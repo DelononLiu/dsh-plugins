@@ -1,7 +1,7 @@
 {
   "name": "dsh-tabs",
   "version": "0.0.0",
-  "description": "UI·会话标签页：顶栏可见 tab + Alt+1..9 跨工作区切换",
+  "description": "UI·会话标签页：Alt+P 固定会话为 tab（对话/轨迹行），点击切换会话",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -29,21 +29,29 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings"
       ],
       "platform": "web"
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.8",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.8"
+    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.1-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
     "@types/node": "^22.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "react": "^19.0.0",
+    "@types/react": "^19.0.0",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-settings": "^0.1.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.0.0"
   }
 }

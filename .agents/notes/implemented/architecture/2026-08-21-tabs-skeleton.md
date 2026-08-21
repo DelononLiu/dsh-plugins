@@ -13,3 +13,7 @@ Status: implemented
 ## Consequences
 
 - dsh-tabs 可加载（host + client + 依赖），typecheck/build 通过；标签/快捷键列入 client 集成步。
+
+> 被取代：本 note 的顶栏 tab + Alt+1..9 设计已由
+> [2026-08-21-tabs-conversation-view.md](2026-08-21-tabs-conversation-view.md)
+> 取代（每个会话动态注册 conversation.view 条目，tab 直接在「对话/轨迹」行）。
