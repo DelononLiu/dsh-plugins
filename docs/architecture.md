@@ -86,7 +86,7 @@
 - **整体性**：一套概念模型（身份/主机/实例）贯穿所有层，不允许逐插件私有模型。
 - **控制面/执行面分离**：console 只编排决策，远程 agent 本地执行，SSH 仅用于一次性引导。
 - **UI 可替换**：UI 层纯消费层，社区插件随时可换，不进入核心契约。dsh-my-ui 是 meta-package 定位（类比 ubuntu-desktop：装一个 = 装齐业务插件集），非组件库、非脚手架。
-- **自定义化为核心**：开箱即用是默认值，可自定义是核心能力，贯穿三层——实例（personal 类型可扩展）、UI（dsh-my-ui 组合/布局/皮肤自定义，继承社区皮肤中心 v2 纯资产机制）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
+- **自定义化为核心**：开箱即用是默认值，可自定义是核心能力，贯穿两层——实例（personal 类型可扩展）、UI（dsh-my-ui 布局/插件组合自定义；**不做换肤，皮肤否决**）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
 - **命名空间**：`dsh-*` = 自研家族；`dst-*` = vendored 第三方（明确标记，非家族）。
 
 ---
@@ -95,9 +95,14 @@
 
 ### 用户（身份，系统层）
 
-- 多用户：同一部署可承载多个用户身份；身份来源双模式——网关注入 / 静态配置。
+- 多用户：同一部署可承载多个用户身份。
 - 身份是所有层的根：实例归属、通道鉴权、投递目标、部署授权都基于它。
-- 角色概念（谁能部署、谁能访问 shared 实例）v1 落进系统层的授权模型。
+- **用户模型机制**（2026-08 定）：`ctx.user.current()` → `User { id, name, roles }`；身份来源**可插拔**（认证已拆走网关）：
+  - 网关注入：dsh-gateway 认证后注入身份头（如 `X-DSH-User-Id` / `X-DSH-User-Roles`），dsh-user 解析；
+  - 静态配置：cordis.patch.yml 配置用户列表（id/name/roles）。
+- **角色三档**（v1）：`admin`（全权）/ `member`（自有实例全权 + shared 按授权）/ `guest`（被授权实例只读）。
+- **归属**：实例档案 owner = userId；shared 实例授权记录（owner 授权其他用户可访问/只读）在实例档案。
+- **授权落点**：dsh-user 提供 `instanceAccess(instanceId)` 授权查询，console 执行控制指令时校验（操作分级：查看 member+ / 控制 owner·admin / 部署·主机管理 admin）。
 
 ### 主机（部署单元，管理组件档案）
 
@@ -120,6 +125,7 @@
 
 - 形态：**发行包的 headless host 实例**（无 web UI 的最小组件集），即远程主机的常驻代表。
 - 职责：接收 console 指令（部署/创建/启停/升级），本地执行，回传状态；凭据不出主机。
+- **通道鉴权**（2026-08 定）：agent↔console 用**实例令牌**（bootstrap 时生成注入 agent，32 hex 随机）——agent 注册/心跳/指令请求携带，console 校验 + 操作级鉴权（角色/授权）；**实例令牌与用户会话分离**（机↔机 vs 人↔机，参考 dsh-relay 双凭证）；浏览器端（远程访问）走 dsh-gateway 会话（cookie 路径，WS/EventSource 无法带 Authorization 头的解法）。
 - agent 即 DSH 实例：随时可升级为完整实例直接进去调试，扩展能力不加新协议。
 
 ---
@@ -293,12 +299,12 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 > 标注"有答案"的项，答案来自社区调研（docs/community-reference.md），补定时先读对应条目。
 
-- [ ] 身份模型的具体机制（用户模型接口、归属模型；认证已拆出走网关，见下）
+- [x] ~~身份模型的具体机制~~（已定 2026-08）：`ctx.user.current()` → User{id,name,roles}；身份来源可插拔（网关注入 header / 静态配置）；角色 admin/member/guest；授权查询 instanceAccess + console 校验
 - [x] ~~认证网关选型~~（已定 2026-08）：**dsh-gateway（clarknu）** 为主选（成熟/多站点/fail-closed/热生效），dsh-webui-auth 安全手法作补强参考；vendored 实测二选一
 - [x] ~~远程访问选型~~（已定 2026-08）：**dsh-remote-web-ui（全家桶内）** 为主（局域网扫码配对，零额外 vendored）；dsh-relay（Wire-Trunk）作跨网扩展参考（v2）
-- [ ] 通道鉴权细节（agent↔console 认证：token？证书？；注意 WS/EventSource 不能带 Authorization 头，需兼容 cookie 路径）
+- [x] ~~通道鉴权细节~~（已定 2026-08）：agent↔console 用**实例令牌**（bootstrap 注入，32 hex）+ 操作级鉴权；令牌与用户会话分离；浏览器端走网关 cookie（WS 无法带 Authorization 的解法）
 - [x] ~~事件总线传输与投递语义~~（已定 2026-08）：**at-least-once + UUID 幂等去重 + 7 天 TTL + 指数退避**；事件三平面分类 control（request/ack）/ task（幂等）/ session（仅显式共享）——参考 dsh-agent-relay / dsh-weave
-- [ ] 权限模型细节（角色、shared 实例的授权粒度；参考 dsh-passwords 授权矩阵）
+- [x] ~~权限模型细节~~（已定 2026-08）：角色 admin/member/guest；shared 实例 owner 授权（可访问/只读）；操作分级（查看 member+ / 控制 owner·admin / 部署·主机管理 admin）——参考 dsh-passwords
 - [x] ~~版本矩阵落地格式~~（已定 2026-08）：dsh.lock.json 定稿 schema（schemaVersion/id/name/version/kernel/bundles/vendored）——参考 Plugin Pack Schema v1
 - [x] ~~局域网内的发现方式~~（**否决** 2026-08）：不做局域网自动发现（mDNS 广播）——实例发现 = **agent 主动注册 + console 已知地址列表**（主机登记时手配地址）
 - [x] ~~实例档案共享契约载体~~（已定 2026-08，最终表述）：**不提"契约"概念**——插件协作模式：dsh-channel 提供实例服务（类型+发现/状态），dsh-console 提供管理服务（扩展类型+生命周期），nav 消费 channel、console-ui 消费 console（`import type` + `ctx.remote`）
