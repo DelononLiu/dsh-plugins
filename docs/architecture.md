@@ -201,6 +201,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | 插件 | 层 | 用途 | 说明 |
 | --- | --- | --- | --- |
 | dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（better-sidebar 侧边栏 / 布局；**不含 skin-center，皮肤否决**）+ 功能应用（task-board 任务看板 / git-graph / ssh / pet…） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除——不装皮肤则无关） |
+| better-sidebar（omdsh-dev） | UI | 侧边栏框架（文件/编辑器/终端/Git 面板），registerTab/registerFileViewer 扩展点 | MIT；全家桶已集成，也可独立引入 |
 | dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
 | dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
 | dsh-remote-web-ui（全家桶内） | 系统·远程访问 | 局域网扫码配对远程控制（SSH 同步、令牌门控） | ✅ 已选定（2026-08）；零额外 vendored；dsh-relay 作跨网扩展参考（v2） |
