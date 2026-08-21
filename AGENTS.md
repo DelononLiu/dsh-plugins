@@ -74,6 +74,7 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · 各
 - **AGENTS.md 只记录稳定事实**；未定项/缺陷/待办放 `docs/architecture.md` §9，不写进本文件。
 - 文档（architecture.md / README / AGENTS.md）与实现同步更新，禁止一处改了另一处不同步。
 - **非平凡变更必须新增/更新 Agent Note**（.agents/notes/，格式与规则见 `.agents/notes/README.md`）：改变行为、架构、共享契约、流程、格式的变更都要附 note；纯机械编辑豁免。决策后不再改 note 为另一个决策，用新 note 取代并交叉链接。
+- `CLAUDE.md` 是 `AGENTS.md` 的符号链接——编辑真实文件（AGENTS.md）。
 
 ## Vendoring policy
 

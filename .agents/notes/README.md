@@ -8,9 +8,9 @@
 
 - **lifecycle**（顶层目录）：
   - `proposed/` — 提案中，尚未实施（或只实施了一部分）
-  - `implemented/` — 已拍板并落地；**与现状保持同步**（事实层面：路径/名字/结构随代码更新，决策本身不改）
+  - `implemented/` — 已拍板并落地；**与现状保持同步**（事实层面：路径/名字/结构随代码更新，决策本身不改——见 [implemented/AGENTS.md](implemented/AGENTS.md)）
   - `rejected/` — 考虑过并否决；仅在"防止再次踩坑"时有保留价值，否则删除
-  - `archived/` — 已归档；**永久冻结**，不可编辑、不作为当前权威
+  - `archived/` — 已归档；**永久冻结**，不可编辑、不作为当前权威（见 [archived/AGENTS.md](archived/AGENTS.md)）
 - **class**（二级目录，本仓库精简为三类）：
   - `architecture` — 对**交付源码**的结构决策（包如何组织、运行时词汇、分层）
   - `feature` — 新的用户/模型可见能力（需求）
@@ -24,6 +24,17 @@
 - 一个 note 只记录**一个**决策；同一主题更新既有 note，不重复建。
 - 已实施的 note 被完全取代时：保留所有独有理由/备选/后果后合并删除，修复入链；部分取代则保留并互相链接。
 - **绝不把 note 改成另一个决策**——用新 note 取代，旧 note 交叉链接。
+
+## 生命周期流转
+
+```
+proposed ──实施──► implemented ──决策完整且不再指导未来──► archived（冻结）
+    │                    │
+    └──否决──► rejected  └──决策反转──► 新 note（交叉链接，旧 note 保留为被取代记录）
+```
+
+- 归档：仅移动完整 note、插入 `Archived: YYYY-MM-DD` 行、修复/删除入链；之后永久冻结。
+- 提案过时 → 直接否决（rejected），不归档 proposed。
 
 ## 文件格式
 
@@ -39,8 +50,3 @@ Status: implemented | proposed | rejected
 ```
 
 note 之间用相对 markdown 链接交叉引用（`[topic](../../implemented/architecture/2026-….md)`），不用裸文字。
-
-## 归档与删除
-
-- 决策已完整落地且其理由不太可能指导未来工作时 → 归档到 `archived/{class}/`，插入 `Archived: YYYY-MM-DD` 行，之后永久冻结。
-- 提案过时 → 直接否决（rejected），不归档 proposed。
