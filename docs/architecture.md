@@ -133,8 +133,8 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 ### 引导（bootstrap，一次性）
 
 1. console 通过 SSH 在远程主机跑一条引导脚本（局域网内零成本）。
-2. 引导内容：部署发行包最小集 → 起 headless host 实例（agent）。
-3. agent 上线，向 console 注册主机档案 + 实例档案。
+2. 引导内容：部署发行包最小集（agent 组件集）→ 起 headless host 实例（agent）。
+3. agent 上线，向 console **主动注册**主机档案 + 实例档案（**不做局域网自动发现**，地址由主机登记时配置/注册获得）。
 
 ### 日常管理（control，全走 channel）
 
@@ -300,7 +300,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [x] ~~事件总线传输与投递语义~~（已定 2026-08）：**at-least-once + UUID 幂等去重 + 7 天 TTL + 指数退避**；事件三平面分类 control（request/ack）/ task（幂等）/ session（仅显式共享）——参考 dsh-agent-relay / dsh-weave
 - [ ] 权限模型细节（角色、shared 实例的授权粒度；参考 dsh-passwords 授权矩阵）
 - [x] ~~版本矩阵落地格式~~（已定 2026-08）：dsh.lock.json 定稿 schema（schemaVersion/id/name/version/kernel/bundles/vendored）——参考 Plugin Pack Schema v1
-- [ ] 局域网内的发现方式（console 已知地址列表 vs 局域网广播）
+- [x] ~~局域网内的发现方式~~（**否决** 2026-08）：不做局域网自动发现（mDNS 广播）——实例发现 = **agent 主动注册 + console 已知地址列表**（主机登记时手配地址）
 - [x] ~~实例档案共享契约载体~~（已定 2026-08，最终表述）：**不提"契约"概念**——插件协作模式：dsh-channel 提供实例服务（类型+发现/状态），dsh-console 提供管理服务（扩展类型+生命周期），nav 消费 channel、console-ui 消费 console（`import type` + `ctx.remote`）
 - [x] ~~升级回滚策略~~（已定 2026-08）：升级前快照（bundles+lock+patch）→ 滚动重启 → 心跳/健康确认 → 失败自动回滚 + 保留 N 份备份——参考 dsh-update-checker
 - [x] ~~总览 UI 归属~~（已定 2026-08）：console **纯服务端**，总览界面独立为 UI 层 **dsh-console-ui**
