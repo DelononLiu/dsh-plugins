@@ -224,8 +224,8 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
 | dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
 | dsh-remote-web-ui（全家桶内） | 系统·远程访问 | 局域网扫码配对远程控制（SSH 同步、令牌门控） | ✅ 已选定（2026-08）；零额外 vendored；dsh-relay 作跨网扩展参考（v2） |
-| dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.3 活跃）；纯本地；官方无 memory，社区填补 |
-| dsh-update-checker | 管理组件 | 升级/备份/回滚/watchdog | U3 回滚答案，console 集成 |
+| dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.3 活跃）；纯本地；**消费方 = agent 会话/上层插件经 ctx.memory 运行时使用（非 type-only 协作）**；官方无 memory，社区填补 |
+| dsh-update-checker | 管理组件 | 升级/备份/回滚/watchdog | 升级回滚策略的蓝本（已定稿），console 集成 |
 | dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | console 总览复用 |
 | dsh-agent-relay | 系统·通信（可选） | HMAC 事件总线骨架 | 若 channel 事件总线直接采用 |
 | dsh-topbar-manager | UI | 顶栏按钮治理（nav/tabs 均注入顶栏，统一注册表） | — |
@@ -260,8 +260,8 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 > 完整分层调研见 **[docs/community-reference.md](community-reference.md)**（按新架构六条线扫描，含每层可借鉴点与 License 红线）。核心结论：
 > - **身份（dsh-user）**：dsh-passwords（多租户主/子用户+配额）、dsh-local-hanaccount（静态配置模式）、dsh-webui-auth / dsh-gateway（网关注入模式）——双模式均有社区对标
 > - **通信（dsh-channel）**：dsh-weave（Iroh P2P 发现/心跳，设计蓝本）、dsh-remote-link（QR+HMAC 配对鉴权）、dsh-agent-relay（事件总线骨架）、SunNull/dsh-relay（Wire-Trunk 传输底座）
-> - **管理（dsh-console）**：dsh-remote-tunnel（部署编排）、dsh-update-checker（**U3 回滚答案**）、dsh-forge mailbridge（inbox 对应物）
-> - **UI**：dsh-web-ui（vendored 全家桶，含 License 陷阱）、皮肤中心 v2（**U8 答案**）、dsh-plugin-pack-web（**U2 版本锁 schema 参考**）
+> - **管理（dsh-console）**：dsh-remote-tunnel（部署编排）、dsh-update-checker（升级回滚蓝本）、dsh-forge mailbridge（inbox 对应物）
+> - **UI**：dsh-web-ui（vendored 全家桶，含 License 陷阱；皮肤中心已否决）、dsh-plugin-pack-web（版本锁 schema 参考）
 > - **远程/agent**：dsh-ssh（主机档案+执行面板）、dsh-daemon（headless host 常驻）
 
 | 参考 | 项目 | 说明 | License |
