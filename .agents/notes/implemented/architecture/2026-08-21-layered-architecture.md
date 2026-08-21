@@ -27,7 +27,7 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · dst
 - **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**首个成员：dst-agent-teams（vendored 协作应用）；全家桶功能应用（task-board/ssh/git-graph 等）随 vendored dsh-web-ui 拆分归入**。
 
 **自研边界原则**（2026-08 社区调研后定）：
-- 系统层（身份/通信）**全自研**（护城河）——社区仅作设计参考（dsh-weave/dsh-relay/dsh-gateway 等）。
+- 系统层：**dsh-user（身份模型）+ dsh-channel（通信）自研**（护城河）；**认证网关与远程访问采用社区 vendored**（接入件可替换，2026-08 用户确认）——认证从 dsh-user 拆出（dsh-user 变薄：只管用户/归属/授权基础接口），远程访问（对外暴露 UI/API）新纳入系统层。
 - 管理组件：自研主体（console），通用能力采用社区（dsh-update-checker 升级回滚、dsh-prometheus 指标）。
 - UI/业务 app：**以社区为主**（vendored），自研只做差异化（dsh-my-ui 平台、dsh-nav、dsh-tabs）。
 - 完整矩阵见 docs/architecture.md §5 分层×插件矩阵。

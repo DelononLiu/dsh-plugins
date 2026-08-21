@@ -23,10 +23,12 @@
 │   dsh-console：主机/实例档案 · 生命周期 · 部署编排 ·    │
 │   inbox/投递（v1 承载，未来可独立为业务 app）· 总览     │
 │   控制面：决策与编排，执行在远程 agent                  │
-├─ 系统（自研核心）─────────────────────────────────────┤
-│   dsh-user（身份：网关注入/静态配置双模式）             │
-│   dsh-channel（通信：发现/心跳 · 事件总线 · 鉴权 ·      │
-│   typert 远程调用 · 控制指令通道）                     │
+├─ 系统 ────────────────────────────────────────────────┤
+│   dsh-user（身份模型：用户/归属/授权基础，自研）          │
+│   dsh-channel（通信：发现/心跳 · 事件总线 · 鉴权 ·       │
+│   typert 远程调用 · 控制指令=远程管理，自研）            │
+│   认证网关（社区 vendored：登录/会话/鉴权执行）          │
+│   远程访问（社区 vendored：对外暴露实例 UI/API）         │
 │   基础设施能力，无业务含义                             │
 ├─ 内核（官方 rc 锁定）─────────────────────────────────┤
 │   deepseek-harness + 官方内置（dsh-base / dsh-web-app） │
@@ -145,8 +147,8 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 | 插件 | 层 | 职责 | 状态 |
 | --- | --- | --- | --- |
-| dsh-user | 系统·身份 | 身份模型、网关注入/静态配置双模式、归属/授权基础 | 设计（试装过 web2/web3） |
-| dsh-channel | 系统·通信 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令 | 设计（P1） |
+| dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；认证实现已拆出走认证网关 | 设计（试装过 web2/web3） |
+| dsh-channel | 系统·通信 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令（远程管理） | 设计（P1） |
 | dsh-console | 管理组件 | 主机/实例档案、生命周期、部署编排、inbox/投递（v1 承载）、总览 | 重新设计 |
 | dsh-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
 | dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
@@ -160,7 +162,8 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | --- | --- | --- | --- |
 | dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（skin-center v2 皮肤中心 / better-sidebar 侧边栏 / 布局）+ 功能应用（task-board 任务看板 / git-graph / ssh / pet…） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除） |
 | dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
-| dsh-gateway 或 dsh-webui-auth | 系统·认证（可选） | 登录/认证网关（scrypt、fail-closed、限速、吊销） | 若 dsh-user 的网关注入实现走社区；二者择一 |
+| dsh-gateway 或 dsh-webui-auth | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销） | dsh-user 的身份接口对接，二选一（§9 待选型） |
+| dsh-relay 或 dsh-remote-web-ui | 系统·远程访问 | 对外暴露实例 UI/API（Wire-Trunk / 扫码配对） | 二选一（§9 待选型）；dsh-remote-web-ui 在全家族桶内 |
 | dsh-update-checker | 管理组件 | 升级/备份/回滚/watchdog | U3 回滚答案，console 集成 |
 | dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | console 总览复用 |
 | dsh-agent-relay | 系统·通信（可选） | HMAC 事件总线骨架 | 若 channel 事件总线直接采用 |
@@ -188,7 +191,6 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - dsh-AuthInOne / dsh-oauth：LLM provider 登录域，非用户身份
 - ZinkLu/dsh-channel / 各 IM 渠道插件：消息渠道，非跨实例通信
 - HuanLinOTO/dsh-plugin-ya-workspace-sidebar：**AGPL-3.0**，不可 vendored（license 红线）
-- 远程 UI 访问（dsh-relay / dsh-remote-web-ui / dsh-Remote）：v1 不纳入，走全家桶内 dsh-remote-web-ui 覆盖（v2 再定）
 
 ---
 
@@ -248,15 +250,19 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 ## 9. 开放问题（下一阶段设计）
 
-- [ ] 身份双模式的具体机制（网关注入的 header 契约 / 静态配置格式）
-- [ ] 通道鉴权细节（agent↔console 认证：token？证书？）
-- [ ] 事件总线传输与投递语义（at-least-once？顺序？）
-- [ ] 权限模型细节（角色、shared 实例的授权粒度）
-- [ ] 版本矩阵的落地形式（lock 文件格式 / release 表维护流程）
+> 标注"有答案"的项，答案来自社区调研（docs/community-reference.md），补定时先读对应条目。
+
+- [ ] 身份模型的具体机制（用户模型接口、归属模型；认证已拆出走网关，见下）
+- [ ] **认证网关选型**（有答案）：dsh-gateway vs dsh-webui-auth vs dsh-gate——三选一 vendored，与 dsh-user 身份接口对齐
+- [ ] **远程访问选型**（有答案）：dsh-relay（Wire-Trunk）vs 全家桶内 dsh-remote-web-ui——二选一 vendored，作为系统层接入能力
+- [ ] 通道鉴权细节（agent↔console 认证：token？证书？；注意 WS/EventSource 不能带 Authorization 头，需兼容 cookie 路径）
+- [ ] 事件总线传输与投递语义（at-least-once？顺序？；参考 dsh-agent-relay）
+- [ ] 权限模型细节（角色、shared 实例的授权粒度；参考 dsh-passwords 授权矩阵）
+- [ ] **版本矩阵落地格式**（有答案）：dsh.lock.json schema 参考 Plugin Pack Schema v1
 - [ ] 局域网内的发现方式（console 已知地址列表 vs 局域网广播）
 - [ ] 实例档案共享契约载体（nav 读端契约：共享包 vs 系统层发现 + 管理组件档案）
-- [ ] 升级回滚策略
+- [ ] **升级回滚策略**（有答案）：参考 dsh-update-checker 备份→更新→回滚闭环
 - [ ] 总览 UI 归属（console 自带 client vs UI 层独立界面）
 - [ ] agent 最小组件集清单（bootstrap 依赖）
 - [ ] vendored submodule 机制落地
-- [ ] 皮肤中心 v2 接入方式
+- [ ] **皮肤中心 v2 接入方式**（有答案）：参考 @linxin666/dsh-client-ui-skin-center + dsh-skin-switcher 双引擎协调

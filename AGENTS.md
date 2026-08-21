@@ -1,53 +1,23 @@
 # AGENTS.md
 
-本文件是给 AI agent / 协作者的项目指南。开工前必读；发现文档与实现不一致时，以本文 + docs/architecture.md 为准，并修复不一致处。
+本文件是给 AI agent / 协作者的项目指南：描述本仓库的**稳定事实**（定位、布局、命令、约定）。**不是缺陷/待办记录**——开放问题与未定项见 `docs/architecture.md` §9。发现文档与实现不一致时，以本文 + `docs/architecture.md` 为准，并修复不一致处。
 
 ## 仓库定位
 
-DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**：自研核心插件（分层：系统/管理组件/UI）+ 社区聚合插件（vendored）+ 版本锁。核心价值 = **自定义化**（开箱即用是默认值，可自定义是核心能力：实例 personal、UI "my"、发行包 patch 层）。
+DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**：自研核心插件（分层：系统/管理组件/UI）+ 社区聚合插件（vendored）+ 版本锁。
 
-## 分层与依赖纪律（最高优先级）
+核心价值 = **自定义化**：开箱即用是默认值，可自定义是核心能力，贯穿三层——实例（personal，类型可扩展）、UI（dsh-my-ui 布局/皮肤/组合）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
 
-```
-业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
-UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · 各界面 · 全家桶 UI 能力（skin-center/better-sidebar）
-管理组件                    dsh-console（主机/实例档案、生命周期、部署编排、inbox/投递）+ 社区 dsh-update-checker/dsh-prometheus
-系统                        dsh-user（身份）· dsh-channel（通信）+ 可选社区认证网关/事件总线
-内核                        官方 deepseek-harness（rc 锁定）
-```
-
-- **依赖严格向下**：业务 app→UI→管理组件→系统→内核，禁止反向或跨层依赖。
-- **UI 层内部允许聚合依赖**（meta 包，如 dsh-my-ui 聚合同层 nav/tabs）。
-- **整体性**：一套概念模型（身份/主机/实例）贯穿所有层，**禁止逐插件私有模型**。
-- **控制面/执行面分离**：console 只编排，远程 agent 本地执行，SSH 仅一次性引导。
-- **UI 可替换**：UI 层不进入核心契约。
-- **自研边界**：系统层全自研（护城河，社区仅设计参考）；管理组件自研主体+通用能力用社区；UI/业务 app 以社区为主（详见 docs/architecture.md §5 分层×插件矩阵）。
-
-## 命名空间
-
-- `dsh-*` = 自研家族（packages/，发布 npm）。
-- `dst-*` = vendored 第三方（vendored/，明确标记非家族）。
-- `vendored/dsh-web-ui` 保留社区原名（特殊：UI 全家桶来源，submodule 锁定，改造走 cordis.patch.yml 补丁层，不 fork）。
-- 命名前查 npm/GitHub 占用（本仓库所有名字均已实查，见 docs/architecture.md §8）。
-
-## 目录布局
+## 仓库布局
 
 ```
 packages/   自研家族（packages/<plugin>/：package.json + tsconfig*.json + src/）
-vendored/   社区插件（git submodule 锁定；dst-* 前缀）
-profiles/   发行包 profile 模板（git clone 即用）：web=开发+正式 / web2=单插件测试（官方基线）/ web3=多插件测试（核心组合），各含 dsh.lock.json 版本锁
+vendored/   社区插件（git submodule 锁定；dst-* 前缀标记第三方）
+profiles/   发行包 profile 模板：web=开发+正式 / web2=单插件测试（官方基线）/ web3=多插件测试（核心组合），各含 dsh.lock.json 版本锁
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
-docs/       架构文档（architecture.md 是 spec）
+docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
+.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）
 ```
-
-## 开发模式
-
-参考官方仓库 /home/long2015/Code/deepseek-harness（docs/development.md）的开发模式：
-
-- **Host/Client 双面构建**：官方用 `tsc -b`（TypeScript Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），包 exports 提供 `"."` 与 `"./client"` 子路径。
-- **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制。
-- **profile 集成**：开发期 `dsh plugin --profile web add <本地包路径>`（linked 安装），改代码后重新 build。
-- 本项目当前为**占位骨架（无功能实现）**：功能不着急开发，**先补定需求**（见下）。
 
 ## 命令
 
@@ -59,30 +29,55 @@ pnpm test         # pnpm -r test
 ```
 
 各包统一脚本：build（tsc -p tsconfig.build.json）/ typecheck（tsc --noEmit）/ test（vitest run）。
+开发期接入 profile：`dsh plugin --profile web add <本地包路径>`（linked 安装），改代码后重新 build。
 
-## 已知未定项（评审 2026-08 发现，开工前必须补定）
+## 分层与依赖纪律（最高优先级）
 
-> 分层社区调研见 docs/community-reference.md——U2/U3/U8 已有社区答案（分别：Plugin Pack Schema v1 / dsh-update-checker / 皮肤中心 v2），补定时先读对应条目。
+```
+业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
+UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · 各界面 · 全家桶 UI 能力（skin-center/better-sidebar）
+管理组件                    dsh-console（档案/生命周期/部署编排/inbox）+ 社区 dsh-update-checker / dsh-prometheus
+系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· 远程访问（社区）
+内核                        官方 deepseek-harness（rc 锁定）
+```
 
-1. **实例档案共享契约载体**：nav 是档案读端，当前直接依赖 dsh-console；文档要求"抽成共享契约"——契约放共享包还是 dsh-channel？未定。
-2. **版本矩阵落地格式**：dsh.lock.json 的 schema 未定（参考 Plugin Pack Schema v1）。
-3. **升级回滚策略**：文档只写了滚动重启，无回滚（参考 dsh-update-checker 备份→更新→回滚闭环）。
-4. **总览 UI 归属**：console 自带 client（./client 导出）vs UI 层"不进核心契约"的边界。
-5. **agent 最小组件集清单**：bootstrap 脚本依赖它，未列。
-6. ~~dsh-my-ui 的 cordis.patch.yml：package.json 的 dsh.bundle.patch 引用它，文件不存在~~ —— **已修复**：占位文件已建（内容待实现期填充）。
-7. **vendored submodule 机制**：未落地（dst-agent-teams、dsh-web-ui 尚未引入）。
-8. **皮肤中心 v2 引用方式**：参考 @linxin666/dsh-client-ui-skin-center（皮肤=纯资产目录）+ dsh-skin-switcher（双引擎协调），接入方案待定。
+- **依赖严格向下**：业务 app→UI→管理组件→系统→内核，禁止反向或跨层依赖；UI 层内部允许聚合依赖（meta 包）。
+- **整体性**：一套概念模型（身份/主机/实例）贯穿所有层，**禁止逐插件私有模型**。
+- **控制面/执行面分离**：console 只编排决策，远程 agent 本地执行，SSH 仅一次性引导。
+- **UI 可替换**：UI 层不进入核心契约。
+- **自研边界**：系统层自研核心（dsh-user 身份模型 + dsh-channel 通信），**认证网关与远程访问采用社区 vendored**（接入件可替换）；管理组件自研主体 + 社区通用能力；UI/业务 app 以社区为主。完整矩阵见 `docs/architecture.md` §5。
 
-## 已知文档矛盾（评审发现，部分已修复）
+## 命名空间
 
-- ~~dsh-nav 的分层标注：分层图写 L4，职责表写"L1/L3 读端"~~ —— **已修复**：统一为"UI（档案读端）"。
-- ~~dst-agent-teams 状态"已装" vs vendored/ 为空~~ —— **已修复**：职责表标注"仓库未引入，以实际为准"。
-- dst-* 命名规则 vs vendored/dsh-web-ui 保留原名——规则需注明例外（见"命名空间"，已注明）。
-- ~~dsh.lock.json 在 README 有、architecture.md §4 无~~ —— **已修复**：§4 已补（见下）。
+- `dsh-*` = 自研家族（packages/，发布 npm）；`dst-*` = vendored 第三方。
+- `vendored/dsh-web-ui` 保留社区原名（UI 全家桶来源，改造走 cordis.patch.yml 补丁层，不 fork）。
+- 新增名字前查 npm + GitHub 占用（已有名字均已实查，见 `docs/architecture.md` §8）。
 
-## 编辑约定
+## 开发模式
 
+参考官方仓库 `/home/long2015/Code/deepseek-harness`（docs/development.md）：
+
+- **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
+- **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
+- 本项目当前为**占位骨架（无功能实现）**：先补定需求（docs/architecture.md §9），再实现。
+
+## 插件包形态（Conventions）
+
+- `"type": "module"`，ESM 全栈。
+- `dsh` 字段：client 插件声明 `client.inject`（官方 client 包）+ `client.platform: "web"`；需补丁的声明 `bundle.patch`。
+- **peerDependencies 必列** `@deepseek-ai/cordis` 与所有 inject 目标（对齐官方 rc 版本，如 `^0.1.0-rc.8`）。
+- 内部依赖用 `workspace:*`；exports 含 `"./package.json"` 子路径。
+- 服务端插件：`export const name` + `export function apply(ctx)`；client 入口在 `src/client.ts`。
+
+## 编辑这些指令
+
+- **AGENTS.md 只记录稳定事实**；未定项/缺陷/待办放 `docs/architecture.md` §9，不写进本文件。
 - 文档（architecture.md / README / AGENTS.md）与实现同步更新，禁止一处改了另一处不同步。
-- 新增插件名/概念前，查 npm + GitHub 占用。
-- 占位代码写 TODO 并标注所属层与契约来源。
-- **非平凡变更必须新增/更新 Agent Note**（.agents/notes/，一决策一文档，格式与规则见 `.agents/notes/README.md`）：改变行为、架构、共享契约、流程、格式的变更都要附 note；纯机械编辑豁免。决策后不再改 note 为另一个决策，用新 note 取代并交叉链接。
+- **非平凡变更必须新增/更新 Agent Note**（.agents/notes/，格式与规则见 `.agents/notes/README.md`）：改变行为、架构、共享契约、流程、格式的变更都要附 note；纯机械编辑豁免。决策后不再改 note 为另一个决策，用新 note 取代并交叉链接。
+
+## Vendoring policy
+
+- `vendored/` 用 git submodule 锁定 commit/tag，不 copy 源码进 git 历史（保留上游更新链路）。
+- 改造走 `cordis.patch.yml` 补丁层，**不 fork**。
+- License 红线：Apache-2.0/MIT 可直接 vendored；AGPL 只可参考设计不可引入；CC BY-NC-SA 商用需剔除（如 dsh-web-ui 的 Maid Atelier 皮肤）。
+- 具体清单与例外见 `docs/architecture.md` §5 与 `docs/community-reference.md`。
