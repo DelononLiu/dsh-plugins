@@ -10,6 +10,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 
 /** 四区（已定布局）。 */
 export type LayoutRegion = 'topbar' | 'tabs' | 'sidebar' | 'actions'
@@ -48,6 +49,19 @@ export const Config = z.object({
   }).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' }, actions: { visible: true, order: 3, size: '' } }),
 }) as z<Config>
 
+/** 布局设置命名空间（settings 持久化，client settingsScope 读写）。 */
+export const LAYOUT_NAMESPACE = settingsNamespace('my-ui-layout')
+
+/** 布局设置 schema（settings 注册用）。 */
+export const LayoutSettingsSchema = z.object({
+  layout: z.object({
+    topbar: z.object({ visible: z.boolean().default(true), order: z.number().default(0), size: z.string().default('') }).default({ visible: true, order: 0, size: '' }),
+    tabs: z.object({ visible: z.boolean().default(true), order: z.number().default(1), size: z.string().default('') }).default({ visible: true, order: 1, size: '' }),
+    sidebar: z.object({ visible: z.boolean().default(true), order: z.number().default(2), size: z.string().default('260px') }).default({ visible: true, order: 2, size: '260px' }),
+    actions: z.object({ visible: z.boolean().default(true), order: z.number().default(3), size: z.string().default('') }).default({ visible: true, order: 3, size: '' }),
+  }).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' }, actions: { visible: true, order: 3, size: '' } }),
+}) as z<{ layout: LayoutConfig }>
+
 /** 默认布局（全部可见，标准顺序）。 */
 export const DEFAULT_LAYOUT: LayoutConfig = {
   topbar: { visible: true, order: 0 },
@@ -65,6 +79,10 @@ export class MyUiService extends Service {
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'myUi')
+    // 可选注入：settings 服务缺席（如单测）时不注册布局命名空间。
+    ctx.inject(['settings'], (settingsCtx) => {
+      settingsCtx.settings.register(LAYOUT_NAMESPACE, LayoutSettingsSchema)
+    })
   }
 
   /** 读取完整四区布局配置。 */

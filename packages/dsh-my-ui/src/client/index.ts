@@ -1,22 +1,30 @@
 /**
- * dsh-my-ui：UI 平台（client 半区）。
+ * dsh-my-ui：UI 平台（client 半区）——布局设置（设置页 General 区）。
  *
- * 消费 host 布局配置（ctx.myUi，四区显隐/顺序）并驱动 UI 布局；聚合的
- * 插件（nav/tabs/console-ui 等）经插槽注册到对应区域。v1 为最小注册
- * 骨架：布局应用（按 ctx.myUi 配置控制区域显隐）在 client 集成步补全。
+ * 经官方 settingsScope 读写 host 布局配置（my-ui-layout 命名空间），
+ * 注册到设置页 settings.general.item（用户反馈：布局不进顶部，进设置）。
  */
 
+import { createElement } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import { LayoutControl, type LayoutRecord } from './LayoutControl'
 
-/** 需要的 client 服务：插槽注册（v1 最小集）。 */
-export const inject = ['slots']
+/** 需要的 client 服务：插槽注册 + settingsScope。 */
+export const inject = ['slots', 'settingsScope']
 
 /**
- * Client 插件体：UI 平台入口（v1 骨架——布局应用后续接入）。
+ * Client 插件体：绑定布局 settings 命名空间并注册设置页布局项。
  * @param ctx - client 根上下文。
  */
 export function apply(ctx: ClientContext): void {
-  // v1 骨架：预留布局应用入口。四区显隐/顺序经 ctx.myUi（host @Remote，
-  // Typert 远程化接入后启用）驱动——client 集成步补全。
-  void ctx
+  const host = ctx.settingsScope.bind<{ layout: LayoutRecord }>({ namespace: 'my-ui-layout' })
+  ctx.slots.inject(
+    'settings.general.item',
+    () => ctx.slots.register({
+      name: 'settings.general.item',
+      id: 'layout-control',
+      order: 20,
+    }, (props) => createElement(LayoutControl, { ...props, host })),
+  )
 }
