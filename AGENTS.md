@@ -69,6 +69,19 @@ UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部�
 - 内部依赖用 `workspace:*`；exports 含 `"./package.json"` 子路径。
 - 服务端插件：`export const name` + `export function apply(ctx)`；client 入口在 `src/client.ts`。
 
+## 开发流程（worktree 分支）
+
+- **大功能在独立 worktree 分支开发**（互不影响）：
+  ```sh
+  git worktree add ../dsh-plugins-feat-xxx feat/xxx   # 独立工作目录 + 功能分支
+  # 功能开发/自检/提交后：
+  git merge feat/xxx --no-ff                          # 合入 main
+  git worktree remove ../dsh-plugins-feat-xxx         # 删除 worktree
+  ```
+- **main 保持稳定基线**：小改动/文档可直接在 main 提交（原子、单功能）；**大功能（跨多文件/多提交）一律走 worktree 分支**，分支命名 `feat/<功能名>`。
+- 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
+- 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
+
 ## 提交规则（Commit Rules）
 
 - **一个提交 = 一个逻辑单元**：一个功能 / 修复 / 文档 / 重构。按功能拆分提交，**禁止把无关改动混合进同一提交**；补丁式碎提交（临时修改、调试残留）不得进入 main。
