@@ -22,7 +22,7 @@ DSH（DeepSeek Harness）本身是单机开发环境（内核）。团队要使�
 ## Consequences
 
 - 仓库 = 发行包源码（packages/ 自研 + vendored/ 社区 + profiles/ 模板 + scripts/ bootstrap/release）。
-- profiles/web 是分发的核心，dsh.lock.json 是版本矩阵的机器可读形式（格式未定，见开放问题）。
+- profiles/web 是分发的核心，dsh.lock.json 是版本矩阵的机器可读形式（schema 已定稿，见 [distro-version-mechanism](../process/2026-08-21-distro-version-mechanism.md)）。
 - 团队部署、升级、实例创建都围绕"发行包模板"展开——模板即实例种子。
 
 相关：[分层架构](2026-08-21-layered-architecture.md) · [部署链路](2026-08-21-deployment-chain.md)

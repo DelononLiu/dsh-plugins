@@ -125,6 +125,14 @@
   - 后续可扩展：`ci`、`sandbox` 等
 - 档案字段：id / name / owner / type / host / addr / status / health / 版本。
 
+### inbox（系统事件消息，v1 于管理组件）
+
+- **实例级**：每实例一份 inbox（console 持久化，按 owner 隔离）；跨实例事件经 channel 同步。
+- **聚焦系统级消息**：升级完成 / 任务结果 / 健康异常 / 部署事件——非用户聊天（user 类投递 v2/业务 app 再做）。
+- 消息结构：`{id, sender, owner, type, title, body, ts, read}`；投递复用事件总线语义（at-least-once + 幂等）。
+- **与 channel 关系**：跨实例事件经 channel 的 **task 平面**（幂等投递）进入本实例 inbox。
+- UI：console-ui 消息区（未读角标 + 列表）。
+
 ### 最小 agent（远程主机代理）
 
 - 形态：**发行包的 headless host 实例**（无 web UI 的最小组件集），即远程主机的常驻代表。

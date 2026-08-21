@@ -24,7 +24,7 @@ Status: implemented
 
 ## Consequences
 
-- 权限模型围绕"归属者 + type"展开：shared 实例的授权粒度是后续设计点。
-- 档案模型（registry）是 nav（读端）与 console（写端）的共享契约，载体未定。
+- 权限模型围绕"归属者 + type"展开：角色三档 + shared 授权（可访问/只读）见 [permission-model](2026-08-21-permission-model.md)；shared 跨实例访问 = SSH 公钥式见 [shared-access-publickey](2026-08-21-shared-access-publickey.md)。
+- 实例服务协作：channel 提供实例服务、console 提供管理服务、nav/console-ui 消费（type-only + ctx.remote）见 [contracts-and-console-ui](2026-08-21-contracts-and-console-ui.md)。
 
 相关：[部署链路](2026-08-21-deployment-chain.md) · [命名决策](2026-08-21-naming-decisions.md)

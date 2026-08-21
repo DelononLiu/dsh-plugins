@@ -50,7 +50,7 @@ UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部�
 ## 命名空间
 
 - `dsh-*` = 自研家族（packages/，发布 npm）；`dst-*` = vendored 第三方。
-- `vendored/dsh-web-ui` 保留社区原名（UI 全家桶来源，改造走 cordis.patch.yml 补丁层，不 fork）。
+- `vendored/dsh-web-ui` 保留社区原名（UI 全家桶来源，改造走 cordis.patch.yml 补丁层，不 fork）；`vendored/dsh-memento` 同样保留原名（LLM 记忆，社区组件）。
 - 新增名字前查 npm + GitHub 占用（已有名字均已实查，见 `docs/architecture.md` §8）。
 
 ## 开发模式
@@ -59,7 +59,7 @@ UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部�
 
 - **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
 - **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
-- 本项目当前为**占位骨架（无功能实现）**：先补定需求（docs/architecture.md §9），再实现。
+- 本项目当前为**占位骨架（无功能实现）**：需求已 100% 定稿（architecture.md §9 清零），进入实现阶段——按依赖链串行开发。
 
 ## 插件包形态（Conventions）
 

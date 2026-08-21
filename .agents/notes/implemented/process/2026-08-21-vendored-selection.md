@@ -30,5 +30,5 @@ Status: implemented
 ## Consequences
 
 - §9 三项已勾除（认证选型/远程选型/vendored 机制）；§5 矩阵标注选定。
-- vendored/ 目录待落地：dst-agent-teams submodule + dsh-web-ui submodule（未定项 U7 进入实施阶段）。
+- vendored/ 目录待落地：dst-agent-teams + dsh-web-ui + dsh-memento submodule（双模式机制已定，进入实施阶段）。
 - 远程访问主通道=局域网（小团队场景）；跨网公网访问 v2 再做。
