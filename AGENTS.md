@@ -6,7 +6,7 @@
 
 DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**：自研核心插件（分层：系统/管理组件/UI）+ 社区聚合插件（vendored）+ 版本锁。
 
-核心价值 = **自定义化**：开箱即用是默认值，可自定义是核心能力，贯穿三层——实例（personal，类型可扩展）、UI（dsh-my-ui 布局/皮肤/组合）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
+核心价值 = **自定义化**：开箱即用是默认值，可自定义是核心能力，贯穿两层——实例（personal，类型可扩展）、UI（dsh-my-ui 布局/插件组合；**不做换肤，皮肤中心否决**）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
 
 ## 仓库布局
 
@@ -35,7 +35,7 @@ pnpm test         # pnpm -r test
 
 ```
 业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
-UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · 各界面 · 全家桶 UI 能力（skin-center/better-sidebar）
+UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
 管理组件                    dsh-console（档案/生命周期/部署编排/inbox）+ 社区 dsh-update-checker / dsh-prometheus
 系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· 远程访问（社区）
 内核                        官方 deepseek-harness（rc 锁定）

@@ -40,7 +40,35 @@
 - **系统**：基础设施能力（身份、通信），被上层消费，自身无业务含义。
 - **管理组件**：面向"系统/资源运维"的能力（主机、实例、部署、健康）——IT 管理面。
 - **UI**：界面层（布局、组件组合、导航、标签），消费管理组件与系统数据。
-- **业务 app**：面向"最终用户业务价值"的应用（沟通、协作、分析）——当前无，未来扩展；**跨层依赖严格向下，UI 层内部允许聚合依赖**（meta 包，如 dsh-my-ui）。
+- **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**首个成员：dst-agent-teams（vendored 协作应用）；全家桶功能应用（task-board/ssh/git-graph 等）随 vendored dsh-web-ui 拆分归入**；**跨层依赖严格向下，UI 层内部允许聚合依赖**（meta 包，如 dsh-my-ui）。
+
+### UI 四区布局（2026-08 定）
+
+发行包 UI 利用**四个区域**，**功能优先（不采用皮肤中心，不做换肤）**：
+
+```
+┌─ 顶部区域 ─────────────────────────────┐
+│  dsh-nav：实例导航（跳转/在线状态）+ 全局操作入口 │
+├──────────┬─────────────────────────────┤
+│ 侧边栏    │  tab 区                     │
+│ 工作区/   │  dsh-tabs：固定会话标签       │
+│ 会话树    │  Alt+1..9 跨工作区切换       │
+│          │                             │
+│ 左侧按钮区│  （内容区）                  │
+│ （设置上方）│                             │
+│ console 入口│                            │
+│ 快捷按钮  │                             │
+├──────────┴─────────────────────────────┤
+```
+
+| 区域 | 职责 | 插件 |
+| --- | --- | --- |
+| 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-nav + 快捷操作 |
+| tab 区 | 会话级切换（固定标签 + Alt+1..9 跨工作区） | dsh-tabs |
+| 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
+| 左侧设置上方按钮区 | 功能区快捷入口（console 管理、inbox/投递、命令面板） | console 入口 + 快捷按钮 |
+
+**皮肤中心（dsh-web-ui 的 skin-center v2）不引入**：用户明确"不喜欢换皮肤，功能优先"；dsh-my-ui 自定义维度收敛为**布局 + 插件组合**（vendored 全家桶时可不装 skin-center 包）。
 
 ### 设计原则
 
@@ -152,7 +180,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | dsh-console | 管理组件 | 主机/实例档案、生命周期、部署编排、inbox/投递（v1 承载）、总览 | 重新设计 |
 | dsh-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
 | dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
-| dsh-my-ui | UI（平台） | 布局/皮肤/插件组合自定义平台，meta-package，"我的"=personal 哲学 | 立项 |
+| dsh-my-ui | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学 | 立项 |
 
 > dsh-nav 已上线三端，说明实例档案模型已有雏形——后续需把它抽成共享契约（系统发现 + 管理组件档案），nav 转纯读端。
 
@@ -160,7 +188,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 | 插件 | 层 | 用途 | 说明 |
 | --- | --- | --- | --- |
-| dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（skin-center v2 皮肤中心 / better-sidebar 侧边栏 / 布局）+ 功能应用（task-board 任务看板 / git-graph / ssh / pet…） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除） |
+| dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（better-sidebar 侧边栏 / 布局；**不含 skin-center，皮肤否决**）+ 功能应用（task-board 任务看板 / git-graph / ssh / pet…） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除——不装皮肤则无关） |
 | dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
 | dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
 | dsh-remote-web-ui（全家桶内） | 系统·远程访问 | 局域网扫码配对远程控制（SSH 同步、令牌门控） | ✅ 已选定（2026-08）；零额外 vendored；dsh-relay 作跨网扩展参考（v2） |
@@ -265,4 +293,4 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [ ] 总览 UI 归属（console 自带 client vs UI 层独立界面）
 - [ ] agent 最小组件集清单（bootstrap 依赖）
 - [x] ~~vendored submodule 机制落地~~（已定 2026-08）：dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装 + lock 锁版本 + patch 层改造
-- [ ] **皮肤中心 v2 接入方式**（有答案）：参考 @linxin666/dsh-client-ui-skin-center + dsh-skin-switcher 双引擎协调
+- [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-my-ui 自定义维度=布局+插件组合
