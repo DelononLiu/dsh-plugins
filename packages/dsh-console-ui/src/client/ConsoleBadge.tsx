@@ -15,7 +15,9 @@ export type ConsoleBadgeProps = PropsRuntime<'conversation.session.header.action
  * 渲染「Console」徽标 + 点击浮层。
  * @param props - 插槽注入的运行时 props。
  */
-export function ConsoleBadge(_props: ConsoleBadgeProps): React.JSX.Element {
+export function ConsoleBadge(props: ConsoleBadgeProps): React.JSX.Element {
+  const { useSessions } = props
+  const list = useSessions((s) => s)
   const [open, setOpen] = useState(false)
   return (
     <span style={{ position: 'relative', display: 'inline-flex' }}>
@@ -55,10 +57,11 @@ export function ConsoleBadge(_props: ConsoleBadgeProps): React.JSX.Element {
             boxShadow: '0 4px 12px rgba(0,0,0,.35)',
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>dsh-console</div>
-          <div>实例管理总览（数据接入中）</div>
-          <div style={{ marginTop: 6, opacity: 0.7 }}>
-            实例列表 · 生命周期 · inbox —— Typert 远程化后显示真实数据
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>dsh-console · 管理组件</div>
+          <div>会话数：{list.ids.length}（当前：{list.current ? list.byId[list.current]?.displayTitle ?? list.current : '无'}）</div>
+          <div style={{ marginTop: 6, opacity: 0.7, lineHeight: 1.5 }}>
+            职责：主机/实例档案 · 生命周期/部署编排 · inbox（系统事件消息）
+            <br />实例列表等管理数据经 Typert 远程化后显示
           </div>
         </div>
       )}
