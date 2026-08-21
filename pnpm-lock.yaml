@@ -79,9 +79,9 @@ importers:
 
   packages/dsh-my-ui:
     dependencies:
-      '@deepseek-ai/dsh-client-runtime':
-        specifier: ^0.1.0-rc.8
-        version: 0.1.0-rc.8(uvftdgm6sjntlod6cahcs25lqi)
+      '@deepseek-ai/schemastery':
+        specifier: ^3.0.0
+        version: 3.18.1
       dsh-nav:
         specifier: workspace:*
         version: link:../dsh-nav
@@ -92,6 +92,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: ^0.1.0-rc.8
+        version: 0.1.0-rc.8(uvftdgm6sjntlod6cahcs25lqi)
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1

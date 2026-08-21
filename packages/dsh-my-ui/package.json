@@ -16,7 +16,10 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["lib", "cordis.patch.yml"],
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -35,6 +38,7 @@
     }
   },
   "dependencies": {
+    "@deepseek-ai/schemastery": "^3.0.0",
     "dsh-nav": "workspace:*",
     "dsh-tabs": "workspace:*"
   },
@@ -44,6 +48,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.8",
     "@types/node": "^22.0.0",
     "typescript": "^5.0.0",
     "vitest": "^3.0.0"
