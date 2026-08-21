@@ -69,6 +69,17 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · 各
 - 内部依赖用 `workspace:*`；exports 含 `"./package.json"` 子路径。
 - 服务端插件：`export const name` + `export function apply(ctx)`；client 入口在 `src/client.ts`。
 
+## 提交规则（Commit Rules）
+
+- **一个提交 = 一个逻辑单元**：一个功能 / 修复 / 文档 / 重构。按功能拆分提交，**禁止把无关改动混合进同一提交**；补丁式碎提交（临时修改、调试残留）不得进入 main。
+- **语义化前缀**：`feat:` 新功能 · `fix:` 修复 · `docs:` 文档 · `chore:` 构建/杂项 · `refactor:` 重构 · `test:` 测试 · `style:` 格式。
+- **main 分支纪律（按功能提交）**：
+  - 功能开发在**分支**进行，自检通过后合入 main；main 上每个提交必须是**可独立成立的功能单元**（原子、可单独回滚、不依赖未提交的兄弟改动）。
+  - 一次合并 = 一个功能，不留半成品/中间态在 main。
+  - 文档与实现同步变更、Agent Note 与实现**同一提交**（见"编辑这些指令"）。
+- **提交前自检**：`pnpm typecheck` 通过（除已知占位期）、无调试残留、文档同步、非平凡变更已附 Agent Note。
+- **提交信息格式**：`<prefix>: <中文或英文摘要>`，必要时正文说明为什么（不是做了什么）。
+
 ## 编辑这些指令
 
 - **AGENTS.md 只记录稳定事实**；未定项/缺陷/待办放 `docs/architecture.md` §9，不写进本文件。
