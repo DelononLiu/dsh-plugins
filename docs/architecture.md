@@ -125,6 +125,16 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - 分发形态（已确认）：**完整 profile 模板**（git clone 现成 profile 目录直接用），模板即实例种子。
 - 落地形式：`profiles/web/dsh.lock.json`（版本锁：内核 rc + 自研 + 社区锁定版本，schema 未定，见 §9 开放问题）。
 
+### Profile 矩阵（三个模板）
+
+| profile | 用途 | bundles 内容 |
+| --- | --- | --- |
+| **web** | 开发 + 正式 | 官方基线 + 全部自研（user/channel/console/nav/tabs/my-ui）+ vendored 全家桶（TBD） |
+| **web2** | 单插件测试（隔离） | 官方基线（无自研）——测试时 `dsh plugin --profile web2 add <被测>` 临时装入 |
+| **web3** | 多插件测试（集成） | 官方基线 + 核心组合（user/channel/console + nav/tabs）——测试时临时增删 |
+
+原则：**web 是正式基线，web2/web3 是测试隔离环境**；版本矩阵锁（dsh.lock.json）三者各自维护。
+
 ---
 
 ## 5. 插件职责表

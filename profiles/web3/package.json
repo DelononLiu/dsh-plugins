@@ -1,8 +1,8 @@
 {
-  "name": "dsh-profile-web",
+  "name": "dsh-profile-web3",
   "private": true,
   "version": "0.0.0",
-  "description": "开发 + 正式环境：完整发行包（官方基线 + 全部自研 + vendored 全家桶）。日常开发插件即在此环境，同时作为正式版。",
+  "description": "多插件测试环境：官方基线 + 核心组合（系统层 user/channel + 管理组件 console + UI 读端 nav/tabs）。验证插件间协同，测试时临时增删。",
   "dependencies": {},
   "dsh": {
     "profile": {
@@ -13,8 +13,7 @@
         "dsh-channel",
         "dsh-console",
         "dsh-nav",
-        "dsh-tabs",
-        "dsh-my-ui"
+        "dsh-tabs"
       ]
     }
   }

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "note": "web2 = 单插件测试环境（官方基线，无自研插件，测单个插件时临时 add）。schema 未定稿，见 docs/architecture.md §9。",
+  "kernel": "@deepseek-ai/dsh@0.1.0-rc.8",
+  "bundles": {
+    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-web-app": "0.1.0-rc.8"
+  },
+  "vendored": {}
+}

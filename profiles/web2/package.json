@@ -1,0 +1,15 @@
+{
+  "name": "dsh-profile-web2",
+  "private": true,
+  "version": "0.0.0",
+  "description": "单插件测试环境：官方基线，无自研插件。测试时 dsh plugin --profile web2 add <被测插件> 临时装入，隔离验证单个插件。",
+  "dependencies": {},
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app"
+      ]
+    }
+  }
+}

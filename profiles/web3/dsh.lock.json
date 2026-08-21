@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "note": "web3 = 多插件测试环境（核心组合：系统层 + 管理组件 + UI 读端）。schema 未定稿，见 docs/architecture.md §9。",
+  "kernel": "@deepseek-ai/dsh@0.1.0-rc.8",
+  "bundles": {
+    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-web-app": "0.1.0-rc.8",
+    "dsh-user": "0.0.0",
+    "dsh-channel": "0.0.0",
+    "dsh-console": "0.0.0",
+    "dsh-nav": "0.0.0",
+    "dsh-tabs": "0.0.0"
+  },
+  "vendored": {}
+}

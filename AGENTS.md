@@ -34,7 +34,7 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · dst
 ```
 packages/   自研家族（packages/<plugin>/：package.json + tsconfig*.json + src/）
 vendored/   社区插件（git submodule 锁定；dst-* 前缀）
-profiles/   发行包 profile 模板（分发形态：git clone 即用）+ dsh.lock.json 版本锁
+profiles/   发行包 profile 模板（git clone 即用）：web=开发+正式 / web2=单插件测试（官方基线）/ web3=多插件测试（核心组合），各含 dsh.lock.json 版本锁
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
 docs/       架构文档（architecture.md 是 spec）
 ```
@@ -66,7 +66,7 @@ pnpm test         # pnpm -r test
 3. **升级回滚策略**：文档只写了滚动重启，无回滚。
 4. **总览 UI 归属**：console 自带 client（./client 导出）vs UI 层"不进核心契约"的边界。
 5. **agent 最小组件集清单**：bootstrap 脚本依赖它，未列。
-6. **dsh-my-ui 的 cordis.patch.yml**：package.json 的 dsh.bundle.patch 引用它，文件不存在。
+6. ~~dsh-my-ui 的 cordis.patch.yml：package.json 的 dsh.bundle.patch 引用它，文件不存在~~ —— **已修复**：占位文件已建（内容待实现期填充）。
 7. **vendored submodule 机制**：未落地（dst-agent-teams、dsh-web-ui 尚未引入）。
 8. **皮肤中心 v2 引用方式**：社区 dsh-web-ui 的皮肤机制如何接入未定。
 
