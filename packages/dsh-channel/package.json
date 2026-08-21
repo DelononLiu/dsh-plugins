@@ -12,7 +12,9 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["lib"],
+  "files": [
+    "lib"
+  ],
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -20,7 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "dsh-user": "workspace:*"
+    "@deepseek-ai/schemastery": "^3.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"

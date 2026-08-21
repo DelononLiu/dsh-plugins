@@ -10,9 +10,9 @@ importers:
 
   packages/dsh-channel:
     dependencies:
-      dsh-user:
-        specifier: workspace:*
-        version: link:../dsh-user
+      '@deepseek-ai/schemastery':
+        specifier: ^3.0.0
+        version: 3.18.1
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
