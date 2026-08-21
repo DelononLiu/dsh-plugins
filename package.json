@@ -9,5 +9,8 @@
     "test": "pnpm -r test"
   },
   "packageManager": "pnpm@9.15.0",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
 }

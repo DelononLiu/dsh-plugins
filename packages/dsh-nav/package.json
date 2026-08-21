@@ -21,7 +21,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-nav",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

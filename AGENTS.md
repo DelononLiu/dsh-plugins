@@ -59,7 +59,9 @@ UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部�
 
 - **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
 - **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
-- 本项目当前为**占位骨架（无功能实现）**：需求已 100% 定稿（architecture.md §9 清零），进入实现阶段——按依赖链串行开发。
+- 本项目当前为**已实现 + 部分接入**：6 插件实现（39 测试全绿）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
+- **测试环境 = 目录隔离**（2026-08 定）：web2/web3 用**独立 DSH_HOME**（`~/.dsh-web2`、`~/.dsh-web3`），`DSH_HOME=<dir> dsh --profile web` 启动——sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。独立 home 的 profile 用 `dsh plugin --profile web add` 创建，自研插件经 cordis.patch.yml insert（不进 bundles），webserver 端口独立配置（避开正式 3080）。
+- **client 构建**：声明 dsh.client 的插件必须产出 `lib/client.js`（官方 ModuleLoader closure 格式）——`scripts/build-client.mjs`（esbuild）生成，4 个 UI 插件 build 已接入。
 
 ## 插件包形态（Conventions）
 
