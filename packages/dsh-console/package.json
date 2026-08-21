@@ -21,8 +21,7 @@
   },
   "dependencies": {
     "dsh-user": "workspace:*",
-    "dsh-channel": "workspace:*",
-    "dsh-contracts": "workspace:*"
+    "dsh-channel": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"

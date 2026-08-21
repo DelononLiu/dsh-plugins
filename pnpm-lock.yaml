@@ -29,9 +29,6 @@ importers:
 
   packages/dsh-console:
     dependencies:
-      '@deepseek-ai/dsh-client-runtime':
-        specifier: ^0.1.0-rc.8
-        version: 0.1.0-rc.8(uvftdgm6sjntlod6cahcs25lqi)
       dsh-channel:
         specifier: workspace:*
         version: link:../dsh-channel
@@ -45,6 +42,28 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)
+
+  packages/dsh-console-ui:
+    dependencies:
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: ^0.1.0-rc.8
+        version: 0.1.0-rc.8(uvftdgm6sjntlod6cahcs25lqi)
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      dsh-console:
+        specifier: workspace:*
+        version: link:../dsh-console
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
@@ -82,9 +101,6 @@ importers:
       '@deepseek-ai/dsh-client-runtime':
         specifier: ^0.1.0-rc.8
         version: 0.1.0-rc.8(uvftdgm6sjntlod6cahcs25lqi)
-      dsh-console:
-        specifier: workspace:*
-        version: link:../dsh-console
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
@@ -92,6 +108,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      dsh-console:
+        specifier: workspace:*
+        version: link:../dsh-console
       typescript:
         specifier: ^5.0.0
         version: 5.9.3

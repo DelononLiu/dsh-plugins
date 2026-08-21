@@ -1,29 +1,32 @@
-# Agent Note: 共享契约包与 console 界面拆分
+# Agent Note: 契约跟随数据所有者 + console 界面拆分
 
 Status: implemented
 
+> 2026-08 修正：撤销独立 contracts 包（用户确认：契约类型不适合单独搞一个插件）。
+
 ## Problem
 
-两个联动未定项：①实例档案共享契约的载体（nav 是档案读端，不能直接依赖 console 运行时——否则 UI 层绑定管理组件实现）；②总览 UI 归属（console 自带 client 会混淆"管理组件"与"UI 层"边界）。
+两个联动未定项：①实例档案共享契约的载体——nav（UI 读端）需要读档案，不能直接绑定 console 运行时实现；②总览 UI 归属——console 自带 client 会混淆"管理组件"与"UI 层"边界。
 
 ## Decision
 
-**U1 契约载体 → `dsh-contracts`（types-only 共享包）**：
-- 身份/实例/主机档案的 schema 与 Typert 契约声明放 dsh-contracts，**无运行时逻辑**，位于内核之上、所有层之下（任何层 → contracts，contracts 零依赖）。
-- console（L3）实现档案服务（@Remote，host 面）；nav / dsh-console-ui 消费生成契约（client 面 `ctx.remote`）——**只依赖类型，不依赖 console 运行时**。整体性的落地机制。
+**契约跟随数据所有者**（不单独建契约包）：
+- 实例/主机档案类型与 @Remote 服务签名由 **dsh-console 定义并导出**（console 是数据所有者）。
+- 消费者（dsh-nav / dsh-console-ui）用 **`import type`** 引用（编译期类型，**运行时零依赖**——产物无对 console 的 require）+ `ctx.remote` 调用（client 面）。
+- 依赖方向 UI → 管理组件（向下），合规；"一套概念模型"由"唯一定义在 console"保证。
 
-**U4 总览 UI 归属 → console 纯服务端 + `dsh-console-ui`（UI 层）**：
+**总览 UI → console 纯服务端 + `dsh-console-ui`（UI 层）**：
 - dsh-console 去掉 client 导出与 dsh.client 字段（纯服务端）。
-- 总览/管理界面独立为 UI 层插件 dsh-console-ui（依赖 dsh-contracts，经 ctx.remote 消费 console 服务），符合"UI 可替换、不进核心契约"。
+- 总览/管理界面独立为 UI 层插件 dsh-console-ui（devDeps 依赖 dsh-console 类型 + ctx.remote 消费）。
 
 ## Alternatives
 
-- 契约放 dsh-channel——否决：档案含归属/类型/生命周期等业务概念，放通信层会让 L2 依赖 L3 语义（违反分层）。
-- 契约放 dsh-console、nav 直接依赖——否决：UI 层绑定管理组件实现，多消费者时代理变多。
-- console 自带 client——否决：混淆管理组件与 UI 层边界（原骨架形态，已改）。
+- 独立 types-only 契约包（dsh-contracts）——否决（2026-08 修正）：契约类型不适合单独搞一个插件；定义在数据所有者处更自然，type-only import 已解决耦合。
+- 契约放 dsh-channel——否决：档案含归属/类型/生命周期等业务概念，放通信层让 L2 依赖 L3 语义。
+- console 自带 client——否决：混淆管理组件与 UI 层边界。
 
 ## Consequences
 
-- packages/ 增加 dsh-contracts（types-only）+ dsh-console-ui（UI）；console 变纯服务端。
-- nav 依赖改为 contracts 类型 + ctx.remote（原直接依赖 console 的骨架已调整）。
-- profiles bundles 同步（web 全量、web3 核心组合均含 contracts）。
+- packages/ = 7 自研插件（user/channel/console/console-ui/nav/tabs/my-ui），无独立契约包。
+- nav/console-ui 对 console 为 **devDependencies type-only 引用**（运行时零依赖）；调用走 Typert ctx.remote。
+- profiles bundles 无 contracts 项（web 9 项 / web3 8 项）。
