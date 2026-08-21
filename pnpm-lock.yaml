@@ -141,6 +141,10 @@ importers:
         version: 3.2.7(@types/node@22.20.1)
 
   packages/dsh-user:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: ^3.0.0
+        version: 3.18.1
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1

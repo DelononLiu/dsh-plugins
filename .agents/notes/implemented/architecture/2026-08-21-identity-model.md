@@ -24,3 +24,4 @@ dsh-user 的用户模型接口与归属机制未定（认证已拆出走 dsh-gat
 
 - dsh-user 职责收敛为"身份模型 + 授权查询"；认证由 dsh-gateway 承担。
 - §9 身份模型项勾除。
+- **实现落地（2026-08-21）**：UserService 类插件（static Config + default export，cordis 自动注册 ctx.user）；Config schema = users（静态列表）+ gatewayHeaders（网关注入头名）+ sharedAuth（shared 授权映射）；13 项单测通过（身份解析/授权/归属）；密钥对与 shared 公钥访问留待 shared 访问实现。
