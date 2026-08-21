@@ -9,10 +9,10 @@ DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**
 ## 分层与依赖纪律（最高优先级）
 
 ```
-业务 app（当前无，预留）  面向用户业务价值的应用（协作/分析/工作流…）
-UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · dst-agent-teams · 各界面
-管理组件                    dsh-console（主机/实例档案、生命周期、部署编排、inbox/投递）
-系统                        dsh-user（身份）· dsh-channel（通信）
+业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
+UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · 各界面 · 全家桶 UI 能力（skin-center/better-sidebar）
+管理组件                    dsh-console（主机/实例档案、生命周期、部署编排、inbox/投递）+ 社区 dsh-update-checker/dsh-prometheus
+系统                        dsh-user（身份）· dsh-channel（通信）+ 可选社区认证网关/事件总线
 内核                        官方 deepseek-harness（rc 锁定）
 ```
 
@@ -21,6 +21,7 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · dst
 - **整体性**：一套概念模型（身份/主机/实例）贯穿所有层，**禁止逐插件私有模型**。
 - **控制面/执行面分离**：console 只编排，远程 agent 本地执行，SSH 仅一次性引导。
 - **UI 可替换**：UI 层不进入核心契约。
+- **自研边界**：系统层全自研（护城河，社区仅设计参考）；管理组件自研主体+通用能力用社区；UI/业务 app 以社区为主（详见 docs/architecture.md §5 分层×插件矩阵）。
 
 ## 命名空间
 

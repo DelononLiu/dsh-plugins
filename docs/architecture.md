@@ -137,19 +137,58 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 ---
 
-## 5. 插件职责表
+## 5. 分层 × 插件矩阵
+
+**原则**：系统层（身份/通信）全自研（护城河，社区仅作设计参考）；管理组件自研主体 + 通用能力采用社区；UI/业务 app 以社区为主（vendored），自研只做差异化插件（nav/tabs/my-ui 平台）。
+
+### 自研插件（packages/）
 
 | 插件 | 层 | 职责 | 状态 |
 | --- | --- | --- | --- |
-| dsh-user | 系统 | 身份模型、网关注入/静态配置、归属/授权基础 | 设计（试装过 web2/web3） |
-| dsh-channel | 系统 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令 | 设计（P1） |
-| dsh-console | 管理组件 | 主机/实例档案、生命周期、部署编排、inbox/投递（v1 承载）、总览（原名 dsh-hub，host-manager 作废） | 重新设计 |
-| dsh-nav | UI（档案读端） | 顶栏实例快捷导航（跳转/在线状态），消费实例档案 | 已上线三端 |
-| dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换（原名 dsh-session-tabs） | web2 试装 |
-| dsh-my-ui | UI（UI 平台） | 开箱即用业务插件集（侧边栏/Git/文件浏览/任务看板/皮肤等），meta-package 定位，"我的"=personal 哲学 | 立项 |
-| dst-agent-teams | UI | vendored 自 NanmiCoder/dsh-agent-teams | 已装（仓库未引入，以实际为准） |
+| dsh-user | 系统·身份 | 身份模型、网关注入/静态配置双模式、归属/授权基础 | 设计（试装过 web2/web3） |
+| dsh-channel | 系统·通信 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令 | 设计（P1） |
+| dsh-console | 管理组件 | 主机/实例档案、生命周期、部署编排、inbox/投递（v1 承载）、总览 | 重新设计 |
+| dsh-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
+| dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
+| dsh-my-ui | UI（平台） | 布局/皮肤/插件组合自定义平台，meta-package，"我的"=personal 哲学 | 立项 |
 
 > dsh-nav 已上线三端，说明实例档案模型已有雏形——后续需把它抽成共享契约（系统发现 + 管理组件档案），nav 转纯读端。
+
+### 社区直接采用（vendored，相似度极高不重复造）
+
+| 插件 | 层 | 用途 | 说明 |
+| --- | --- | --- | --- |
+| dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（skin-center v2 皮肤中心 / better-sidebar 侧边栏 / 布局）+ 功能应用（task-board 任务看板 / git-graph / ssh / pet…） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除） |
+| dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
+| dsh-gateway 或 dsh-webui-auth | 系统·认证（可选） | 登录/认证网关（scrypt、fail-closed、限速、吊销） | 若 dsh-user 的网关注入实现走社区；二者择一 |
+| dsh-update-checker | 管理组件 | 升级/备份/回滚/watchdog | U3 回滚答案，console 集成 |
+| dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | console 总览复用 |
+| dsh-agent-relay | 系统·通信（可选） | HMAC 事件总线骨架 | 若 channel 事件总线直接采用 |
+| dsh-topbar-manager | UI | 顶栏按钮治理（nav/tabs 均注入顶栏，统一注册表） | — |
+| dsh-daemon | 部署 | headless host 常驻/自愈（watchdog + /health） | 引导装 agent 后的守护 |
+
+### 设计参考（不引入，只借鉴）
+
+| 插件 | 层 | 借鉴点 |
+| --- | --- | --- |
+| dsh-weave（Iroh P2P） | 系统·通信 | channel 发现/心跳/事件投递的设计蓝本（stage=design-preview） |
+| SunNull/dsh-relay（Wire-Trunk） | 系统·通信 | 主动拨出 + 认证补在入口 + 实例/用户凭证分离 |
+| deepseek-harness-remote | 系统·通信 | typert 远程调用面收缩（ApiProxy-only）+ 版本协商 |
+| dsh-remote-link | 系统·通信 | QR+HMAC 配对、cookie 会话（WS 无法带 Authorization 的解法） |
+| dsh-agent-message | 系统·通信 | 控制指令投递模式/回执状态机/离线恢复 |
+| dsh-passwords / dsh-local-hanaccount | 系统·身份 | 多租户（v1 不做）、静态配置 workspace scoping |
+| dsh-remote-tunnel | 管理组件 | 主机档案 + 生命周期 + 审计 CLI 结构 |
+| dsh-plugin-doctor | 管理组件 | 发行包质量门禁（版本锁校验 + 冒烟） |
+| dsh-better-session-title / dsh-hotkeys | UI | nav+tabs 功能对照 / 快捷键实现层 |
+| dsh-skin-switcher | UI | 双皮肤引擎协调（启动迁移） |
+| dsh-Remote | 远程访问 | 多服务器选优、远程审批（v2 参考） |
+
+### 排除边界（避免误引）
+
+- dsh-AuthInOne / dsh-oauth：LLM provider 登录域，非用户身份
+- ZinkLu/dsh-channel / 各 IM 渠道插件：消息渠道，非跨实例通信
+- HuanLinOTO/dsh-plugin-ya-workspace-sidebar：**AGPL-3.0**，不可 vendored（license 红线）
+- 远程 UI 访问（dsh-relay / dsh-remote-web-ui / dsh-Remote）：v1 不纳入，走全家桶内 dsh-remote-web-ui 覆盖（v2 再定）
 
 ---
 

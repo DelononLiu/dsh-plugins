@@ -24,7 +24,13 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · dst
 - **系统**：基础设施能力（身份、通信），被上层消费，自身无业务含义。
 - **管理组件**：面向"系统/资源运维"的能力（主机、实例、部署、健康）——IT 管理面。
 - **UI**：界面层（布局、组件组合、导航、标签），消费管理组件与系统数据。
-- **业务 app**：面向"最终用户业务价值"的应用（沟通、协作、分析）——当前无，未来扩展。
+- **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**首个成员：dst-agent-teams（vendored 协作应用）；全家桶功能应用（task-board/ssh/git-graph 等）随 vendored dsh-web-ui 拆分归入**。
+
+**自研边界原则**（2026-08 社区调研后定）：
+- 系统层（身份/通信）**全自研**（护城河）——社区仅作设计参考（dsh-weave/dsh-relay/dsh-gateway 等）。
+- 管理组件：自研主体（console），通用能力采用社区（dsh-update-checker 升级回滚、dsh-prometheus 指标）。
+- UI/业务 app：**以社区为主**（vendored），自研只做差异化（dsh-my-ui 平台、dsh-nav、dsh-tabs）。
+- 完整矩阵见 docs/architecture.md §5 分层×插件矩阵。
 
 配套纪律：
 - **整体性**：一套概念模型（身份/主机/实例）贯穿所有层，禁止逐插件私有模型。
