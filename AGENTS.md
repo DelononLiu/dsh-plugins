@@ -89,6 +89,9 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · 各
 ## Vendoring policy
 
 - `vendored/` 用 git submodule 锁定 commit/tag，不 copy 源码进 git 历史（保留上游更新链路）。
+- **双模式**（2026-08 定）：
+  - 轻量单包（如 dst-agent-teams）：submodule 进 vendored/，profile 本地安装——完全锁定 + dst- 标记。
+  - 重量全家桶（如 dsh-web-ui 17 包）：submodule 锁源码快照（审查/补丁参考），**安装走 npm 发布版**（@linxin666 scope），`dsh.lock.json` 锁版本，改造走 profile 层 patch。
 - 改造走 `cordis.patch.yml` 补丁层，**不 fork**。
 - License 红线：Apache-2.0/MIT 可直接 vendored；AGPL 只可参考设计不可引入；CC BY-NC-SA 商用需剔除（如 dsh-web-ui 的 Maid Atelier 皮肤）。
 - 具体清单与例外见 `docs/architecture.md` §5 与 `docs/community-reference.md`。

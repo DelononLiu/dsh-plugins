@@ -162,8 +162,8 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | --- | --- | --- | --- |
 | dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（skin-center v2 皮肤中心 / better-sidebar 侧边栏 / 布局）+ 功能应用（task-board 任务看板 / git-graph / ssh / pet…） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除） |
 | dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
-| dsh-gateway 或 dsh-webui-auth | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销） | dsh-user 的身份接口对接，二选一（§9 待选型） |
-| dsh-relay 或 dsh-remote-web-ui | 系统·远程访问 | 对外暴露实例 UI/API（Wire-Trunk / 扫码配对） | 二选一（§9 待选型）；dsh-remote-web-ui 在全家族桶内 |
+| dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
+| dsh-remote-web-ui（全家桶内） | 系统·远程访问 | 局域网扫码配对远程控制（SSH 同步、令牌门控） | ✅ 已选定（2026-08）；零额外 vendored；dsh-relay 作跨网扩展参考（v2） |
 | dsh-update-checker | 管理组件 | 升级/备份/回滚/watchdog | U3 回滚答案，console 集成 |
 | dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | console 总览复用 |
 | dsh-agent-relay | 系统·通信（可选） | HMAC 事件总线骨架 | 若 channel 事件总线直接采用 |
@@ -253,8 +253,8 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 > 标注"有答案"的项，答案来自社区调研（docs/community-reference.md），补定时先读对应条目。
 
 - [ ] 身份模型的具体机制（用户模型接口、归属模型；认证已拆出走网关，见下）
-- [ ] **认证网关选型**（有答案）：dsh-gateway vs dsh-webui-auth vs dsh-gate——三选一 vendored，与 dsh-user 身份接口对齐
-- [ ] **远程访问选型**（有答案）：dsh-relay（Wire-Trunk）vs 全家桶内 dsh-remote-web-ui——二选一 vendored，作为系统层接入能力
+- [x] ~~认证网关选型~~（已定 2026-08）：**dsh-gateway（clarknu）** 为主选（成熟/多站点/fail-closed/热生效），dsh-webui-auth 安全手法作补强参考；vendored 实测二选一
+- [x] ~~远程访问选型~~（已定 2026-08）：**dsh-remote-web-ui（全家桶内）** 为主（局域网扫码配对，零额外 vendored）；dsh-relay（Wire-Trunk）作跨网扩展参考（v2）
 - [ ] 通道鉴权细节（agent↔console 认证：token？证书？；注意 WS/EventSource 不能带 Authorization 头，需兼容 cookie 路径）
 - [ ] 事件总线传输与投递语义（at-least-once？顺序？；参考 dsh-agent-relay）
 - [ ] 权限模型细节（角色、shared 实例的授权粒度；参考 dsh-passwords 授权矩阵）
@@ -264,5 +264,5 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [ ] **升级回滚策略**（有答案）：参考 dsh-update-checker 备份→更新→回滚闭环
 - [ ] 总览 UI 归属（console 自带 client vs UI 层独立界面）
 - [ ] agent 最小组件集清单（bootstrap 依赖）
-- [ ] vendored submodule 机制落地
+- [x] ~~vendored submodule 机制落地~~（已定 2026-08）：dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装 + lock 锁版本 + patch 层改造
 - [ ] **皮肤中心 v2 接入方式**（有答案）：参考 @linxin666/dsh-client-ui-skin-center + dsh-skin-switcher 双引擎协调
