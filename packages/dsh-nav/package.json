@@ -32,7 +32,7 @@
     }
   },
   "dependencies": {
-    "dsh-console": "workspace:*"
+    "dsh-contracts": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

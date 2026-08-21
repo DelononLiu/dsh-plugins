@@ -1,7 +1,7 @@
 {
-  "name": "dsh-console",
+  "name": "dsh-contracts",
   "version": "0.0.0",
-  "description": "管理组件（纯服务端）：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据（界面在 dsh-console-ui）",
+  "description": "跨层共享契约包（types-only）：身份/实例/主机档案 schema 与 Typert 契约声明，零运行时逻辑",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -18,14 +18,6 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
-  },
-  "dependencies": {
-    "dsh-user": "workspace:*",
-    "dsh-channel": "workspace:*",
-    "dsh-contracts": "workspace:*"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

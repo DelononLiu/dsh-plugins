@@ -11,6 +11,7 @@
         "@deepseek-ai/dsh-web-app",
         "dsh-user",
         "dsh-channel",
+        "dsh-contracts",
         "dsh-console",
         "dsh-nav",
         "dsh-tabs"

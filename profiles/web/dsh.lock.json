@@ -10,7 +10,8 @@
     "dsh-console": "0.0.0",
     "dsh-nav": "0.0.0",
     "dsh-tabs": "0.0.0",
-    "dsh-my-ui": "0.0.0"
+    "dsh-my-ui": "0.0.0",
+    "dsh-contracts": "0.0.0"
   },
   "vendored": {
     "dst-agent-teams": "TBD",
