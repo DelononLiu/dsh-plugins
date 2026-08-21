@@ -28,6 +28,8 @@
 │   typert 远程调用 · 控制指令=远程管理，自研）            │
 │   认证网关（社区 vendored：登录/会话/鉴权执行）          │
 │   远程访问（社区 vendored：对外暴露实例 UI/API）         │
+│   LLM 记忆（社区 vendored：dsh-memento——ctx.memory     │
+│   seam + SQLite + 门控注入）                            │
 │   基础设施能力，无业务含义                             │
 ├─ 内核（官方 rc 锁定）─────────────────────────────────┤
 │   deepseek-harness + 官方内置（dsh-base / dsh-web-app） │
@@ -210,6 +212,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
 | dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
 | dsh-remote-web-ui（全家桶内） | 系统·远程访问 | 局域网扫码配对远程控制（SSH 同步、令牌门控） | ✅ 已选定（2026-08）；零额外 vendored；dsh-relay 作跨网扩展参考（v2） |
+| dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.3 活跃）；纯本地；官方无 memory，社区填补 |
 | dsh-update-checker | 管理组件 | 升级/备份/回滚/watchdog | U3 回滚答案，console 集成 |
 | dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | console 总览复用 |
 | dsh-agent-relay | 系统·通信（可选） | HMAC 事件总线骨架 | 若 channel 事件总线直接采用 |

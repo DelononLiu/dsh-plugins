@@ -37,7 +37,7 @@ pnpm test         # pnpm -r test
 业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
 UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
 管理组件                    dsh-console（档案/生命周期/部署编排/inbox）+ 社区 dsh-update-checker / dsh-prometheus
-系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· 远程访问（社区）
+系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· 远程访问（社区）· LLM 记忆（社区 dsh-memento）
 内核                        官方 deepseek-harness（rc 锁定）
 ```
 
