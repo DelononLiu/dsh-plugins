@@ -15,5 +15,12 @@
     "dsh-tabs": "0.0.0",
     "dsh-my-ui": "0.0.0"
   },
-  "vendored": {}
+  "vendored": {
+    "dst-agent-teams": "0.1.10",
+    "dsh-memento": "0.4.3",
+    "dsh-web-ui": "0.2.6(npm @linxin666)",
+    "dsh-gateway": "1.6.0",
+    "dsh-update-checker": "TBD",
+    "dsh-prometheus": "TBD"
+  }
 }
