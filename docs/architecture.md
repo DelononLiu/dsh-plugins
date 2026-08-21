@@ -42,16 +42,16 @@
 - **UI**：界面层（布局、组件组合、导航、标签），消费管理组件与系统数据。
 - **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**首个成员：dst-agent-teams（vendored 协作应用）；全家桶功能应用（task-board/ssh/git-graph 等）随 vendored dsh-web-ui 拆分归入**；**跨层依赖严格向下，UI 层内部允许聚合依赖**（meta 包，如 dsh-my-ui）。
 
-### 共享契约（按语义分居）
+### 插件协作模式（服务定义 / 提供者 / 消费者）
 
-**契约类型按语义归属定义，不单独建契约包**（2026-08 定）：
+插件间协作采用 DSH 生态标准模式（官方 capability seam），**不引入独立"契约"概念**：
 
-- **实例基础契约 → dsh-channel**（系统层）：`InstanceIdentity`（id/name/addr/status/health）+ 发现/心跳/状态 @Remote 服务签名——实例首先是通信层发现的实体。
-- **管理档案契约 → dsh-console**（管理组件）：`InstanceRecord extends Identity`（+owner/type/host/version）+ 生命周期/部署 @Remote 服务签名。
-- 消费者用 `import type` 引用（编译期类型，**运行时零依赖**）+ `ctx.remote` 调用（client 面）：
-  - dsh-nav → channel 的 Identity（导航只需 id/name/addr/status），依赖降到系统层
-  - dsh-console-ui → console 的 InstanceRecord（管理界面）
-- 依赖方向向下，合规；"一套概念模型"由各层唯一定义保证。
+- **dsh-channel = 实例服务提供者**：定义实例类型（id/name/addr/status/health）+ 暴露发现/心跳/状态服务（@Remote，host 面）——实例是通信层发现的对象，放 channel 名正言顺。
+- **dsh-console = 实例管理服务提供者**：定义管理档案类型（在 channel 的实例类型上扩展 owner/type/host/version）+ 暴露生命周期/部署服务。
+- **dsh-nav / dsh-console-ui = 消费者**：`import type` 引用提供者的类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用服务（client 面）：
+  - dsh-nav → channel（导航只需实例身份/状态，依赖降到系统层）
+  - dsh-console-ui → console（管理界面）
+- 依赖方向向下；"一套概念模型"由提供者唯一定义类型保证。
 
 ### UI 四区布局（2026-08 定）
 
@@ -187,14 +187,14 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | 插件 | 层 | 职责 | 状态 |
 | --- | --- | --- | --- |
 | dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；认证实现已拆出走认证网关 | 设计（试装过 web2/web3） |
-| dsh-channel | 系统·通信 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令（远程管理）；**定义实例基础契约 InstanceIdentity** | 设计（P1） |
-| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**导出档案类型与 @Remote 契约**（消费者 type-only import） | 重新设计 |
+| dsh-channel | 系统·通信 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令（远程管理）；**实例服务提供者**（实例类型 + 发现/状态服务） | 设计（P1） |
+| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | 重新设计 |
 | dsh-console-ui | UI | 总览/管理界面（四区：左侧按钮区入口 + 内容区），消费 dsh-contracts + ctx.remote | 新立 |
 | dsh-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
 | dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
 | dsh-my-ui | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学 | 立项 |
 
-> dsh-nav 已上线三端，说明实例档案模型已有雏形——后续需把它抽成共享契约（系统发现 + 管理组件档案），nav 转纯读端。
+> dsh-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
 
 ### 社区直接采用（vendored，相似度极高不重复造）
 
@@ -300,7 +300,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [ ] 权限模型细节（角色、shared 实例的授权粒度；参考 dsh-passwords 授权矩阵）
 - [ ] **版本矩阵落地格式**（有答案）：dsh.lock.json schema 参考 Plugin Pack Schema v1
 - [ ] 局域网内的发现方式（console 已知地址列表 vs 局域网广播）
-- [x] ~~实例档案共享契约载体~~（已定 2026-08，**修正**）：不单独建契约包，**按语义分居**——实例基础契约 InstanceIdentity 在 dsh-channel（发现/状态），管理档案契约 InstanceRecord（extends Identity）在 dsh-console；nav 消费 channel（依赖降到系统层）、console-ui 消费 console，均 `import type` + `ctx.remote`
+- [x] ~~实例档案共享契约载体~~（已定 2026-08，最终表述）：**不提"契约"概念**——插件协作模式：dsh-channel 提供实例服务（类型+发现/状态），dsh-console 提供管理服务（扩展类型+生命周期），nav 消费 channel、console-ui 消费 console（`import type` + `ctx.remote`）
 - [ ] **升级回滚策略**（有答案）：参考 dsh-update-checker 备份→更新→回滚闭环
 - [x] ~~总览 UI 归属~~（已定 2026-08）：console **纯服务端**，总览界面独立为 UI 层 **dsh-console-ui**
 - [ ] agent 最小组件集清单（bootstrap 依赖）
