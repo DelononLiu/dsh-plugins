@@ -105,6 +105,7 @@
   - 静态配置：cordis.patch.yml 配置用户列表（id/name/roles）。
 - **角色三档**（v1）：`admin`（全权）/ `member`（自有实例全权 + shared 按授权）/ `guest`（被授权实例只读）。
 - **归属**：实例档案 owner = userId；shared 实例授权记录（owner 授权其他用户可访问/只读）在实例档案。
+- **shared 跨实例访问路径**（2026-08 定，SSH 公钥式）：每个实例持有身份密钥对（私钥留本地，v1 每实例一对）；owner 在目标实例配置授权用户/实例的**公钥列表**（authorized_keys 式）；访问者用私钥签名请求 → 目标实例验证公钥 + 授权列表 → 放行（只读/可访问按授权）。不做证书链/CA（v2 再考虑用户级密钥与信任体系）。
 - **授权落点**：dsh-user 提供 `instanceAccess(instanceId)` 授权查询，console 执行控制指令时校验（操作分级：查看 member+ / 控制 owner·admin / 部署·主机管理 admin）。
 
 ### 主机（部署单元，管理组件档案）
