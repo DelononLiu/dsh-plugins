@@ -297,13 +297,13 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [x] ~~认证网关选型~~（已定 2026-08）：**dsh-gateway（clarknu）** 为主选（成熟/多站点/fail-closed/热生效），dsh-webui-auth 安全手法作补强参考；vendored 实测二选一
 - [x] ~~远程访问选型~~（已定 2026-08）：**dsh-remote-web-ui（全家桶内）** 为主（局域网扫码配对，零额外 vendored）；dsh-relay（Wire-Trunk）作跨网扩展参考（v2）
 - [ ] 通道鉴权细节（agent↔console 认证：token？证书？；注意 WS/EventSource 不能带 Authorization 头，需兼容 cookie 路径）
-- [ ] 事件总线传输与投递语义（at-least-once？顺序？；参考 dsh-agent-relay）
+- [x] ~~事件总线传输与投递语义~~（已定 2026-08）：**at-least-once + UUID 幂等去重 + 7 天 TTL + 指数退避**；事件三平面分类 control（request/ack）/ task（幂等）/ session（仅显式共享）——参考 dsh-agent-relay / dsh-weave
 - [ ] 权限模型细节（角色、shared 实例的授权粒度；参考 dsh-passwords 授权矩阵）
-- [ ] **版本矩阵落地格式**（有答案）：dsh.lock.json schema 参考 Plugin Pack Schema v1
+- [x] ~~版本矩阵落地格式~~（已定 2026-08）：dsh.lock.json 定稿 schema（schemaVersion/id/name/version/kernel/bundles/vendored）——参考 Plugin Pack Schema v1
 - [ ] 局域网内的发现方式（console 已知地址列表 vs 局域网广播）
 - [x] ~~实例档案共享契约载体~~（已定 2026-08，最终表述）：**不提"契约"概念**——插件协作模式：dsh-channel 提供实例服务（类型+发现/状态），dsh-console 提供管理服务（扩展类型+生命周期），nav 消费 channel、console-ui 消费 console（`import type` + `ctx.remote`）
-- [ ] **升级回滚策略**（有答案）：参考 dsh-update-checker 备份→更新→回滚闭环
+- [x] ~~升级回滚策略~~（已定 2026-08）：升级前快照（bundles+lock+patch）→ 滚动重启 → 心跳/健康确认 → 失败自动回滚 + 保留 N 份备份——参考 dsh-update-checker
 - [x] ~~总览 UI 归属~~（已定 2026-08）：console **纯服务端**，总览界面独立为 UI 层 **dsh-console-ui**
-- [ ] agent 最小组件集清单（bootstrap 依赖）
+- [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored submodule 机制落地~~（已定 2026-08）：dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装 + lock 锁版本 + patch 层改造
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-my-ui 自定义维度=布局+插件组合
