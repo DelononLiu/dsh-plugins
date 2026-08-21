@@ -30,6 +30,7 @@ const result = await build({
   globalName: '__dshClient',
   platform: 'browser',
   target: 'es2022',
+  jsx: 'automatic',
   outfile: join(root, 'lib/.client.tmp.js'),
   external: ['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-runtime/client', '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-locale/client'],
   write: true,
