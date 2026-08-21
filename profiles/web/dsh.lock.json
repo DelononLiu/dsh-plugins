@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "note": "版本矩阵锁（schema 未定稿，见 docs/architecture.md §9 开放问题）。发行包 = 内核 rc + 自研 + 社区锁定组合，随 rc 整体 bump。",
+  "kernel": "@deepseek-ai/dsh@0.1.0-rc.8",
+  "bundles": {
+    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-web-app": "0.1.0-rc.8",
+    "dsh-user": "0.0.0",
+    "dsh-channel": "0.0.0",
+    "dsh-console": "0.0.0",
+    "dsh-nav": "0.0.0",
+    "dsh-tabs": "0.0.0",
+    "dsh-my-ui": "0.0.0"
+  },
+  "vendored": {
+    "dst-agent-teams": "TBD",
+    "dsh-web-ui": "TBD"
+  }
+}

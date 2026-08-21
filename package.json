@@ -1,0 +1,13 @@
+{
+  "name": "dsh-plugins",
+  "private": true,
+  "version": "0.0.0",
+  "description": "dsh 团队发行包 monorepo：内核之上分层（身份/通信/业务/UI），自研核心 + 社区聚合",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "license": "MIT"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {},
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-user",
+        "dsh-channel",
+        "dsh-console",
+        "dsh-nav",
+        "dsh-tabs",
+        "dsh-my-ui"
+      ]
+    }
+  }
+}
