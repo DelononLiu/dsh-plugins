@@ -81,6 +81,7 @@ UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部�
 - **main 保持稳定基线**：小改动/文档可直接在 main 提交（原子、单功能）；**大功能（跨多文件/多提交）一律走 worktree 分支**，分支命名 `feat/<功能名>`。
 - 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
 - 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
+- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console → dsh-console-ui → dsh-nav（type-only 依赖 channel）→ dsh-my-ui（聚合 nav/tabs）；**dsh-tabs 无内部依赖，独立**。无依赖关系的插件可并行。
 
 ## 提交规则（Commit Rules）
 
