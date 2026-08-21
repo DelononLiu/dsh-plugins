@@ -61,14 +61,16 @@ pnpm test         # pnpm -r test
 
 ## 已知未定项（评审 2026-08 发现，开工前必须补定）
 
+> 分层社区调研见 docs/community-reference.md——U2/U3/U8 已有社区答案（分别：Plugin Pack Schema v1 / dsh-update-checker / 皮肤中心 v2），补定时先读对应条目。
+
 1. **实例档案共享契约载体**：nav 是档案读端，当前直接依赖 dsh-console；文档要求"抽成共享契约"——契约放共享包还是 dsh-channel？未定。
-2. **版本矩阵落地格式**：dsh.lock.json 的 schema 未定。
-3. **升级回滚策略**：文档只写了滚动重启，无回滚。
+2. **版本矩阵落地格式**：dsh.lock.json 的 schema 未定（参考 Plugin Pack Schema v1）。
+3. **升级回滚策略**：文档只写了滚动重启，无回滚（参考 dsh-update-checker 备份→更新→回滚闭环）。
 4. **总览 UI 归属**：console 自带 client（./client 导出）vs UI 层"不进核心契约"的边界。
 5. **agent 最小组件集清单**：bootstrap 脚本依赖它，未列。
 6. ~~dsh-my-ui 的 cordis.patch.yml：package.json 的 dsh.bundle.patch 引用它，文件不存在~~ —— **已修复**：占位文件已建（内容待实现期填充）。
 7. **vendored submodule 机制**：未落地（dst-agent-teams、dsh-web-ui 尚未引入）。
-8. **皮肤中心 v2 引用方式**：社区 dsh-web-ui 的皮肤机制如何接入未定。
+8. **皮肤中心 v2 引用方式**：参考 @linxin666/dsh-client-ui-skin-center（皮肤=纯资产目录）+ dsh-skin-switcher（双引擎协调），接入方案待定。
 
 ## 已知文档矛盾（评审发现，部分已修复）
 

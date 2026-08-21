@@ -155,11 +155,18 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 ## 6. 社区参考（已核实）
 
+> 完整分层调研见 **[docs/community-reference.md](community-reference.md)**（按新架构六条线扫描，含每层可借鉴点与 License 红线）。核心结论：
+> - **身份（dsh-user）**：dsh-passwords（多租户主/子用户+配额）、dsh-local-hanaccount（静态配置模式）、dsh-webui-auth / dsh-gateway（网关注入模式）——双模式均有社区对标
+> - **通信（dsh-channel）**：dsh-weave（Iroh P2P 发现/心跳，设计蓝本）、dsh-remote-link（QR+HMAC 配对鉴权）、dsh-agent-relay（事件总线骨架）、SunNull/dsh-relay（Wire-Trunk 传输底座）
+> - **管理（dsh-console）**：dsh-remote-tunnel（部署编排）、dsh-update-checker（**U3 回滚答案**）、dsh-forge mailbridge（inbox 对应物）
+> - **UI**：dsh-web-ui（vendored 全家桶，含 License 陷阱）、皮肤中心 v2（**U8 答案**）、dsh-plugin-pack-web（**U2 版本锁 schema 参考**）
+> - **远程/agent**：dsh-ssh（主机档案+执行面板）、dsh-daemon（headless host 常驻）
+
 | 参考 | 项目 | 说明 | License |
 | --- | --- | --- | --- |
-| dsh-web-ui | [zhu1090093659/dsh-web-ui](https://github.com/zhu1090093659/dsh-web-ui) | DSH Web GUI 插件+皮肤全家桶，含聚合包 dsh-web-ui-all、皮肤中心 v2 | Apache-2.0 |
+| dsh-web-ui | [zhu1090093659/dsh-web-ui](https://github.com/zhu1090093659/dsh-web-ui) | DSH Web GUI 插件+皮肤全家桶，含聚合包 dsh-web-ui-all、皮肤中心 v2 | Apache-2.0（4 子包 BSD-3-Clause、1 皮肤 CC BY-NC-SA） |
 | dst-agent-teams | [NanmiCoder/dsh-agent-teams](https://github.com/NanmiCoder/dsh-agent-teams) | 船长式多 Agent 编排（持久成员/任务 DAG/直接消息/活动面板） | MIT |
-| 插件包参考 | [baihejiangnan/dsh-plugin-pack-web](https://github.com/baihejiangnan/dsh-plugin-pack-web) | 30 插件一键复刻包，Plugin Pack Schema v1 | — |
+| 插件包参考 | [baihejiangnan/dsh-plugin-pack-web](https://github.com/baihejiangnan/dsh-plugin-pack-web) | 30 插件一键复刻包，Plugin Pack Schema v1（版本锁格式参考） | MIT |
 
 ---
 
