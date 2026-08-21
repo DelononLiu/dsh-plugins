@@ -16,7 +16,7 @@ vendored/   社区插件（git submodule 锁定；dst-* 前缀标记第三方）
 profiles/   发行包 profile 模板：web=开发+正式 / web2=单插件测试（官方基线）/ web3=多插件测试（核心组合），各含 dsh.lock.json 版本锁
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
 docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
-.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）
+.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（dsh-code-review / dsh-prose-standard / dsh-trim-cot-leakage / dsh-pre-push-checks / record-browser-gif，vendored 自官方 harness 并适配）
 ```
 
 ## 命令
@@ -65,7 +65,7 @@ UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部�
 
 - `"type": "module"`，ESM 全栈。
 - `dsh` 字段：client 插件声明 `client.inject`（官方 client 包）+ `client.platform: "web"`；需补丁的声明 `bundle.patch`。
-- **peerDependencies 必列** `@deepseek-ai/cordis` 与所有 inject 目标（对齐官方 rc 版本，如 `^0.1.0-rc.8`）。
+- **peerDependencies 必列** `@deepseek-ai/cordis`（`^4.0.1`，稳定版）与所有 inject 目标（对齐官方 rc，如 `^0.1.0-rc.8`）；type-only 引用的内部服务包也放 peerDependencies（发布后 .d.ts 解析需要）。
 - 内部依赖用 `workspace:*`；exports 含 `"./package.json"` 子路径。
 - 服务端插件：`export const name` + `export function apply(ctx)`；client 入口在 `src/client.ts`。
 
