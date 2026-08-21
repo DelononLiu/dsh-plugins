@@ -1,6 +1,6 @@
 # 调研：UI 全家桶与皮肤层 · 社区可参考插件/设计
 
-> 调研日期：2026-08-21。面向【UI 全家桶与皮肤】层（对应组件：vendored dsh-web-ui → dsh-my-ui 布局/组合/皮肤自定义）。
+> 调研日期：2026-08-21。面向【UI 全家桶与皮肤】层（对应组件：vendored dsh-web-ui → dsh-my-ui 布局/组合自定义）。**注：调研后（同日）皮肤中心已否决**——皮肤相关条目仅作调研快照，不构成采用决定。
 > 数据源：GitHub API / raw.githubusercontent / npm registry 元数据（均为第一手核实，2026-08-21 时点）+ awesome-dsh-hub 机器可读 registry（2017 插件）。
 > 结论先行：**核心参考 = dsh-web-ui 全家桶（已知，已核实）+ 皮肤中心 v2 纯资产机制 + better-sidebar 服务化布局框架 + dsh-skin-switcher 双引擎协调 + dsh-plugin-pack-web 发行包清单格式**。
 
@@ -59,7 +59,7 @@
 ### 3.3 @linxin666/dsh-client-ui-skin-center —— 皮肤中心 v2（新增，核心）
 - url: https://www.npmjs.com/package/@linxin666/dsh-client-ui-skin-center | Apache-2.0
 - desc: 唯一皮肤加载器；皮肤 = 纯资产目录（skin.json + skin.css L1/L2 + patches.css L3 + hooks.mjs），内建 + $DSH_HOME/skins 用户目录，fail-closed 校验，原子切换 + 首屏盖章。
-- match: dsh-my-ui 皮肤自定义（架构.md 未定项 #8"皮肤中心 v2 接入方式"的直接答案）
+- match: dsh-my-ui 皮肤自定义（调研快照；**后续否决：皮肤中心不引入，功能优先**）
 - takeaway: ①皮肤与官方彻底解耦、只与皮肤中心耦合——官方升级不牵动皮肤，新增皮肤只需落目录、免发布免安装（团队分发皮肤 = 拷贝目录/发皮肤包）；②fail-closed 校验 + 原子切换账本 = 换肤安全；③首屏盖章避免 FOUC；④刻意不走 cordis.patch.yml 重写（对比 3.4 的 legacy 路线）。
 
 ### 3.4 zhtx2024/dsh-skin-switcher —— 多皮肤引擎统一管理（新增）
@@ -71,7 +71,7 @@
 ### 3.5 baihejiangnan/dsh-plugin-pack-web —— 发行包/版本锁格式（新增）
 - url: https://github.com/baihejiangnan/dsh-plugin-pack-web | MIT（清单 `dsh-plugin-pack.json` 亦 MIT）
 - desc: 30 项 profile/web 插件"一键复刻"发行包：`dsh-plugin-pack.json`（DSH Plugin Pack Schema v1）+ 安装命令 + PROMPT.md 复刻提示词 + 环境备份 JSON。
-- match: 我们的发行包 profile 模板 + dsh.lock.json 版本锁（未定项 #2 的现成 schema 参考）；**已 vendored 到本仓库 packweb/**。
+- match: 我们的发行包 profile 模板 + dsh.lock.json 版本锁（Plugin Pack Schema v1 的现成 schema 参考；schema 已定稿采用其字段结构）。
 - takeaway: ①清单 schema：`{schemaVersion, id, name, version, description, license, plugins:[{id,name,kind,spec,repository}]}`——`spec` 支持 `github:owner/repo`、npm 包名、tar.gz URL 三种安装源；②"复刻提示词 + 备份 JSON"的克隆即用哲学（= 我们 profiles/ git clone 即用）；③README 中 `dshpm install` 与安装保护门禁的处理。
 
 ### 3.6 RevolutionLA/dsh-dream-skin —— 皮肤包分发/共享（新增）
