@@ -152,6 +152,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - agent 本地执行（克隆模板 → 新 profile → 起进程 → 注册档案），回传结构化回执。
 - 心跳经 channel 上报；主机在线状态 = 其下实例心跳聚合。
 - 升级 = 推新版本发行包 → 逐实例滚动重启 → 心跳恢复确认。
+- **patch 层升级适配**（2026-08 定，半自动）：升级前校验 patch 层的 target id 是否在新 rc 存在——**校验失败默认回滚**（安全），管理员**显式确认后可跳过失效 patch 继续**（升级 + 报告待适配项）。**回滚保留 3 份**（默认，可配）。
 
 ### 部署状态机
 
@@ -313,7 +314,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [x] ~~版本矩阵落地格式~~（已定 2026-08）：dsh.lock.json 定稿 schema（schemaVersion/id/name/version/kernel/bundles/vendored）——参考 Plugin Pack Schema v1
 - [x] ~~局域网内的发现方式~~（**否决** 2026-08）：不做局域网自动发现（mDNS 广播）——实例发现 = **agent 主动注册 + console 已知地址列表**（主机登记时手配地址）
 - [x] ~~实例档案共享契约载体~~（已定 2026-08，最终表述）：**不提"契约"概念**——插件协作模式：dsh-channel 提供实例服务（类型+发现/状态），dsh-console 提供管理服务（扩展类型+生命周期），nav 消费 channel、console-ui 消费 console（`import type` + `ctx.remote`）
-- [x] ~~升级回滚策略~~（已定 2026-08）：升级前快照（bundles+lock+patch）→ 滚动重启 → 心跳/健康确认 → 失败自动回滚 + 保留 N 份备份——参考 dsh-update-checker
+- [x] ~~升级回滚策略~~（已定 2026-08）：升级前快照（bundles+lock+patch）→ patch 校验（失败默认回滚/管理员确认可跳过）→ 滚动重启 → 心跳确认 → 失败自动回滚，**保留 3 份**——参考 dsh-update-checker
 - [x] ~~总览 UI 归属~~（已定 2026-08）：console **纯服务端**，总览界面独立为 UI 层 **dsh-console-ui**
 - [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored submodule 机制落地~~（已定 2026-08）：dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装 + lock 锁版本 + patch 层改造
