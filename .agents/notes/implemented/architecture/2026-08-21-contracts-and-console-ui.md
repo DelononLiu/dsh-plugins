@@ -27,3 +27,4 @@ Status: implemented
 
 - 文档统一用"服务提供者/消费者"语言（架构 §1、§5、§9 同步）。
 - packages/ = 7 自研插件；nav 依赖 channel（系统层）、console-ui 依赖 console（type-only）。
+- **实现落地（2026-08-21）**：ConsoleService 类插件（static Config + static inject ['channel'] + default export）；主机/实例档案（InstanceRecord 扩展 InstanceIdentity：owner/type/host/version）、生命周期编排（controlInstance/deployInstance 经 channel.sendControl 回环）、inbox（按 owner 隔离，订阅 channel task 平面 system.* 事件）；8 项单测通过。档案/inbox v1 内存存储；Typert 远程化留待消费端。
