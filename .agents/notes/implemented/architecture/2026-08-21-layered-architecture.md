@@ -49,7 +49,7 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · dst
 
 - workspace 内用 ESLint import 规则锁定依赖方向（实现期落地），UI 层内部聚合例外需在规则中体现。
 - 系统层（身份）是所有层的根：归属、鉴权、投递目标都基于它；系统层接口应先稳定。
-- 实例档案共享契约 = 系统层发现 + 管理组件档案的组合（载体未定，见 AGENTS.md 未定项 1）。
+- 实例服务协作模式：channel 提供实例服务（类型+发现/状态），console 提供管理服务（扩展类型+生命周期），nav 消费 channel、console-ui 消费 console（type-only + ctx.remote）。
 - 文档同步：architecture.md §1/§5、README、AGENTS.md 分层部分均按此更新（2026-08-21）。
 
 相关：[团队发行包定位](2026-08-21-team-distribution-package.md) · [自定义化为核心](2026-08-21-customization-core.md) · [实例模型](2026-08-21-instance-model.md)

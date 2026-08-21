@@ -1,7 +1,7 @@
 {
   "name": "dsh-my-ui",
   "version": "0.0.0",
-  "description": "UI 平台（L4）：自定义 UI（布局/组合/皮肤）；默认全家桶（侧边栏/Git/文件浏览/任务看板/皮肤）+ 可自定义，meta-package 定位，改造自社区 dsh-web-ui",
+  "description": "UI 平台：自定义 UI（四区布局/插件组合，不做换肤——皮肤否决）；默认全家桶（侧边栏/Git/文件浏览/任务看板），meta-package 定位，改造自社区 dsh-web-ui",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

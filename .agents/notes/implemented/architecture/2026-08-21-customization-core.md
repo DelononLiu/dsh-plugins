@@ -13,7 +13,7 @@ Status: implemented
 | 层 | 自定义什么 | 机制 |
 | --- | --- | --- |
 | 实例 | 每人创建自己的实例（personal），类型可扩展 | 实例档案 type 枚举（normal/shared/host/...） |
-| UI | 每人的布局（「三边一浮」可调）、插件组合、皮肤 | dsh-my-ui 自定义框架 + 社区皮肤中心 v2（皮肤=纯资产目录，加载器统一加载） |
+| UI | 每人的布局（四区可调）、插件组合（不做换肤——皮肤否决 2026-08） | dsh-my-ui 自定义框架（布局+组合） |
 | 发行包 | 每团队的默认配置 + 用户覆盖 | profile 模板 + `cordis.patch.yml` 覆盖层（DSH 原生机制） |
 
 哲学类比 oh-my-zsh：默认给你一套好用的，"my"的精髓是你可以改。
@@ -26,7 +26,7 @@ Status: implemented
 ## Consequences
 
 - dsh-my-ui 定位 = 自定义 UI 平台（默认全家桶 + 组合/布局/皮肤自定义），非纯聚合。
-- vendored 社区 dsh-web-ui 时**继承其皮肤中心 v2 机制**（接入方式未定，见 AGENTS.md 未定项 8）。
+- vendored 社区 dsh-web-ui 时**不引入皮肤中心**（皮肤否决 2026-08，功能优先）；自定义维度=布局+插件组合。
 - profiles/web 模板的 cordis.patch.yml 是自定义化的主战场，默认配置要"够用且可改"。
 
 相关：[分层架构](2026-08-21-layered-architecture.md) · [命名决策](2026-08-21-naming-decisions.md)

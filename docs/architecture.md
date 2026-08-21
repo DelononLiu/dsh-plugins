@@ -10,14 +10,13 @@
 依赖方向严格向下：每层只消费下层能力，不跨层。
 
 ```
-┌─ 业务 app（当前无，预留）─────────────────────────────┐
-│  面向用户业务价值的应用（协作/分析/工作流…）；          │
-│  消费 UI + 系统能力；当前为空，inbox/投递未来可         │
-│  长成第一个业务 app                                   │
+┌─ 业务 app（vendored 功能应用）───────────────────────┐
+│  dst-agent-teams（多 Agent 协作编排，第一个成员）      │
+│  全家桶功能应用（task-board/ssh/git-graph…，按需组合） │
 ├─ UI（可替换）────────────────────────────────────────┤
-│   dsh-my-ui：UI 平台（布局/组合/皮肤自定义；            │
-│   meta-package 定位；"我的"= personal 哲学）           │
-│   dsh-nav · dsh-tabs · 各界面 · dst-agent-teams        │
+│   dsh-my-ui：UI 平台（四区布局/插件组合自定义；         │
+│   不做换肤——皮肤否决；meta-package；"我的"=personal）  │
+│   dsh-nav · dsh-tabs · dsh-console-ui · 各界面        │
 │   消费管理组件与系统数据，不定义模型                   │
 ├─ 管理组件（自研核心）─────────────────────────────────┤
 │   dsh-console：主机/实例档案 · 生命周期 · 部署编排 ·    │
@@ -170,7 +169,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - 升级路径：跟随 DSH rc 整体 bump，不散装升级。
 - 部署/升级 = 版本矩阵整体推进，console 协调所有主机/实例。
 - 分发形态（已确认）：**完整 profile 模板**（git clone 现成 profile 目录直接用），模板即实例种子。
-- 落地形式：`profiles/web/dsh.lock.json`（版本锁：内核 rc + 自研 + 社区锁定版本，schema 未定，见 §9 开放问题）。
+- 落地形式：`profiles/web/dsh.lock.json`（版本锁 schema 已定稿：schemaVersion/id/name/version/kernel/bundles/vendored，见 §9）。边界语义：`kernel` = CLI 入口（@deepseek-ai/dsh）版本；`bundles` = profile 组件（含官方内置 base/web-app 与自研插件）；`vendored` = 社区插件锁定。
 
 ### Profile 矩阵（三个模板）
 
@@ -195,7 +194,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；认证实现已拆出走认证网关 | 设计（试装过 web2/web3） |
 | dsh-channel | 系统·通信 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令（远程管理）；**实例服务提供者**（实例类型 + 发现/状态服务） | 设计（P1） |
 | dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | 重新设计 |
-| dsh-console-ui | UI | 总览/管理界面（四区：左侧按钮区入口 + 内容区），消费 dsh-contracts + ctx.remote | 新立 |
+| dsh-console-ui | UI | 总览/管理界面（四区：左侧按钮区入口 + 内容区），消费 console 服务（type-only + ctx.remote） | 新立 |
 | dsh-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
 | dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
 | dsh-my-ui | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学 | 立项 |

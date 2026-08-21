@@ -1,7 +1,7 @@
 {
   "name": "dsh-console-ui",
   "version": "0.0.0",
-  "description": "UI·总览/管理界面：消费 dsh-contracts 类型与 ctx.remote（console 服务），四区布局（左侧按钮区入口 + 内容区）",
+  "description": "UI·总览/管理界面：消费 console 服务（type-only 类型 + ctx.remote），四区布局（左侧按钮区入口 + 内容区）",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -35,13 +35,13 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.8"
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.8",
+    "dsh-console": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@types/node": "^22.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^3.0.0",
-    "dsh-console": "workspace:*"
+    "vitest": "^3.0.0"
   }
 }
