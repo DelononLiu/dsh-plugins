@@ -1,0 +1,2 @@
+# agent 最小集补丁层：实例令牌注入（注册/心跳校验）。
+- { "id": "dsh-channel", "config": { "tokens": { "inst1": "tok" } } }
