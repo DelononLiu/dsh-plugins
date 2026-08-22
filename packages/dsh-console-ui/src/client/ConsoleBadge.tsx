@@ -165,22 +165,23 @@ export function ConsoleBadge(props: ConsoleBadgeProps): React.JSX.Element {
             maxHeight: 'calc(100dvh - 80px)',
             overflowY: 'auto',
             padding: '8px 10px',
-            borderRadius: 6,
-            border: '1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
-            background: 'var(--dsw-alias-bg-base, #ffffff)',
-            color: 'var(--dsw-alias-label-primary, #1a1a1a)',
+            // 风格对齐官方面板（设置面板/浮层同设计语言）：层级背景 + 官方阴影 + 官方圆角/边框层级。
+            borderRadius: 8,
+            border: '1px solid var(--dsw-alias-border-l2)',
+            background: 'var(--dsw-alias-bg-layer-2)',
+            color: 'var(--dsw-alias-label-primary)',
             fontSize: 12,
-            boxShadow: '0 4px 12px rgba(0,0,0,.35)',
+            boxShadow: 'var(--dsw-shadow-lv2)',
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>实例管理（单机/多机）</div>
-          {instances === null && <div style={{ opacity: 0.7 }}>加载中…</div>}
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>实例管理</div>
+          {instances === null && <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>加载中…</div>}
           {instances !== null && instances.length === 0 && (
-            <div style={{ opacity: 0.7 }}>暂无实例（channel 未发现）</div>
+            <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>暂无实例（channel 未发现）</div>
           )}
           {instances !== null && instances.map((inst) => (
             <div key={inst.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
-              <span style={{ color: inst.status === 'online' ? '#4caf50' : '#f44336' }}>{inst.status === 'online' ? '●' : '○'}</span>
+              <span style={{ color: inst.status === 'online' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{inst.status === 'online' ? '●' : '○'}</span>
               {/* 行文本 = 实例名 + 所属主机名（在线状态由圆点表示）；在线且非当前实例、有地址 → 可点击跳转 */}
               {inst.status === 'online' && !inst.self && inst.addr ? (
                 <a
@@ -226,27 +227,27 @@ export function ConsoleBadge(props: ConsoleBadgeProps): React.JSX.Element {
             </div>
           ))}
           {hosts !== null && hosts.length > 0 && (
-            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))' }}>
-              <div style={{ fontWeight: 600, marginBottom: 2 }}>主机守护</div>
+            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--dsw-alias-border-l2)' }}>
+              <div style={{ color: 'var(--dsw-alias-label-secondary)', fontSize: 11, fontWeight: 600, marginBottom: 2 }}>主机守护</div>
               {hosts.map((host) => (
                 <div key={host.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-                  <span style={{ color: host.status === 'online' ? '#4caf50' : '#f44336' }}>{host.status === 'online' ? '●' : '○'}</span>
+                  <span style={{ color: host.status === 'online' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{host.status === 'online' ? '●' : '○'}</span>
                   <span style={{ flex: 1 }}>{host.name}（{host.status}）</span>
                 </div>
               ))}
             </div>
           )}
           {broker !== null && (
-            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))' }}>
-              <div style={{ fontWeight: 600, marginBottom: 2 }}>Broker 状态</div>
+            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--dsw-alias-border-l2)' }}>
+              <div style={{ color: 'var(--dsw-alias-label-secondary)', fontSize: 11, fontWeight: 600, marginBottom: 2 }}>Broker 状态</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-                <span style={{ color: broker.connected ? '#4caf50' : '#f44336' }}>{broker.connected ? '●' : '○'}</span>
+                <span style={{ color: broker.connected ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{broker.connected ? '●' : '○'}</span>
                 <span style={{ flex: 1 }}>{broker.connected ? `已连接（在线 ${broker.agents.filter((a) => a.online).length} / ${broker.agents.length}）` : `不可达${broker.reason ? `：${broker.reason}` : ''}`}</span>
               </div>
-              <div style={{ padding: '2px 0', opacity: 0.85 }}>消息队列：{broker.queueCount < 0 ? '查询失败' : `${broker.queueCount} 条`}</div>
+              <div style={{ padding: '2px 0', color: 'var(--dsw-alias-label-secondary)' }}>消息队列：{broker.queueCount < 0 ? '查询失败' : `${broker.queueCount} 条`}</div>
             </div>
           )}
-          {notice && <div style={{ marginTop: 6, opacity: 0.85 }}>{notice}</div>}
+          {notice && <div style={{ marginTop: 6, color: 'var(--dsw-alias-label-secondary)' }}>{notice}</div>}
         </div>
       )}
     </span>
