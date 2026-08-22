@@ -7,7 +7,6 @@
     "@linxin666/dsh-client-ui-git-graph": "0.2.9",
     "@linxin666/dsh-client-ui-skill-explorer": "0.2.9",
     "@linxin666/dsh-client-ui-task-board": "0.2.9",
-    "@linxin666/dsh-client-ui-web-ui-settings": "0.2.9",
     "@linxin666/dsh-ssh": "0.2.9",
     "dsh-better-sidebar": "0.15.2"
   },
@@ -26,7 +25,6 @@
         "@linxin666/dsh-client-ui-git-graph",
         "@linxin666/dsh-ssh",
         "@linxin666/dsh-client-ui-task-board",
-        "@linxin666/dsh-client-ui-web-ui-settings",
         "@linxin666/dsh-client-ui-skill-explorer"
       ]
     }
