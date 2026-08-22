@@ -2,8 +2,15 @@
   "name": "dsh-profile-web",
   "private": true,
   "version": "0.0.0",
-  "description": "开发 + 正式环境：完整发行包（官方基线 + 全部自研 + vendored 全家桶）。日常开发插件即在此环境，同时作为正式版。",
-  "dependencies": {},
+  "description": "开发 + 正式环境：完整发行包（官方基线 + 全部自研 + vendored 开发工具全家桶）——个人 AI 工作台。日常开发插件即在此环境，同时作为正式版。",
+  "dependencies": {
+    "@linxin666/dsh-client-ui-git-graph": "0.2.9",
+    "@linxin666/dsh-client-ui-skill-explorer": "0.2.9",
+    "@linxin666/dsh-client-ui-task-board": "0.2.9",
+    "@linxin666/dsh-client-ui-web-ui-settings": "0.2.9",
+    "@linxin666/dsh-ssh": "0.2.9",
+    "dsh-better-sidebar": "0.15.2"
+  },
   "dsh": {
     "profile": {
       "bundles": [
@@ -14,7 +21,13 @@
         "dsh-console",
         "dsh-quick-nav",
         "dsh-tabs",
-        "dsh-desk"
+        "dsh-desk",
+        "dsh-better-sidebar",
+        "@linxin666/dsh-client-ui-git-graph",
+        "@linxin666/dsh-ssh",
+        "@linxin666/dsh-client-ui-task-board",
+        "@linxin666/dsh-client-ui-web-ui-settings",
+        "@linxin666/dsh-client-ui-skill-explorer"
       ]
     }
   }

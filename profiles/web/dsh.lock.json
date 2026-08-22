@@ -12,7 +12,13 @@
     "dsh-console": "0.0.0",
     "dsh-quick-nav": "0.0.0",
     "dsh-tabs": "0.0.0",
-    "dsh-desk": "0.0.0"
+    "dsh-desk": "0.0.0",
+    "dsh-better-sidebar": "0.15.2",
+    "@linxin666/dsh-client-ui-git-graph": "0.2.9",
+    "@linxin666/dsh-ssh": "0.2.9",
+    "@linxin666/dsh-client-ui-task-board": "0.2.9",
+    "@linxin666/dsh-client-ui-web-ui-settings": "0.2.9",
+    "@linxin666/dsh-client-ui-skill-explorer": "0.2.9"
   },
   "vendored": {
     "dst-agent-teams": "0.1.10",
