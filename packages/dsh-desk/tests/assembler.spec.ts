@@ -4,7 +4,7 @@
  * 自愈兼容（entry 仍在 sidebar root / body 内时不触发插件重插）。
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startToolAssembler } from '../src/client/ToolAssembler.ts'
 
 /** 官方 SidebarRoot.module.css 的 hash 类前缀（css-modules 形式）。 */
@@ -90,19 +90,15 @@ describe('startToolAssembler', () => {
     expect(foot.children[3]).toBe(footerActions)
   })
 
-  it('entry 晚于侧边栏出现时也能摆位（MutationObserver 等待）', () => {
+  it('entry 晚于侧边栏出现时也能摆位（MutationObserver 等待）', async () => {
     disposers.push(startToolAssembler())
     const logoRow = root.querySelector(`.${H('logoRow')}`) as HTMLElement
     // 组装器先跑（body 无 entry），插件后注入
     const taskboard = injectEntry('data-dsh-taskboard-entry', root, logoRow)
-    // 触发 observer：移动 DOM 会触发 MutationObserver 回调
+    // 触发 observer：移动 DOM 会触发 MutationObserver 回调（异步）
     expect(parentOf(taskboard)).toBe(root)
-    // observer 是异步的，等一个宏任务
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(parentOf(taskboard)).toBe(root.querySelector(`.${H('footArea')}`))
-        resolve()
-      }, 20)
+    await vi.waitFor(() => {
+      expect(parentOf(taskboard)).toBe(root.querySelector(`.${H('footArea')}`))
     })
   })
 
@@ -132,16 +128,20 @@ describe('startToolAssembler', () => {
     expect(document.querySelectorAll('style[data-plugin-css="@dsh-desk/tool-assembler"]').length).toBe(before)
   })
 
-  it('disposer 断开观察器（后续注入不再摆位）', () => {
+  it('disposer 断开观察器（后续注入不再摆位）', async () => {
     const disposer = startToolAssembler()
     disposer()
     const logoRow = root.querySelector(`.${H('logoRow')}`) as HTMLElement
     const taskboard = injectEntry('data-dsh-taskboard-entry', root, logoRow)
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(parentOf(taskboard)).toBe(root)
-        resolve()
-      }, 20)
-    })
+    // 给一个微任务+宏任务窗口，确认 observer 已断开、不摆位
+    await new Promise<void>((resolve) => setTimeout(resolve, 20))
+    expect(parentOf(taskboard)).toBe(root)
+  })
+
+  it('disposer 移除注入的样式（清理闭环）', () => {
+    const disposer = startToolAssembler()
+    expect(document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')).not.toBeNull()
+    disposer()
+    expect(document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')).toBeNull()
   })
 })

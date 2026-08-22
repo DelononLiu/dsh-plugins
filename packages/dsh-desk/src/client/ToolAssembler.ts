@@ -55,14 +55,15 @@ const TOOL_ENTRY_FOOT_CSS = [
   '[class*="collapsed"] [class*="footArea"] [class*="trigger"]{margin:8px 0 10px}',
 ].join('')
 
-/** 幂等注入样式（bundle 加载即执行，与 ConsoleBadge 同机制）。 */
-function injectEntryFootCss(): void {
-  if (typeof document === 'undefined' || document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')) return
+/** 幂等注入样式（bundle 加载即执行，与 ConsoleBadge 同机制）。返回移除函数。 */
+function injectEntryFootCss(): () => void {
+  if (typeof document === 'undefined' || document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')) return () => {}
   const tag = document.createElement('style')
   tag.dataset.plugin = 'dsh-desk'
   tag.dataset.pluginCss = '@dsh-desk/tool-assembler'
   tag.textContent = TOOL_ENTRY_FOOT_CSS
   document.head.appendChild(tag)
+  return () => tag.remove()
 }
 
 /** 官方侧边栏根（与 vendored sidebarRoot() 同策略：logoRow 的 parentElement）。 */
@@ -91,7 +92,7 @@ export type ToolAssemblerDisposer = () => void
  * @returns disposer（断开观察器；entry 留在 footArea，由插件自身 dispose 清理）。
  */
 export function startToolAssembler(): ToolAssemblerDisposer {
-  injectEntryFootCss()
+  const removeCss = injectEntryFootCss()
   const tryPlace = (): void => {
     const root = sidebarRoot()
     if (root === null) return
@@ -110,5 +111,8 @@ export function startToolAssembler(): ToolAssemblerDisposer {
   tryPlace()
   const observer = new MutationObserver(() => { tryPlace() })
   observer.observe(document.body, { childList: true, subtree: true })
-  return () => observer.disconnect()
+  return () => {
+    observer.disconnect()
+    removeCss()
+  }
 }
