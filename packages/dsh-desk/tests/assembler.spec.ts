@@ -128,6 +128,28 @@ describe('startToolAssembler', () => {
     expect(document.querySelectorAll('style[data-plugin-css="@dsh-desk/tool-assembler"]').length).toBe(before)
   })
 
+  it('折叠态（root collapsed）：entry 仍摆到 footArea、折叠 CSS 规则存在且顺序正确', () => {
+    // 模拟官方折叠：root 加 collapsed hash 类（SidebarRoot `!wide && css.collapsed`）
+    root.classList.add(H('collapsed'))
+    const logoRow = root.querySelector(`.${H('logoRow')}`) as HTMLElement
+    const taskboard = injectEntry('data-dsh-taskboard-entry', root, logoRow)
+    disposers.push(startToolAssembler())
+
+    // 折叠态下摆位不变（footArea 顶部）
+    const foot = root.querySelector(`.${H('footArea')}`) as HTMLElement
+    expect(parentOf(taskboard)).toBe(foot)
+    expect(foot.children[0]).toBe(taskboard)
+
+    // 折叠 CSS：36px 圆、仅图标（label 隐藏）、rail 间距
+    const css = (document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]') as HTMLStyleElement).textContent ?? ''
+    expect(css).toContain('[class*="collapsed"] [data-dsh-part="sidebar-entry"]{width:36px;height:36px;margin:8px 0 10px;justify-content:center;gap:0;padding:0;border-radius:50%}')
+    expect(css).toContain('[class*="collapsed"] [data-dsh-part="sidebar-entry"] [class*="entryLabel"]{display:none}')
+    // 折叠态规则须在展开规则之后（同特异性时后者胜 → 折叠优先）
+    expect(css.indexOf('[class*="collapsed"] [data-dsh-part="sidebar-entry"]{')).toBeGreaterThan(css.indexOf('[class*="footArea"] [data-dsh-part="sidebar-entry"]{'))
+    // trigger 折叠恢复 rail 间距
+    expect(css).toContain('[class*="collapsed"] [class*="footArea"] [class*="trigger"]{margin:8px 0 10px}')
+  })
+
   it('disposer 断开观察器（后续注入不再摆位）', async () => {
     const disposer = startToolAssembler()
     disposer()
