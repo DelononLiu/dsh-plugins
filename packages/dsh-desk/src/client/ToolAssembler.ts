@@ -41,12 +41,18 @@ const TOOL_ENTRY_SELECTORS = [
  * 设计的，re-parent 到 foot 区后须与同区按钮统一。选择器限定 footArea 内 +
  * data-dsh-part（全家桶 entry 统一标记），特异性高于插件 css-modules 类。
  * Rail（折叠）态对齐官方 `.trigger.rail`：36px 圆、仅图标。
+ *
+ * 间距：foot 区各行（entry/控制台/设置）统一收紧为 `margin: 2px -2px`
+ * （行间 4px，用户反馈官方 4px 上下边距间隔过大）；折叠态恢复官方 rail
+ * 的 `margin: 8px 0 10px`（覆盖规则在后面、特异性更高，折叠态优先）。
  */
 const TOOL_ENTRY_FOOT_CSS = [
-  '[class*="footArea"] [data-dsh-part="sidebar-entry"]{box-sizing:border-box;flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);height:42px;margin:4px -2px;padding:0 10px 0 8px;border:none;border-radius:12px;background:transparent;cursor:pointer;overflow:hidden;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px}',
+  '[class*="footArea"] [data-dsh-part="sidebar-entry"]{box-sizing:border-box;flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);height:42px;margin:2px -2px;padding:0 10px 0 8px;border:none;border-radius:12px;background:transparent;cursor:pointer;overflow:hidden;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px}',
   '[class*="footArea"] [data-dsh-part="sidebar-entry"]:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+  '[class*="footArea"] [class*="trigger"]{margin:2px -2px}',
   '[class*="collapsed"] [data-dsh-part="sidebar-entry"]{width:36px;height:36px;margin:8px 0 10px;justify-content:center;gap:0;padding:0;border-radius:50%}',
   '[class*="collapsed"] [data-dsh-part="sidebar-entry"] [class*="entryLabel"]{display:none}',
+  '[class*="collapsed"] [class*="footArea"] [class*="trigger"]{margin:8px 0 10px}',
 ].join('')
 
 /** 幂等注入样式（bundle 加载即执行，与 ConsoleBadge 同机制）。 */

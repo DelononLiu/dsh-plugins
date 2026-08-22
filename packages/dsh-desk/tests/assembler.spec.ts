@@ -122,6 +122,10 @@ describe('startToolAssembler', () => {
     expect(css).toContain('border-radius:12px')
     expect(css).toContain('--dsw-alias-interactive-bg-hover')
     expect(css).toContain('[class*="collapsed"] [data-dsh-part="sidebar-entry"]')
+    // 间距：foot 区各行统一 2px 上下边距（行间 4px），折叠态恢复官方 rail 值
+    expect(css).toContain('margin:2px -2px')
+    expect(css).toContain('[class*="footArea"] [class*="trigger"]{margin:2px -2px}')
+    expect(css).toContain('[class*="collapsed"] [class*="footArea"] [class*="trigger"]{margin:8px 0 10px}')
     // 幂等：再次启动不重复注入
     const before = document.querySelectorAll('style[data-plugin-css="@dsh-desk/tool-assembler"]').length
     disposers.push(startToolAssembler())
