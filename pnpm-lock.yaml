@@ -77,7 +77,7 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.1)
 
-  packages/dsh-my-ui:
+  packages/dsh-desk:
     dependencies:
       '@deepseek-ai/schemastery':
         specifier: ^3.0.0

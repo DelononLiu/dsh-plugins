@@ -5,7 +5,7 @@
  * factory 经注入 require 解析 external，导出 apply/inject）。
  *
  * 用法：node scripts/build-client.mjs <包路径> <client-id>
- * 例：node scripts/build-client.mjs packages/dsh-my-ui dsh-my-ui
+ * 例：node scripts/build-client.mjs packages/dsh-desk dsh-desk
  */
 
 import { build } from 'esbuild'
