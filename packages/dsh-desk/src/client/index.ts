@@ -9,12 +9,14 @@ import { createElement } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { LayoutControl, type LayoutRecord } from './LayoutControl'
+import { startToolAssembler } from './ToolAssembler'
 
 /** 需要的 client 服务：插槽注册 + settingsScope。 */
 export const inject = ['slots', 'settingsScope']
 
 /**
- * Client 插件体：绑定布局 settings 命名空间并注册设置页布局项。
+ * Client 插件体：绑定布局 settings 命名空间并注册设置页布局项；
+ * 同时启动工具入口组装器（把全家桶 data-dsh-*-entry 入口摆到控制台上方）。
  * @param ctx - client 根上下文。
  */
 export function apply(ctx: ClientContext): void {
@@ -27,4 +29,6 @@ export function apply(ctx: ClientContext): void {
       order: 20,
     }, (props) => createElement(LayoutControl, { ...props, host })),
   )
+  const disposer = startToolAssembler()
+  ctx.effect(() => disposer, 'dsh-desk: tool assembler')
 }
