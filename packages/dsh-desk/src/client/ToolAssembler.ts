@@ -33,6 +33,32 @@ const TOOL_ENTRY_SELECTORS = [
   '[data-dsh-skill-explorer-entry]',
 ]
 
+/**
+ * foot 区内 entry 的样式覆盖：对齐官方侧边栏 foot 按钮契约
+ * （ui-settings-general SettingsRoot.module.css `.trigger`——设置/控制台同款）：
+ * 42px 行、12px 圆角、14px 字号、primary 文字、interactive-bg-hover 悬停。
+ * 全家桶 entry 自带样式（32~36px/8px/13px/secondary）是为「工作区上面」的行
+ * 设计的，re-parent 到 foot 区后须与同区按钮统一。选择器限定 footArea 内 +
+ * data-dsh-part（全家桶 entry 统一标记），特异性高于插件 css-modules 类。
+ * Rail（折叠）态对齐官方 `.trigger.rail`：36px 圆、仅图标。
+ */
+const TOOL_ENTRY_FOOT_CSS = [
+  '[class*="footArea"] [data-dsh-part="sidebar-entry"]{box-sizing:border-box;flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);height:42px;margin:4px -2px;padding:0 10px 0 8px;border:none;border-radius:12px;background:transparent;cursor:pointer;overflow:hidden;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px}',
+  '[class*="footArea"] [data-dsh-part="sidebar-entry"]:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+  '[class*="collapsed"] [data-dsh-part="sidebar-entry"]{width:36px;height:36px;margin:8px 0 10px;justify-content:center;gap:0;padding:0;border-radius:50%}',
+  '[class*="collapsed"] [data-dsh-part="sidebar-entry"] [class*="entryLabel"]{display:none}',
+].join('')
+
+/** 幂等注入样式（bundle 加载即执行，与 ConsoleBadge 同机制）。 */
+function injectEntryFootCss(): void {
+  if (typeof document === 'undefined' || document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')) return
+  const tag = document.createElement('style')
+  tag.dataset.plugin = 'dsh-desk'
+  tag.dataset.pluginCss = '@dsh-desk/tool-assembler'
+  tag.textContent = TOOL_ENTRY_FOOT_CSS
+  document.head.appendChild(tag)
+}
+
 /** 官方侧边栏根（与 vendored sidebarRoot() 同策略：logoRow 的 parentElement）。 */
 function sidebarRoot(): HTMLElement | null {
   const column = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')
@@ -59,6 +85,7 @@ export type ToolAssemblerDisposer = () => void
  * @returns disposer（断开观察器；entry 留在 footArea，由插件自身 dispose 清理）。
  */
 export function startToolAssembler(): ToolAssemblerDisposer {
+  injectEntryFootCss()
   const tryPlace = (): void => {
     const root = sidebarRoot()
     if (root === null) return

@@ -113,6 +113,21 @@ describe('startToolAssembler', () => {
     }).not.toThrow()
   })
 
+  it('注入 foot 区样式覆盖（对齐官方 trigger 契约，幂等）', () => {
+    disposers.push(startToolAssembler())
+    const tag = document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')
+    expect(tag).not.toBeNull()
+    const css = (tag as HTMLStyleElement).textContent ?? ''
+    expect(css).toContain('height:42px')
+    expect(css).toContain('border-radius:12px')
+    expect(css).toContain('--dsw-alias-interactive-bg-hover')
+    expect(css).toContain('[class*="collapsed"] [data-dsh-part="sidebar-entry"]')
+    // 幂等：再次启动不重复注入
+    const before = document.querySelectorAll('style[data-plugin-css="@dsh-desk/tool-assembler"]').length
+    disposers.push(startToolAssembler())
+    expect(document.querySelectorAll('style[data-plugin-css="@dsh-desk/tool-assembler"]').length).toBe(before)
+  })
+
   it('disposer 断开观察器（后续注入不再摆位）', () => {
     const disposer = startToolAssembler()
     disposer()
