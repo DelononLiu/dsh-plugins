@@ -16,7 +16,7 @@ DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**
 
 ```
 packages/   自研家族（发布 npm，dsh-* 前缀）
-vendored/   社区插件（git submodule，dst-* 前缀标记第三方）
+vendored/   社区插件清单（npm 安装 + lock 锁版本；dst-* 标记第三方）
 profiles/   发行包 profile 模板（git clone 即用）：web=开发+正式 / web2=单插件测试 / web3=多插件测试，各含 dsh.lock.json 版本锁
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
 docs/       架构文档

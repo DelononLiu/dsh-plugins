@@ -1,6 +1,0 @@
-[submodule "vendored/dst-agent-teams"]
-	path = vendored/dst-agent-teams
-	url = https://github.com/NanmiCoder/dsh-agent-teams
-[submodule "vendored/dsh-memento"]
-	path = vendored/dsh-memento
-	url = https://github.com/PerryLink/dsh-memento

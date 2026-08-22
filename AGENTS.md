@@ -12,7 +12,7 @@ DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**
 
 ```
 packages/   自研家族（packages/<plugin>/：package.json + tsconfig*.json + src/）
-vendored/   社区插件（git submodule 锁定；dst-* 前缀标记第三方）
+vendored/   社区插件清单（npm 安装 + lock 锁版本；见 Vendoring policy）
 profiles/   发行包 profile 模板：web=开发+正式 / web2=单插件测试（官方基线）/ web3=多插件测试（核心组合），各含 dsh.lock.json 版本锁
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
 docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
@@ -51,7 +51,7 @@ UI                         dsh-desk（四区布局平台 + 工具入口组装器
 ## 命名空间
 
 - `dsh-*` = 自研家族（packages/，发布 npm）；`dst-*` = vendored 第三方。
-- `vendored/dsh-web-ui` 保留社区原名（UI 全家桶来源，改造走 cordis.patch.yml 补丁层，不 fork）；`vendored/dsh-memento` 同样保留原名（LLM 记忆，社区组件）。
+- 社区包保留原名（vendored 不重命名，防与上游发布版脱钩）：dsh-web-ui（UI 全家桶来源，npm @linxin666）、dsh-memento（LLM 记忆）、dst-agent-teams（业务 app）；改造走 cordis.patch.yml 补丁层，不 fork。
 - 新增名字前查 npm + GitHub 占用（已有名字均已实查，见 `docs/architecture.md` §8）。
 
 ## 开发模式
@@ -106,10 +106,8 @@ UI                         dsh-desk（四区布局平台 + 工具入口组装器
 
 ## Vendoring policy
 
-- `vendored/` 用 git submodule 锁定 commit/tag，不 copy 源码进 git 历史（保留上游更新链路）。
-- **双模式**（2026-08 定）：
-  - 轻量单包（如 dst-agent-teams）：submodule 进 vendored/，profile 本地安装——完全锁定 + dst- 标记。
-  - 重量全家桶（如 dsh-web-ui 17 包）：submodule 锁源码快照（审查/补丁参考），**安装走 npm 发布版**（@linxin666 scope），`dsh.lock.json` 锁版本，改造走 profile 层 patch。
+- **统一 npm 安装**（2026-08 改）：vendored 插件走 `dependencies`（npm 发布版）+ `dsh.lock.json` 锁版本 + 改造走 `cordis.patch.yml` 补丁层——**不再用 submodule**（dsh-memento / dst-agent-teams 原为轻量单包 submodule，npm 有发布版即用 npm，submodule 已移除）。
+- submodule 仅保留给**无 npm 发布版或需深度改造审查**的例外（当前无）。
 - 改造走 `cordis.patch.yml` 补丁层，**不 fork**。
 - License 红线：Apache-2.0/MIT 可直接 vendored；AGPL 只可参考设计不可引入；CC BY-NC-SA 商用需剔除（如 dsh-web-ui 的 Maid Atelier 皮肤）。
 - 具体清单与例外见 `docs/architecture.md` §5 与 `docs/community-reference.md`。

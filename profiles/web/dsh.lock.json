@@ -20,8 +20,8 @@
     "@linxin666/dsh-client-ui-skill-explorer": "0.2.9"
   },
   "vendored": {
-    "dst-agent-teams": "0.1.10",
-    "dsh-memento": "0.4.3",
+    "dsh-memento": "0.4.4",
+    "@nanmicoder/dsh-agent-teams": "0.1.12",
     "dsh-web-ui": "0.2.6(npm @linxin666)",
     "dsh-gateway": "1.6.0",
     "dsh-update-checker": "TBD",

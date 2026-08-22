@@ -223,9 +223,9 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | --- | --- | --- | --- |
 | dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（better-sidebar 侧边栏 / 布局；**不含 skin-center，皮肤否决**）+ 功能应用（task-board 任务看板 / git-graph / ssh / skill-explorer；**v1 引入 5 包**） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除——不装皮肤则无关） |
 | better-sidebar（omdsh-dev） | UI | 侧边栏框架（文件/编辑器/终端/Git 面板），registerTab/registerFileViewer 扩展点 | MIT；全家桶已集成，也可独立引入 |
-| dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
+| dst-agent-teams（@nanmicoder） | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员**；npm 安装 + lock 锁版本（v0.1.12） |
 | dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
-| dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.3 活跃）；纯本地；**消费方 = agent 会话/上层插件经 ctx.memory 运行时使用（非 type-only 协作）**；官方无 memory，社区填补 |
+| dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.4 活跃）；纯本地；npm 安装 + lock 锁版本；**消费方 = agent 会话/上层插件经 ctx.memory 运行时使用（非 type-only 协作）**；官方无 memory，社区填补 |
 | dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | console 总览复用 |
 
 > **已移除/已实现**：dsh-topbar-manager（顶栏治理）删除——nav/tabs 直接注入顶栏，不设统一注册表；dsh-update-checker（升级/备份/回滚）删除——作为 dsh-console 遗留项（console 生命周期未来补）；dsh-agent-relay（HMAC 事件总线骨架）submodule 移除——仅作 channel 设计蓝本，事件总线已由 channel 自研实现；dsh-daemon 已实现——**融入 dsh-console 的 daemon 角色**（守护进程：本机实例 spawn/kill/追踪/重启三分支/busy 锁，控制面在 console）。
@@ -303,7 +303,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - dsh-hub → **`dsh-console`**（总览/管理/编排控制台；dsh-cockpit 已被 npm 占用，排除）
 - dsh-session-tabs → **`dsh-tabs`**（短、与 dsh-quick-nav 风格统一；npm/GitHub 均无占用）
 - dsh-web-ui2 → **`dsh-desk`**（个人化工作台语义，呼应"实例皆 personal"哲学；dsh-ui 被 2021 空壳包占用、dsh-toolkits 与 dsh-plugins 集合概念混淆、dsh-web-ui2 为将就续作名、dsh-fleet-ui 社区已有 dsh-fleet 系列、dsh-distributed-ui 过于学术；npm/GitHub 均无占用）
-- 社区全家桶：**vendored/dsh-web-ui**（submodule 锁定社区原版，保留原名，改造走 cordis.patch.yml 补丁层，不 fork）
+- 社区全家桶：**dsh-web-ui（@linxin666 npm）**（npm 安装 + lock 锁版本，保留原名，改造走 cordis.patch.yml 补丁层，不 fork）
 
 ---
 
@@ -322,6 +322,6 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [x] ~~升级回滚策略~~（已定 2026-08）：升级前快照（bundles+lock+patch）→ patch 校验（失败默认回滚/管理员确认可跳过）→ 滚动重启 → 心跳确认 → 失败自动回滚，**保留 3 份**——参考 dsh-update-checker
 - [x] ~~总览 UI 归属~~（已定 2026-08）：console **纯服务端**，总览界面独立为 UI 层 **dsh-console-ui**
 - [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
-- [x] ~~vendored submodule 机制落地~~（已定 2026-08）：dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装 + lock 锁版本 + patch 层改造
+- [x] ~~vendored 机制落地~~（已定 2026-08 → **2026-08 改统一 npm**）：原"dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装"——**已改为统一 npm 安装 + lock 锁版本**（dsh-memento / dst-agent-teams npm 均有发布版，submodule 已移除；见 Vendoring policy）
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合
 - [ ] **全家桶工具入口组装边界**（2026-08 提出，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；未定项——① 官方 slots 型插件（git-graph/better-sidebar）的组装语义 ② CSS 覆盖脆弱边界（类名 hash 变/inline 失效时的回退策略）③ 组装配置化（间距/显隐/顺序进设置页，默认与官方一致）④ rail 折叠态真实验证 ⑤ 通用性声明 vs 显式选择器列表
