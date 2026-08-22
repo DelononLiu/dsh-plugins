@@ -210,20 +210,37 @@ export function apply(ctx: ClientContext): void {
   document.addEventListener('click', onClickCapture, true)
   ctx.effect(() => () => document.removeEventListener('click', onClickCapture, true), 'dsh-tabs: tab click delegation')
 
-  // —— Alt+P：固定/取消固定当前会话（事件 5/6） ——
+  // —— Alt+P 固定/取消固定；Alt+1..9 切到第 N 个固定 tab ——
   const onKeyDown = (e: KeyboardEvent): void => {
-    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.code !== 'KeyP') return
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+    // Alt+P：固定/取消固定当前会话（事件 5/6）。
+    if (e.code === 'KeyP') {
+      e.preventDefault()
+      const current = ctx.sessions.list.getSnapshot().current
+      if (current === undefined) return
+      const pinned = pinnedOf()
+      const isPinned = pinned.includes(current as never)
+      settings.set('pinned', isPinned
+        ? pinned.filter((id) => id !== current)
+        : [...pinned, String(current)])
+      // 固定 → 会话 tab 划线（记忆保持）；取消固定 → 官方划线 + 记忆当前。
+      officialView = isPinned
+      if (isPinned) dialogSession = String(current)
+      applyActive()
+      return
+    }
+    // Alt+1..9（主键盘/Numpad）：切到第 N 个固定会话 tab。
+    const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code)?.[1]
+    if (digit === undefined) return
     e.preventDefault()
-    const current = ctx.sessions.list.getSnapshot().current
-    if (current === undefined) return
-    const pinned = pinnedOf()
-    const isPinned = pinned.includes(current as never)
-    settings.set('pinned', isPinned
-      ? pinned.filter((id) => id !== current)
-      : [...pinned, String(current)])
-    // 固定 → 会话 tab 划线（记忆保持）；取消固定 → 官方划线 + 记忆当前。
-    officialView = isPinned
-    if (isPinned) dialogSession = String(current)
+    const index = Number(digit) - 1
+    const list = ctx.sessions.list.getSnapshot()
+    const pinnedExisting = [...new Set(pinnedOf())].filter((id) => list.ids.includes(id as never))
+    const target = pinnedExisting[index]
+    if (target === undefined) return
+    ctx.sessions.open(target as never)
+    // 切到固定会话 → 会话 tab 划线（open 触发的 onCurrentChange 也会设，这里兜底）。
+    officialView = false
     applyActive()
   }
   window.addEventListener('keydown', onKeyDown)
