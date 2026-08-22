@@ -37,7 +37,7 @@ pnpm test         # pnpm -r test
 业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
 UI                         dsh-desk（四区布局平台 + 工具入口组装器）· dsh-quick-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
 管理组件                    dsh-console（档案/生命周期/部署编排/inbox，升级回滚为遗留项）+ 社区 dsh-prometheus
-系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· 远程访问（社区）· LLM 记忆（社区 dsh-memento）
+系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· LLM 记忆（社区 dsh-memento）
 内核                        官方 deepseek-harness（rc 锁定）
 ```
 
@@ -46,7 +46,7 @@ UI                         dsh-desk（四区布局平台 + 工具入口组装器
 - **控制面/执行面分离**：console 只编排决策，远程 agent 本地执行，SSH 仅一次性引导。
 - **UI 默认与官方一致（抄官方）**：任何 UI 元素以官方对应组件（DOM 结构 / CSS 机制 / 属性值）为唯一基准，默认直接照抄，不手写近似、不自由发挥——官方组件实现即样式契约（见 [.agents/notes/implemented/process/2026-08-22-ui-official-alignment.md](.agents/notes/implemented/process/2026-08-22-ui-official-alignment.md)）。
 - **UI 可替换**：UI 层不进入核心契约。
-- **自研边界**：系统层自研核心（dsh-user 身份模型 + dsh-channel 通信），**认证网关与远程访问采用社区 vendored**（接入件可替换）；管理组件自研主体 + 社区通用能力；UI/业务 app 以社区为主。完整矩阵见 `docs/architecture.md` §5。
+- **自研边界**：系统层自研核心（dsh-user 身份模型 + dsh-channel 通信），**认证网关采用社区 vendored**（接入件可替换）；管理组件自研主体 + 社区通用能力；UI/业务 app 以社区为主。完整矩阵见 `docs/architecture.md` §5。
 
 ## 命名空间
 

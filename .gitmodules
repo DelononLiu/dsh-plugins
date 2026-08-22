@@ -4,6 +4,3 @@
 [submodule "vendored/dsh-memento"]
 	path = vendored/dsh-memento
 	url = https://github.com/PerryLink/dsh-memento
-[submodule "vendored/dsh-agent-relay"]
-	path = vendored/dsh-agent-relay
-	url = https://github.com/Noelune/dsh-agent-relay.git

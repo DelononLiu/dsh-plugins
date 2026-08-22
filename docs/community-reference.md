@@ -68,7 +68,6 @@
 | --- | --- | --- | --- |
 | [dsh-ssh](https://github.com/zhu1090093659/dsh-web-ui/tree/main/packages/dsh-ssh)（@linxin666/dsh-ssh，全家桶内） | 完整 SSH 运维：主机档案（~/.dsh/dsh-ssh.json）+连接池+Web 终端+SFTP+端口转发+集群并发执行，GUI 与 Agent 共享配置 | **SSH 引导与远程执行面板**：连接池复用（空闲 30min 断、重连≤3 次）；~/.ssh/config 导入+ProxyJump；ssh_list/exec/upload/download/tunnel/cluster 六工具与 GUI 共用配置（"console 只编排、agent 本地执行"形态）；安全模型（/api/* 仅 loopback、隧道只听 127.0.0.1、改连接字段立即断旧凭据） | Apache-2.0 |
 | [chenkai2/dsh-daemon](https://github.com/chenkai2/dsh-daemon)（npm @chenkai114） | dsh web 注册为自启自愈后台服务：LaunchAgent/systemd/cron、watchdog 每 30s 健康检查 /health、连续 3 次失败重启（watchdog 为独立生成脚本） | **headless host 常驻/守护**：守护用独立 watchdog+ /health 端点（不依赖插件进程内存存活——"常驻"做成可验证契约）；dsh_daemon_install 等 7 工具让 agent 自助完成守护安装（契合"引导装最小 agent"后自举）。备选 [gitsang/dsh-daemon](https://github.com/gitsang/dsh-daemon)：systemd --user+独立管理 profile、拒绝 --host 0.0.0.0 | MIT |
-| [Blank-not-black/dsh-Remote](https://github.com/Blank-not-black/dsh-Remote)（npm dsh-remote-plugin） | 口袋控制台：会话/审批/提问/文件传输，局域网/Tailscale 直连、多服务器自动选优、Token 鉴权、网关随 DSH 自动启停（systemd 独立单元） | 多服务器自动选优（对应多主机 channel 选路与健康探测）；远程审批移动端化；网关随 DSH 生命周期启停+抽屉直显令牌/设备状态（"网关与宿主同生命周期"可抄模式）；Tailscale/局域网直连避免公网暴露 | MIT |
 | [bruc3van/dsh-desktop](https://github.com/bruc3van/dsh-desktop) | 独立桌面客户端：官方 Web UI 原封不动、长任务常驻托盘、精选插件先审查再安装 | "官方 UI 原封不动+宿主壳层"；**插件先审查再安装的供应链控制**（对应 vendored 审查与发行包 patch 层）；托盘常驻长任务=桌面侧"常驻 agent"最小形态 | MIT |
 
 ## 对未定项的回应
