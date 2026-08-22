@@ -11,7 +11,7 @@ UI 平台（四区布局 + 插件组合自定义）的 host 服务与布局配�
 **实现落地（2026-08-21）**：MyUiService 类插件（static Config + default export，cordis 自动注册 ctx.myUi）：
 - 四区布局配置（topbar/tabs/sidebar/actions 的 visible/order/size），Config schema（实例级本地配置，cordis.yml 可配）。
 - `ctx.myUi.layout()` / `ctx.myUi.region()`：布局查询（默认布局 DEFAULT_LAYOUT，自定义覆盖）。
-- 聚合职责：dependencies 拉入 dsh-nav / dsh-tabs（meta 包）。
+- 聚合职责：dependencies 拉入 dsh-quick-nav / dsh-tabs（meta 包）。
 - client 半区最小注册骨架（布局应用列入 client 集成步）。
 - 3 项单测通过（默认/自定义/单区查询）。
 

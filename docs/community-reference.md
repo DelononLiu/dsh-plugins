@@ -38,7 +38,7 @@
 | [zoahdev/dsh-plugin-doctor](https://github.com/zoahdev/dsh-plugin-doctor) | 插件健康检查：manifest/patch/entry/build/pack+全新 profile 安装验证+环境诊断（RFC #1629 dsh plugin check 先行） | **发行包质量门禁**：每条检查绑定真实事故编号；--full 模式在全新 profile 跑 pack→install→dump-config——版本锁校验+CI 冒烟可直接借鉴 | MIT |
 | [xxiaoxiong/dsh-prometheus](https://github.com/xxiaoxiong/dsh-prometheus) | 有界 Prometheus 指标（会话/回合/LLM/工具/审批/子代理/后台任务）+ Grafana dashboard，默认 loopback-only | **总览数据面**：指标刻意有界、命名语义独立成文档、不导出 payload——多实例总览聚合复用同一指标面，避免逐插件私有指标模型 | MIT |
 
-## UI · 导航与会话（dsh-nav / dsh-tabs）
+## UI · 导航与会话（dsh-quick-nav / dsh-tabs）
 
 | 参考 | 定位 | 借鉴点 | License |
 | --- | --- | --- | --- |

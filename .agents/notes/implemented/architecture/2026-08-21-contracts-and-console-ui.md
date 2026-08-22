@@ -14,8 +14,8 @@ Status: implemented
 
 - **dsh-channel = 实例服务提供者**：定义实例类型（id/name/addr/status/health）+ 暴露发现/心跳/状态服务（@Remote，host 面）——实例是通信层发现的对象，放 channel 名正言顺。
 - **dsh-console = 实例管理服务提供者**：定义管理档案类型（在 channel 实例类型上扩展 owner/type/host/version）+ 暴露生命周期/部署服务。
-- **dsh-nav / dsh-console-ui = 消费者**：`import type` 引用提供者类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用（client 面）：
-  - dsh-nav → channel（导航只需实例身份/状态，依赖降到系统层）
+- **dsh-quick-nav / dsh-console-ui = 消费者**：`import type` 引用提供者类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用（client 面）：
+  - dsh-quick-nav → channel（导航只需实例身份/状态，依赖降到系统层）
   - dsh-console-ui → console（管理界面）
 - 依赖方向向下；"一套概念模型"由提供者唯一定义类型保证。
 

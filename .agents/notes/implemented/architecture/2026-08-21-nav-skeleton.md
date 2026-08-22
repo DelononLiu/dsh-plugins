@@ -1,4 +1,4 @@
-# Agent Note: dsh-nav 骨架（可加载版）
+# Agent Note: dsh-quick-nav 骨架（可加载版）
 
 Status: implemented
 
@@ -16,4 +16,4 @@ Status: implemented
 
 ## Consequences
 
-- dsh-nav 可加载（host + client + 依赖），typecheck/build 通过；顶栏渲染列入 client 集成步。
+- dsh-quick-nav 可加载（host + client + 依赖），typecheck/build 通过；顶栏渲染列入 client 集成步。
