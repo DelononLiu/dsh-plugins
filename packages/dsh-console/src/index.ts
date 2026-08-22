@@ -9,7 +9,7 @@
  * - instance：实例自退兜底——收到 stop/restart 退出进程（执行面）。
  *
  * 实例管理服务提供者：`InstanceRecord` 在 channel 的 `InstanceIdentity` 上
- * 扩展 owner/type/host/version；消费者（dsh-console-ui / dsh-quick-nav）经
+ * 扩展 owner/type/host/version；消费者（dsh-quick-nav 等）经
  * type-only import + Typert ctx.remote 消费（运行时零依赖）。
  *
  * v1 为**进程内实现**：档案与 inbox 存内存（持久化后续）；生命周期指令经

@@ -10,7 +10,7 @@ Status: proposed
 
 - **链路已通**（feat/channel-link 已验证）：web2 console.controlInstance('web3','restart') → channel.sendControl 经 broker → web3 agent 执行器 → 重启
 - **dsh-console**：纯服务端（档案/inbox/controlInstance）——无 UI
-- **dsh-console-ui**：仅「Console」徽标（header.actions 按钮 + 占位浮层）
+- **dsh-console（原 dsh-console-ui 并入）**：仅「Console」徽标（header.actions 按钮 + 占位浮层）
 - **缺口**：client（浏览器 UI）拿不到 host 的实例数据、调不了 host 的控制方法——**需要 client→host 通道**（远程化）
 
 ## 方案

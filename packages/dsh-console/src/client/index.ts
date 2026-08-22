@@ -1,5 +1,5 @@
 /**
- * dsh-console-ui：总览/管理界面（client 半区）。
+ * dsh-console：管理组件 client 半区（原 dsh-console-ui 并入，UI 与实现同包）。
  *
  * v1 可见 UI：在左侧栏底部（sidebar.footer.action，设置上方）注册
  * 「Console」徽标按钮入口。数据面（实例列表/控制指令/broker 状态经

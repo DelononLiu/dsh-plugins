@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-dsh-console-ui 控制台按钮与侧栏官方「设置」按钮样式不一致，反复调整 8+ 轮才对齐。根因链：
+dsh-console 控制台按钮与侧栏官方「设置」按钮样式不一致，反复调整 8+ 轮才对齐。根因链：
 
 - 按钮样式**手写近似值**（高度 32px、圆角 8 等靠猜），而官方设置按钮（`dsh-client-ui-settings-general .trigger`）是现成的标准答案——每猜一次错一次；
 - 现象「hover 只盖文字区域」被误判为 hover 机制问题（React state / CSS :hover / inline 覆盖来回折腾），**真根因是按钮宽度没占满整行**：外层 `span` 是 `inline-flex`（宽度=内容），按钮 `width: calc(100% + 4px)` 相对它解析成文字宽——hover 一直触发，只是背景区域=按钮宽度；
@@ -26,7 +26,7 @@ dsh-console-ui 控制台按钮与侧栏官方「设置」按钮样式不一致�
 
 ## Consequences
 
-- 后续 UI 插件开发照此执行；控制台按钮（dsh-console-ui）即范例：`span` 展开态 `display:flex; width:100%`（等效 `settingsArea` 全宽）+ 按钮纯 `className`（模块顶层注入样式表，`:hover` 同表覆盖）。
+- 后续 UI 插件开发照此执行；控制台按钮（dsh-console，原 dsh-console-ui 并入）即范例：`span` 展开态 `display:flex; width:100%`（等效 `settingsArea` 全宽）+ 按钮纯 `className`（模块顶层注入样式表，`:hover` 同表覆盖）。
 - 与官方组件不一致的排查顺序：先对比官方实现结构差异（DOM 包裹/容器宽度），再查属性值，最后才怀疑触发机制。
 - 环境无浏览器验证时，先索要截图再改。
 

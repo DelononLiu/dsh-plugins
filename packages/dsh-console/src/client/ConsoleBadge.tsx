@@ -17,10 +17,10 @@ const CONSOLE_TRIGGER_CSS = [
   '.dsh-console-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}',
   '.dsh-console-trigger--rail{border-radius:50%;justify-content:center;gap:0;width:36px;height:36px;margin:8px 0 10px;padding:0}',
 ].join('')
-if (typeof document !== 'undefined' && !document.querySelector('style[data-plugin-css="@dsh-console-ui/ConsoleBadge"]')) {
+if (typeof document !== 'undefined' && !document.querySelector('style[data-plugin-css="@dsh-console/ConsoleBadge"]')) {
   const tag = document.createElement('style')
-  tag.dataset.plugin = 'dsh-console-ui'
-  tag.dataset.pluginCss = '@dsh-console-ui/ConsoleBadge'
+  tag.dataset.plugin = 'dsh-console'
+  tag.dataset.pluginCss = '@dsh-console/ConsoleBadge'
   tag.textContent = CONSOLE_TRIGGER_CSS
   document.head.appendChild(tag)
 }
