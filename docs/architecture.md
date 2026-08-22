@@ -223,12 +223,11 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | better-sidebar（omdsh-dev） | UI | 侧边栏框架（文件/编辑器/终端/Git 面板），registerTab/registerFileViewer 扩展点 | MIT；全家桶已集成，也可独立引入 |
 | dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
 | dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
-| dsh-remote-web-ui（全家桶内） | 系统·远程访问 | 局域网扫码配对远程控制（SSH 同步、令牌门控） | ✅ 已选定（2026-08）；零额外 vendored；dsh-relay 作跨网扩展参考（v2） |
 | dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.3 活跃）；纯本地；**消费方 = agent 会话/上层插件经 ctx.memory 运行时使用（非 type-only 协作）**；官方无 memory，社区填补 |
 | dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | console 总览复用 |
 | dsh-agent-relay | 系统·通信（可选） | HMAC 事件总线骨架 | 若 channel 事件总线直接采用 |
 
-> **已移除/已实现**：dsh-topbar-manager（顶栏治理）删除——nav/tabs 直接注入顶栏，不设统一注册表；dsh-update-checker（升级/备份/回滚）删除——作为 dsh-console 遗留项（console 生命周期未来补）；dsh-daemon 已实现——**融入 dsh-console 的 daemon 角色**（守护进程：本机实例 spawn/kill/追踪/重启三分支/busy 锁，控制面在 console）。
+> **已移除/已实现**：dsh-topbar-manager（顶栏治理）删除——nav/tabs 直接注入顶栏，不设统一注册表；dsh-update-checker（升级/备份/回滚）删除——作为 dsh-console 遗留项（console 生命周期未来补）；dsh-remote-web-ui（外部设备访问控制）删除——不需要；dsh-daemon 已实现——**融入 dsh-console 的 daemon 角色**（守护进程：本机实例 spawn/kill/追踪/重启三分支/busy 锁，控制面在 console）。
 
 ### 设计参考（不引入，只借鉴）
 
@@ -314,7 +313,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 - [x] ~~身份模型的具体机制~~（已定 2026-08）：`ctx.user.current()` → User{id,name,roles}；身份来源可插拔（网关注入 header / 静态配置）；角色 admin/member/guest；授权查询 instanceAccess + console 校验
 - [x] ~~认证网关选型~~（已定 2026-08）：**dsh-gateway（clarknu）** 为主选（成熟/多站点/fail-closed/热生效），dsh-webui-auth 安全手法作补强参考；vendored 实测二选一
-- [x] ~~远程访问选型~~（已定 2026-08）：**dsh-remote-web-ui（全家桶内）** 为主（局域网扫码配对，零额外 vendored）；dsh-relay（Wire-Trunk）作跨网扩展参考（v2）
+- [x] ~~远程访问选型~~（已定 2026-08 → **已否决** 2026-08）：dsh-remote-web-ui（外部设备访问控制）不需要；「远程工作区」（跨实例/跨设备继续会话与工作区）为另一需求，映射 channel session 平面（设计预留，未实现）
 - [x] ~~通道鉴权细节~~（已定 2026-08）：agent↔console 用**实例令牌**（bootstrap 注入，32 hex）+ 操作级鉴权；令牌与用户会话分离；浏览器端走网关 cookie（WS 无法带 Authorization 的解法）
 - [x] ~~事件总线传输与投递语义~~（已定 2026-08）：**at-least-once + UUID 幂等去重 + 7 天 TTL + 指数退避**；事件三平面分类 control（request/ack）/ task（幂等）/ session（仅显式共享）——参考 dsh-agent-relay / dsh-weave
 - [x] ~~权限模型细节~~（已定 2026-08）：角色 admin/member/guest；shared 实例 owner 授权（可访问/只读）；操作分级（查看 member+ / 控制 owner·admin / 部署·主机管理 admin）——参考 dsh-passwords
