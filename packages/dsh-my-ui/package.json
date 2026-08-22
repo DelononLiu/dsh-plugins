@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.0.0",
-    "dsh-nav": "workspace:*",
+    "dsh-quick-nav": "workspace:*",
     "dsh-tabs": "workspace:*"
   },
   "peerDependencies": {

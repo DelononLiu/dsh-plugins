@@ -12,7 +12,7 @@
         "dsh-user",
         "dsh-channel",
         "dsh-console",
-        "dsh-nav",
+        "dsh-quick-nav",
         "dsh-tabs"
       ]
     }
