@@ -16,8 +16,9 @@
 ├─ UI（可替换）────────────────────────────────────────┤
 │   dsh-desk：UI 平台（四区布局/插件组合自定义；         │
 │   不做换肤——皮肤否决；meta-package；"我的"=personal）  │
-│   dsh-quick-nav · dsh-tabs · dsh-console-ui · 各界面        │
-│   消费管理组件与系统数据，不定义模型                   │
+│   dsh-quick-nav · dsh-tabs · 各界面（console UI 并入   │
+│   dsh-console client 半区）· 消费管理组件与系统数据，   │
+│   不定义模型                                          │
 ├─ 管理组件（自研核心）─────────────────────────────────┤
 │   dsh-console：主机/实例档案 · 生命周期 · 部署编排 ·    │
 │   inbox/投递（v1 承载，未来可独立为业务 app）· 总览     │
@@ -48,9 +49,7 @@
 
 - **dsh-channel = 实例服务提供者**：定义实例类型（id/name/addr/status/health）+ 暴露发现/心跳/状态服务（@Remote，host 面）——实例是通信层发现的对象，放 channel 名正言顺。
 - **dsh-console = 实例管理服务提供者**：定义管理档案类型（在 channel 的实例类型上扩展 owner/type/host/version）+ 暴露生命周期/部署服务。
-- **dsh-quick-nav / dsh-console-ui = 消费者**：`import type` 引用提供者的类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用服务（client 面）：
-  - dsh-quick-nav → channel（导航只需实例身份/状态，依赖降到系统层）
-  - dsh-console-ui → console（管理界面）
+- **dsh-quick-nav = 消费者**：`import type` 引用提供者的类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用服务（client 面）；dsh-quick-nav → channel（导航只需实例身份/状态，依赖降到系统层）；**console-ui 已并入 dsh-console 包**（client 半区），其管理界面消费同一 console 服务面。
 - 依赖方向向下；"一套概念模型"由提供者唯一定义类型保证。
 
 ### UI 四区布局（2026-08 定）
@@ -218,13 +217,13 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 | 插件 | 层 | 职责 | 状态 |
 | --- | --- | --- | --- |
-| dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；认证实现已拆出走认证网关 | 设计（试装过 web2/web3） |
-| dsh-channel | 系统·通信 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令（远程管理）；**实例服务提供者**（实例类型 + 发现/状态服务） | 设计（P1） |
-| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | 重新设计 |
-| dsh-console-ui | UI | 总览/管理界面（四区：左侧按钮区入口 + 内容区），消费 console 服务（type-only + ctx.remote） | 新立 |
-| dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
-| dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
-| dsh-desk | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：全家桶 entry 摆位到 foot 区控制台上方 + 样式对齐官方契约）** | 组装器已实现 |
+| dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；认证实现已拆出走认证网关 | ✅ 已实现（13 测试；网关对接预留，见 §9） |
+| dsh-channel | 系统·通信 | 发现/心跳、事件总线（at-least-once/幂等/TTL/三平面）、鉴权、控制指令；**实例服务提供者**（实例类型 + 发现/状态服务） | ✅ 已实现（29 测试；Typert 远程化未接入——跨实例走 relay+HTTP，见 §9） |
+| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | ✅ 已实现（37 测试 + 3 HTTP 端点 instances/control/broker；daemon/instance 三角色；升级回滚为遗留项，见 §9） |
+| dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示） | ✅ 已并入（非独立包） |
+| dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ✅ 已上线三端（2 测试） |
+| dsh-tabs | UI | 固定会话标签页（Alt+P 固定/取消、× 关闭、编号标题） | ✅ 已实现（2 测试，web2 验证） |
+| dsh-desk | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：全家桶 entry 摆位到 foot 区控制台上方 + 样式对齐官方契约）** | ✅ 组装器已实现（10 测试）；四区布局配置开关待消费方，见 §9 |
 
 > dsh-quick-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
 
@@ -331,7 +330,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [x] ~~局域网内的发现方式~~（**否决** 2026-08）：不做局域网自动发现（mDNS 广播）——实例发现 = **agent 主动注册 + console 已知地址列表**（主机登记时手配地址）
 - [x] ~~实例档案共享契约载体~~（已定 2026-08，最终表述）：**不提"契约"概念**——插件协作模式：dsh-channel 提供实例服务（类型+发现/状态），dsh-console 提供管理服务（扩展类型+生命周期），nav 消费 channel、console-ui 消费 console（`import type` + `ctx.remote`）
 - [x] ~~升级回滚策略~~（已定 2026-08）：升级前快照（bundles+lock+patch）→ patch 校验（失败默认回滚/管理员确认可跳过）→ 滚动重启 → 心跳确认 → 失败自动回滚，**保留 3 份**——参考 dsh-update-checker
-- [x] ~~总览 UI 归属~~（已定 2026-08）：console **纯服务端**，总览界面独立为 UI 层 **dsh-console-ui**
+- [x] ~~总览 UI 归属~~（已定 2026-08 → **2026-08 并入 console**）：原"console 纯服务端、总览界面独立为 dsh-console-ui"——**已并入 dsh-console 包**（client 半区：ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示）；无独立 dsh-console-ui 包
 - [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored 机制落地~~（已定 2026-08 → **2026-08 改统一 npm**）：原"dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装"——**已改为统一 npm 安装 + lock 锁版本**（dsh-memento / dst-agent-teams npm 均有发布版，submodule 已移除；见 Vendoring policy）
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合
