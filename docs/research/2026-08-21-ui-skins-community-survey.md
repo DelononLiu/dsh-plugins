@@ -1,6 +1,6 @@
 # 调研：UI 全家桶与皮肤层 · 社区可参考插件/设计
 
-> 调研日期：2026-08-21。面向【UI 全家桶与皮肤】层（对应组件：vendored dsh-web-ui → dsh-my-ui 布局/组合自定义）。**注：调研后（同日）皮肤中心已否决**——皮肤相关条目仅作调研快照，不构成采用决定。
+> 调研日期：2026-08-21。面向【UI 全家桶与皮肤】层（对应组件：vendored dsh-web-ui → dsh-desk 布局/组合自定义）。**注：调研后（同日）皮肤中心已否决**——皮肤相关条目仅作调研快照，不构成采用决定。
 > 数据源：GitHub API / raw.githubusercontent / npm registry 元数据（均为第一手核实，2026-08-21 时点）+ awesome-dsh-hub 机器可读 registry（2017 插件）。
 > 结论先行：**核心参考 = dsh-web-ui 全家桶（已知，已核实）+ 皮肤中心 v2 纯资产机制 + better-sidebar 服务化布局框架 + dsh-skin-switcher 双引擎协调 + dsh-plugin-pack-web 发行包清单格式**。
 
@@ -47,19 +47,19 @@
 
 ### 3.1 zhu1090093659/dsh-web-ui —— 全家桶来源（已知项，核实+补新）
 - url: https://github.com/zhu1090093659/dsh-web-ui | Apache-2.0（部分 BSD-3-Clause；1 皮肤 CC BY-NC-SA）
-- match: 我们 vendored 的 UI 全家桶来源（dsh-my-ui 布局/组合/皮肤）
+- match: 我们 vendored 的 UI 全家桶来源（dsh-desk 布局/组合/皮肤）
 - takeaway: ①16 插件 + skins 聚合层 + scripts/plugin-template 的"每样独立成包、可插拔、聚合包一键装齐"组织法；②所有包走官方 profile 机制、不改 DSH 源码、改造走 `dsh.bundle.patch`（= 我们的 cordis.patch.yml 补丁层）；③**聚合包把外部插件（dsh-better-sidebar）拼进全家桶**的先例；④皮肤与插件职责分离（插件管逻辑、皮肤管外观）。
 
 ### 3.2 omdsh-dev/DSH-better-sidebar —— 服务化侧边栏/布局框架（新增）
 - url: https://github.com/omdsh-dev/DSH-better-sidebar | MIT，974★（awesome-dsh-hub Web UI 增强 Top4，活跃：v0.14.1 适配 DSH 0.1.0-rc.8）
 - desc: 右侧栏 + 底部面板双工作台（文件/编辑器/内嵌浏览器/真实终端/Git 面板/后台任务），服务优先：`ctx.betterSidebar.registerTab/registerFileViewer` 与内置 tab/viewer 能力对等。
-- match: dsh-my-ui 的布局/组合能力 + "UI 可替换"边界；dsh-web-ui-all 已集成它为右侧面板。
+- match: dsh-desk 的布局/组合能力 + "UI 可替换"边界；dsh-web-ui-all 已集成它为右侧面板。
 - takeaway: ①布局/Tab/面板**按会话持久化**、陈旧状态自动净化（多会话多实例隔离的直接参考）；②~325KB 核心 + 重依赖按需加载；③拖 Tab 拆分/合并、移动端自动合并全宽抽屉；④外部插件经同一服务 API 注册——我们 UI 层的第三方扩展点可照此设计；⑤dsh-web-ui-all 拼外部插件的依赖集成模式。
 
 ### 3.3 @linxin666/dsh-client-ui-skin-center —— 皮肤中心 v2（新增，核心）
 - url: https://www.npmjs.com/package/@linxin666/dsh-client-ui-skin-center | Apache-2.0
 - desc: 唯一皮肤加载器；皮肤 = 纯资产目录（skin.json + skin.css L1/L2 + patches.css L3 + hooks.mjs），内建 + $DSH_HOME/skins 用户目录，fail-closed 校验，原子切换 + 首屏盖章。
-- match: dsh-my-ui 皮肤自定义（调研快照；**后续否决：皮肤中心不引入，功能优先**）
+- match: dsh-desk 皮肤自定义（调研快照；**后续否决：皮肤中心不引入，功能优先**）
 - takeaway: ①皮肤与官方彻底解耦、只与皮肤中心耦合——官方升级不牵动皮肤，新增皮肤只需落目录、免发布免安装（团队分发皮肤 = 拷贝目录/发皮肤包）；②fail-closed 校验 + 原子切换账本 = 换肤安全；③首屏盖章避免 FOUC；④刻意不走 cordis.patch.yml 重写（对比 3.4 的 legacy 路线）。
 
 ### 3.4 zhtx2024/dsh-skin-switcher —— 多皮肤引擎统一管理（新增）

@@ -14,7 +14,7 @@ Status: implemented
 3. **client 构建**：新增 `scripts/build-client.mjs`（esbuild bundle → iife → 包装成 ModuleLoader closure，external 由注入 require 提供）；4 个 client 插件（my-ui/console-ui/nav/tabs）build 脚本已接入。
 4. **测试环境 = 目录隔离**（用户要求）：web2/web3 用**独立 DSH_HOME**（`~/.dsh-web2`、`~/.dsh-web3`，`DSH_HOME=<dir> dsh --profile web` 启动），非共享 ~/.dsh 的 profile 隔离——sessions/settings/storages 完全隔离。独立 home 的 profile 用官方方式创建（`dsh plugin --profile web add`）。webserver 端口独立配置（避开正式 3080）。
 
-**验证结果**：独立环境（~/.dsh-web2）web profile 启动成功，4 个 host 插件（user/channel/console/my-ui）加载无错误；浏览器 `/plugins/dsh-my-ui/client.js` 返回官方格式 bundle；页面 200。
+**验证结果**：独立环境（~/.dsh-web2）web profile 启动成功，4 个 host 插件（user/channel/console/my-ui）加载无错误；浏览器 `/plugins/dsh-desk/client.js` 返回官方格式 bundle；页面 200。
 
 ## Consequences
 

@@ -1,4 +1,4 @@
-# dsh-my-ui 补丁层（占位）
+# dsh-desk 补丁层（占位）
 # 改造社区 dsh-web-ui 全家桶的补丁挂载点：配置覆盖、UI 插入点。
 # 格式：cordis loader patch 条目数组（id-targeted config overrides / disables / insert lists）。
 []

@@ -6,7 +6,7 @@
 
 DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**：自研核心插件（分层：系统/管理组件/UI）+ 社区聚合插件（vendored）+ 版本锁。
 
-核心价值 = **自定义化**：开箱即用是默认值，可自定义是核心能力，贯穿两层——实例（personal，类型可扩展）、UI（dsh-my-ui 布局/插件组合；**不做换肤，皮肤中心否决**）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
+核心价值 = **自定义化**：开箱即用是默认值，可自定义是核心能力，贯穿两层——实例（personal，类型可扩展）、UI（dsh-desk 布局/插件组合；**不做换肤，皮肤中心否决**）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
 
 ## 仓库布局
 
@@ -35,7 +35,7 @@ pnpm test         # pnpm -r test
 
 ```
 业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
-UI                         dsh-my-ui（四区布局平台）· dsh-quick-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
+UI                         dsh-desk（四区布局平台）· dsh-quick-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
 管理组件                    dsh-console（档案/生命周期/部署编排/inbox，升级回滚为遗留项）+ 社区 dsh-prometheus
 系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· 远程访问（社区）· LLM 记忆（社区 dsh-memento）
 内核                        官方 deepseek-harness（rc 锁定）
@@ -85,7 +85,7 @@ UI                         dsh-my-ui（四区布局平台）· dsh-quick-nav（�
 - **main 保持稳定基线**：小改动/文档可直接在 main 提交（原子、单功能）；**大功能（跨多文件/多提交）一律走 worktree 分支**，分支命名 `feat/<功能名>`。
 - 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
 - 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
-- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console → dsh-console-ui → dsh-quick-nav（type-only 依赖 channel）→ dsh-my-ui（聚合 nav/tabs）；**dsh-tabs 无内部依赖，独立**。无依赖关系的插件可并行。
+- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console → dsh-console-ui → dsh-quick-nav（type-only 依赖 channel）→ dsh-desk（聚合 nav/tabs）；**dsh-tabs 无内部依赖，独立**。无依赖关系的插件可并行。
 
 ## 提交规则（Commit Rules）
 

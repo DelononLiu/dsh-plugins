@@ -12,7 +12,7 @@
     "dsh-console": "0.0.0",
     "dsh-quick-nav": "0.0.0",
     "dsh-tabs": "0.0.0",
-    "dsh-my-ui": "0.0.0"
+    "dsh-desk": "0.0.0"
   },
   "vendored": {
     "dst-agent-teams": "0.1.10",

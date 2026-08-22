@@ -1,11 +1,11 @@
 /**
- * dsh-my-ui：UI 平台（host 面）——四区布局 + 插件组合自定义。
+ * dsh-desk：UI 平台（host 面）——四区布局 + 插件组合自定义。
  *
  * meta-package 定位：聚合 UI 插件（dsh-quick-nav / dsh-tabs），提供四区布局
  * （顶部/tab/侧边栏/左侧按钮区）的显隐/顺序/宽度配置（Config，实例级
  * 本地配置——cordis.yml 可配；"my"= personal 哲学，不做换肤）。
  * 浏览器半区经 exports["./client"] 提供。
- * @module dsh-my-ui
+ * @module dsh-desk
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'

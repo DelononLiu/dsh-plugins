@@ -1,4 +1,4 @@
-# Agent Note: dsh-my-ui 实现（平台服务 + 布局配置）
+# Agent Note: dsh-desk 实现（平台服务 + 布局配置）
 
 Status: implemented
 

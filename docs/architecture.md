@@ -14,7 +14,7 @@
 │  dst-agent-teams（多 Agent 协作编排，第一个成员）      │
 │  全家桶功能应用（task-board/ssh/git-graph…，按需组合） │
 ├─ UI（可替换）────────────────────────────────────────┤
-│   dsh-my-ui：UI 平台（四区布局/插件组合自定义；         │
+│   dsh-desk：UI 平台（四区布局/插件组合自定义；         │
 │   不做换肤——皮肤否决；meta-package；"我的"=personal）  │
 │   dsh-quick-nav · dsh-tabs · dsh-console-ui · 各界面        │
 │   消费管理组件与系统数据，不定义模型                   │
@@ -41,7 +41,7 @@
 - **系统**：基础设施能力（身份、通信），被上层消费，自身无业务含义。
 - **管理组件**：面向"系统/资源运维"的能力（主机、实例、部署、健康）——IT 管理面。
 - **UI**：界面层（布局、组件组合、导航、标签），消费管理组件与系统数据。
-- **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**首个成员：dst-agent-teams（vendored 协作应用）；全家桶功能应用（task-board/ssh/git-graph 等）随 vendored dsh-web-ui 拆分归入**；**跨层依赖严格向下，UI 层内部允许聚合依赖**（meta 包，如 dsh-my-ui）。
+- **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**首个成员：dst-agent-teams（vendored 协作应用）；全家桶功能应用（task-board/ssh/git-graph 等）随 vendored dsh-web-ui 拆分归入**；**跨层依赖严格向下，UI 层内部允许聚合依赖**（meta 包，如 dsh-desk）。
 
 ### 插件协作模式（服务定义 / 提供者 / 消费者）
 
@@ -80,16 +80,16 @@
 | 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
 | 左侧设置上方按钮区 | 功能区快捷入口（console 管理、inbox/投递、命令面板） | console 入口 + 快捷按钮 |
 
-**皮肤中心（dsh-web-ui 的 skin-center v2）不引入**：用户明确"不喜欢换皮肤，功能优先"；dsh-my-ui 自定义维度收敛为**布局 + 插件组合**（vendored 全家桶时可不装 skin-center 包）。
+**皮肤中心（dsh-web-ui 的 skin-center v2）不引入**：用户明确"不喜欢换皮肤，功能优先"；dsh-desk 自定义维度收敛为**布局 + 插件组合**（vendored 全家桶时可不装 skin-center 包）。
 
-**布局自定义机制**（2026-08 定，v1 从简）：插件组合走 cordis.patch.yml（DSH 原生）；四区布局调整（显隐/顺序/宽度）走 dsh-my-ui 的 Config 字段（cordis.yml 可配）+ 设置页开关（参考顶栏治理模式）；**布局配置按实例存**（每实例一套）——"每用户布局"（跨实例一致）留 v2（需用户级配置存储）。
+**布局自定义机制**（2026-08 定，v1 从简）：插件组合走 cordis.patch.yml（DSH 原生）；四区布局调整（显隐/顺序/宽度）走 dsh-desk 的 Config 字段（cordis.yml 可配）+ 设置页开关（参考顶栏治理模式）；**布局配置按实例存**（每实例一套）——"每用户布局"（跨实例一致）留 v2（需用户级配置存储）。
 
 ### 设计原则
 
 - **整体性**：一套概念模型（身份/主机/实例）贯穿所有层，不允许逐插件私有模型。
 - **控制面/执行面分离**：console 只编排决策，远程 agent 本地执行，SSH 仅用于一次性引导。
-- **UI 可替换**：UI 层纯消费层，社区插件随时可换，不进入核心契约。dsh-my-ui 是 meta-package 定位（类比 ubuntu-desktop：装一个 = 装齐业务插件集），非组件库、非脚手架。
-- **自定义化为核心**：开箱即用是默认值，可自定义是核心能力，贯穿两层——实例（personal 类型可扩展）、UI（dsh-my-ui 布局/插件组合自定义；**不做换肤，皮肤否决**）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
+- **UI 可替换**：UI 层纯消费层，社区插件随时可换，不进入核心契约。dsh-desk 是 meta-package 定位（类比 ubuntu-desktop：装一个 = 装齐业务插件集），非组件库、非脚手架。
+- **自定义化为核心**：开箱即用是默认值，可自定义是核心能力，贯穿两层——实例（personal 类型可扩展）、UI（dsh-desk 布局/插件组合自定义；**不做换肤，皮肤否决**）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
 - **命名空间**：`dsh-*` = 自研家族；`dst-*` = vendored 第三方（明确标记，非家族）。
 
 ---
@@ -211,7 +211,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | dsh-console-ui | UI | 总览/管理界面（四区：左侧按钮区入口 + 内容区），消费 console 服务（type-only + ctx.remote） | 新立 |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
 | dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
-| dsh-my-ui | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学 | 立项 |
+| dsh-desk | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学 | 立项 |
 
 > dsh-quick-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
 
@@ -302,7 +302,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - dsh-channel：**保留原名**（dsh- 前缀为自研家族标记，社区撞名不影响）
 - dsh-hub → **`dsh-console`**（总览/管理/编排控制台；dsh-cockpit 已被 npm 占用，排除）
 - dsh-session-tabs → **`dsh-tabs`**（短、与 dsh-quick-nav 风格统一；npm/GitHub 均无占用）
-- dsh-web-ui2 → **`dsh-my-ui`**（个人化工作台语义，呼应"实例皆 personal"哲学；dsh-ui 被 2021 空壳包占用、dsh-toolkits 与 dsh-plugins 集合概念混淆、dsh-web-ui2 为将就续作名、dsh-fleet-ui 社区已有 dsh-fleet 系列、dsh-distributed-ui 过于学术；npm/GitHub 均无占用）
+- dsh-web-ui2 → **`dsh-desk`**（个人化工作台语义，呼应"实例皆 personal"哲学；dsh-ui 被 2021 空壳包占用、dsh-toolkits 与 dsh-plugins 集合概念混淆、dsh-web-ui2 为将就续作名、dsh-fleet-ui 社区已有 dsh-fleet 系列、dsh-distributed-ui 过于学术；npm/GitHub 均无占用）
 - 社区全家桶：**vendored/dsh-web-ui**（submodule 锁定社区原版，保留原名，改造走 cordis.patch.yml 补丁层，不 fork）
 
 ---
@@ -324,4 +324,4 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [x] ~~总览 UI 归属~~（已定 2026-08）：console **纯服务端**，总览界面独立为 UI 层 **dsh-console-ui**
 - [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored submodule 机制落地~~（已定 2026-08）：dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装 + lock 锁版本 + patch 层改造
-- [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-my-ui 自定义维度=布局+插件组合
+- [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合

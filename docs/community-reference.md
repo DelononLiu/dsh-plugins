@@ -49,7 +49,7 @@
 | [HuanLinOTO/dsh-plugin-ya-workspace-sidebar](https://github.com/HuanLinOTO/dsh-plugin-ya-workspace-sidebar)（npm v0.3.1） | 工作区侧栏整体替代：顶部固定 5 条全局最近会话、日期分组、搜索/重命名/删除/Fork | cordis.patch.yml 禁用官方 ui-workspace 后整体替换（**与发行包 patch 层同思路**）；「全局最近会话置顶+日期分组」好 UX；预构建 lib/client.js+window.__ModuleLoader__.load() 发布流程可照抄 | **AGPL-3.0（只可参考设计，不可 vendored）** |
 | [0xsline/dsh-spotlight](https://github.com/0xsline/dsh-spotlight)（npm @0xsline/dsh-spotlight） | 键盘命令面板：⌘K 唤起、模糊搜索斜杠命令/最近会话/UI 动作/插件设置 | 「复用原生注册表」原则（只向原生斜杠菜单贡献 /spotlight 而非维护第二套）；干净生命周期（卸载清理事件/样式/DOM） | MIT |
 
-## UI · 全家桶与皮肤（dsh-my-ui / vendored dsh-web-ui）
+## UI · 全家桶与皮肤（dsh-desk / vendored dsh-web-ui）
 
 > 详细版（17 包逐包核实 + 皮肤中心 v2 完整契约）见 [docs/research/2026-08-21-ui-skins-community-survey.md](research/2026-08-21-ui-skins-community-survey.md)。
 
@@ -77,7 +77,7 @@
 | --- | --- |
 | **U2 版本锁格式** | dsh-plugin-pack-web 的 **Plugin Pack Schema v1**（{schemaVersion,id,name,version,plugins:[{id,name,kind,spec,repository}]}，spec 三种安装源）可直接参考扩为 dsh.lock.json |
 | **U3 升级回滚** | dsh-update-checker 的**备份→更新→回滚闭环**（/rollback、lockfile 持久化防静默回退、watchdog 探活、写路由 loopback+confirm） |
-| **U8 皮肤中心接入** | 皮肤中心 v2（皮肤=纯资产目录，团队分发=拷贝目录）+ dsh-skin-switcher（双引擎协调：单一管理权威+启动迁移）——直接作为 dsh-my-ui 皮肤自定义的接入方案 |
+| **U8 皮肤中心接入** | 皮肤中心 v2（皮肤=纯资产目录，团队分发=拷贝目录）+ dsh-skin-switcher（双引擎协调：单一管理权威+启动迁移）——直接作为 dsh-desk 皮肤自定义的接入方案 |
 
 ## 重要更正
 

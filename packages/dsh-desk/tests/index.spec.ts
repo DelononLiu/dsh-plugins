@@ -1,5 +1,5 @@
 /**
- * dsh-my-ui 行为测试：四区布局配置（默认/自定义/单区查询）。
+ * dsh-desk 行为测试：四区布局配置（默认/自定义/单区查询）。
  */
 
 import { describe, expect, it } from 'vitest'

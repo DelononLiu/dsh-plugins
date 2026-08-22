@@ -1,5 +1,5 @@
 /**
- * dsh-my-ui：UI 平台（client 半区）——布局设置（设置页 General 区）。
+ * dsh-desk：UI 平台（client 半区）——布局设置（设置页 General 区）。
  *
  * 经官方 settingsScope 读写 host 布局配置（my-ui-layout 命名空间），
  * 注册到设置页 settings.general.item（用户反馈：布局不进顶部，进设置）。

@@ -1,5 +1,5 @@
 {
-  "name": "dsh-my-ui",
+  "name": "dsh-desk",
   "version": "0.0.0",
   "description": "UI 平台：自定义 UI（四区布局/插件组合，不做换肤——皮肤否决）；默认全家桶（侧边栏/Git/文件浏览/任务看板），meta-package 定位，改造自社区 dsh-web-ui",
   "type": "module",
@@ -22,7 +22,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-my-ui",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-desk",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

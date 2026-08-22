@@ -17,7 +17,7 @@ Status: implemented
 | 管理 | 管理组件 | **dsh-console** | 原 dsh-hub（npm 被 @marecgents/dsh-hub 占、GitHub "hub"=插件市场语义垄断） |
 | 导航 | UI（档案读端） | **dsh-nav** | 无占用（社区 dsh-navbar 不同名） |
 | 标签页 | UI | **dsh-tabs** | 原 dsh-session-tabs（短、与 nav 风格统一） |
-| UI 平台 | UI | **dsh-my-ui** | 个人化语义，呼应"实例皆 personal + 自定义化核心"；dsh-ui（2021 空壳占）、toolkits（集合词混淆）、web-ui2（将就续作名）、fleet（社区 dsh-fleet 系列）、distributed（学术）均否决 |
+| UI 平台 | UI | **dsh-desk** | 个人化语义，呼应"实例皆 personal + 自定义化核心"；dsh-ui（2021 空壳占）、toolkits（集合词混淆）、web-ui2（将就续作名）、fleet（社区 dsh-fleet 系列）、distributed（学术）均否决 |
 | vendored | UI | **dst-agent-teams** | vendor 自 NanmiCoder/dsh-agent-teams（MIT），dst- 前缀标记第三方 |
 
 **命名规则**：`dsh-*` = 自研家族（发布 npm）；`dst-*` = vendored 第三方；**例外**：`vendored/dsh-web-ui` 保留社区原名（UI 全家桶来源，改名无意义）。新增名字前查 npm + GitHub 占用。
