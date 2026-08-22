@@ -1,7 +1,7 @@
 {
-  "name": "dsh-nav",
+  "name": "dsh-quick-nav",
   "version": "0.0.0",
-  "description": "UI·实例导航：顶栏实例快捷导航（跳转/在线状态），实例档案读端",
+  "description": "UI·快捷导航：顶栏实例快捷导航（跳转/在线状态），实例档案读端",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -21,7 +21,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-nav",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-quick-nav",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -36,11 +36,13 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.1-rc.2",
     "dsh-channel": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.1-rc.2",
     "@types/node": "^22.0.0",
     "typescript": "^5.0.0",
     "vitest": "^3.0.0",

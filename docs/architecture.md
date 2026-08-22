@@ -16,7 +16,7 @@
 ├─ UI（可替换）────────────────────────────────────────┤
 │   dsh-my-ui：UI 平台（四区布局/插件组合自定义；         │
 │   不做换肤——皮肤否决；meta-package；"我的"=personal）  │
-│   dsh-nav · dsh-tabs · dsh-console-ui · 各界面        │
+│   dsh-quick-nav · dsh-tabs · dsh-console-ui · 各界面        │
 │   消费管理组件与系统数据，不定义模型                   │
 ├─ 管理组件（自研核心）─────────────────────────────────┤
 │   dsh-console：主机/实例档案 · 生命周期 · 部署编排 ·    │
@@ -49,8 +49,8 @@
 
 - **dsh-channel = 实例服务提供者**：定义实例类型（id/name/addr/status/health）+ 暴露发现/心跳/状态服务（@Remote，host 面）——实例是通信层发现的对象，放 channel 名正言顺。
 - **dsh-console = 实例管理服务提供者**：定义管理档案类型（在 channel 的实例类型上扩展 owner/type/host/version）+ 暴露生命周期/部署服务。
-- **dsh-nav / dsh-console-ui = 消费者**：`import type` 引用提供者的类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用服务（client 面）：
-  - dsh-nav → channel（导航只需实例身份/状态，依赖降到系统层）
+- **dsh-quick-nav / dsh-console-ui = 消费者**：`import type` 引用提供者的类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用服务（client 面）：
+  - dsh-quick-nav → channel（导航只需实例身份/状态，依赖降到系统层）
   - dsh-console-ui → console（管理界面）
 - 依赖方向向下；"一套概念模型"由提供者唯一定义类型保证。
 
@@ -60,7 +60,7 @@
 
 ```
 ┌─ 顶部区域 ─────────────────────────────┐
-│  dsh-nav：实例导航（跳转/在线状态）+ 全局操作入口 │
+│  dsh-quick-nav：实例导航（跳转/在线状态）+ 全局操作入口 │
 ├──────────┬─────────────────────────────┤
 │ 侧边栏    │  tab 区                     │
 │ 工作区/   │  dsh-tabs：固定会话标签       │
@@ -75,7 +75,7 @@
 
 | 区域 | 职责 | 插件 |
 | --- | --- | --- |
-| 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-nav + 快捷操作 |
+| 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-quick-nav + 快捷操作 |
 | tab 区 | 会话级切换（固定标签 + Alt+1..9 跨工作区） | dsh-tabs |
 | 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
 | 左侧设置上方按钮区 | 功能区快捷入口（console 管理、inbox/投递、命令面板） | console 入口 + 快捷按钮 |
@@ -209,11 +209,11 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | dsh-channel | 系统·通信 | 发现/心跳、事件总线、鉴权、typert 远程调用、控制指令（远程管理）；**实例服务提供者**（实例类型 + 发现/状态服务） | 设计（P1） |
 | dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | 重新设计 |
 | dsh-console-ui | UI | 总览/管理界面（四区：左侧按钮区入口 + 内容区），消费 console 服务（type-only + ctx.remote） | 新立 |
-| dsh-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
+| dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
 | dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
 | dsh-my-ui | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学 | 立项 |
 
-> dsh-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
+> dsh-quick-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
 
 ### 社区直接采用（vendored，相似度极高不重复造）
 
@@ -296,14 +296,14 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | dsh-user | 无（官方 dsh-user-questions/-approval 为审批 seam，语义不同） | 无 | ✅ 可用 |
 | dsh-channel | 无 | ⚠️ ZinkLu/dsh-channel（IM 消息渠道：Telegram/微信/飞书） | ⚠️ 名字被占，语义不同（消息渠道 vs 跨实例通信） |
 | dsh-hub | ❌ @marecgents/dsh-hub（Tauri 桌面壳）、dsh-hub-oauth-gateway | ❌ 多个（均为插件市场/目录语义） | ❌ 必须改名 |
-| dsh-nav | 无 | 有 dsh-navbar（不同名） | ✅ 可用 |
+| dsh-quick-nav | 无 | 有 dsh-quick-navbar（不同名） | ✅ 可用 |
 | dsh-session-tabs | 无 | 有 dsh-session-manager / dsh-side-session（不同名） | ✅ 可用 |
 | 发行包定位 | — | dsh-web-ui-all（个人全家桶）、dsh-plugin-pack-web（个人复刻包） | ✅ 团队发行包无同类 |
 
 **最终命名决定（2026-08 拍板）**：
 - dsh-channel：**保留原名**（dsh- 前缀为自研家族标记，社区撞名不影响）
 - dsh-hub → **`dsh-console`**（总览/管理/编排控制台；dsh-cockpit 已被 npm 占用，排除）
-- dsh-session-tabs → **`dsh-tabs`**（短、与 dsh-nav 风格统一；npm/GitHub 均无占用）
+- dsh-session-tabs → **`dsh-tabs`**（短、与 dsh-quick-nav 风格统一；npm/GitHub 均无占用）
 - dsh-web-ui2 → **`dsh-my-ui`**（个人化工作台语义，呼应"实例皆 personal"哲学；dsh-ui 被 2021 空壳包占用、dsh-toolkits 与 dsh-plugins 集合概念混淆、dsh-web-ui2 为将就续作名、dsh-fleet-ui 社区已有 dsh-fleet 系列、dsh-distributed-ui 过于学术；npm/GitHub 均无占用）
 - 社区全家桶：**vendored/dsh-web-ui**（submodule 锁定社区原版，保留原名，改造走 cordis.patch.yml 补丁层，不 fork）
 

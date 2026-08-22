@@ -13,7 +13,7 @@
         "dsh-channel",
         "dsh-console",
         "dsh-console-ui",
-        "dsh-nav",
+        "dsh-quick-nav",
         "dsh-tabs",
         "dsh-my-ui"
       ]

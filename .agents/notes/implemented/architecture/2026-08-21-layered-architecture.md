@@ -14,7 +14,7 @@ Status: implemented
 
 ```
 业务 app（当前无，预留）  面向用户业务价值的应用（协作/分析/工作流…）
-UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · dst-agent-teams · 各界面
+UI                         dsh-my-ui（UI 平台）· dsh-quick-nav · dsh-tabs · dst-agent-teams · 各界面
 管理组件                    dsh-console（主机/实例档案、生命周期、部署编排、inbox/投递）
 系统                        dsh-user（身份）· dsh-channel（通信）
 内核                        官方 deepseek-harness（rc 锁定）
@@ -29,7 +29,7 @@ UI                         dsh-my-ui（UI 平台）· dsh-nav · dsh-tabs · dst
 **自研边界原则**（2026-08 社区调研后定）：
 - 系统层：**dsh-user（身份模型）+ dsh-channel（通信）自研**（护城河）；**认证网关与远程访问采用社区 vendored**（接入件可替换，2026-08 用户确认）——认证从 dsh-user 拆出（dsh-user 变薄：只管用户/归属/授权基础接口），远程访问（对外暴露 UI/API）新纳入系统层。
 - 管理组件：自研主体（console），通用能力采用社区（dsh-update-checker 升级回滚、dsh-prometheus 指标）。
-- UI/业务 app：**以社区为主**（vendored），自研只做差异化（dsh-my-ui 平台、dsh-nav、dsh-tabs）。
+- UI/业务 app：**以社区为主**（vendored），自研只做差异化（dsh-my-ui 平台、dsh-quick-nav、dsh-tabs）。
 - 完整矩阵见 docs/architecture.md §5 分层×插件矩阵。
 
 配套纪律：

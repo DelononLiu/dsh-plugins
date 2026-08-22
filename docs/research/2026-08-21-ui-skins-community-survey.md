@@ -87,7 +87,7 @@ npm `@linxin666/dsh-web-ui-all@0.2.6` dependencies = 16 家族包 + **`dsh-bette
 ## 5. 其余值得留档的生态发现（不列短名单）
 
 - 皮肤/主题阵营（awesome-dsh-hub 收录 62 个"皮肤与娱乐"类）：`dsh-skin`（wei-806206088，MIT，CSS 变量 `--dsw-*` 驱动 + 5 图槽换肤 + 命名预设，`~/.dsh/dsh-skin-state.json` 持久化）；`KinGao294/dsh-skin`（MIT，`--dsw-alias-*` 调色板）；`suzike/freestyle-dsh-theme`（BSD-3-Clause，OKLCH 主题设计器跨重启持久化）；Catppuccin 系（NoNameLeGo/dsh-catppuccin、zhijun-dai/Catppuccin-dsh-theme）；`dsh-skin-manager`（xiaoyangcheng84-svg，MIT，skin.json 皮肤发现——与 skin-center 契约同构，说明 skin.json 是生态事实标准）；`dsh-skin-studio`（**AGPL-3.0，避开**）。
-- 布局类：`vlln/dsh-navbar`（MIT，会话节点导航条 → 我们 dsh-nav 参考）；`dsh-client-ui-mobile`（gihungdang，MIT，窄屏 CSS + 浮动导航）；`mexiaosqwq/dsh-web-mobile`（MIT，窄屏侧栏变 overlay 抽屉）；`HuanLinOTO/dsh-plugin-ya-workspace-sidebar`（工作区侧栏替代）。
+- 布局类：`vlln/dsh-navbar`（MIT，会话节点导航条 → 我们 dsh-quick-nav 参考）；`dsh-client-ui-mobile`（gihungdang，MIT，窄屏 CSS + 浮动导航）；`mexiaosqwq/dsh-web-mobile`（MIT，窄屏侧栏变 overlay 抽屉）；`HuanLinOTO/dsh-plugin-ya-workspace-sidebar`（工作区侧栏替代）。
 - 发行/管理类：`@dsh-suite/plugin-manager`（whyihaveyou/dsh-suite，MIT，插件应用商店：目录浏览/一键安装/兼容徽章）；`lire1131/dsh-undo-plugin`（MIT，插件/皮肤/设置快照回滚 → 升级回滚策略参考）；`dsh-gateway`（clarknu，MIT，HTTPS+登录网关，多实例远程访问）。
 - **双引擎格局**：皮肤中心 v2 资产引擎（免 cordis 重写）vs legacy patch 写入（cordis.patch.yml managed section）——dsh-skin-switcher 明确协调两者；我们接入时二选一并预留迁移（对应未定项 #8）。
 

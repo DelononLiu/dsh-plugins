@@ -1,5 +1,5 @@
 /**
- * dsh-nav：UI·实例导航（client 半区）。
+ * dsh-quick-nav：UI·实例导航（client 半区）。
  *
  * 顶部区域：实例快捷导航（跳转/在线状态）。v1 可见形态：显示「实例」
  * 入口 + 点击浮层列出占位实例（本机实例 + 提示）。真实实例列表
@@ -7,7 +7,7 @@
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import { InstanceNav } from './InstanceNav'
+import { QuickNav } from './QuickNav'
 
 /** 需要的 client 服务：插槽注册。 */
 export const inject = ['slots']
@@ -23,6 +23,6 @@ export function apply(ctx: ClientContext): void {
       name: 'conversation.session.header.actions',
       id: 'instance-nav',
       order: 5,
-    }, InstanceNav),
+    }, QuickNav),
   )
 }

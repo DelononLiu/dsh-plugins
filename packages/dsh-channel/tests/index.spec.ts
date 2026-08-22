@@ -5,7 +5,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ChannelService, EVENT_TTL_MS, type Config } from '../src/index.ts'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { ChannelService, EVENT_TTL_MS, isHostAgent, type Config } from '../src/index.ts'
 
 function boot(config: Partial<Config> = {}): ChannelService {
   return new ChannelService(new Context(), {
@@ -116,5 +119,178 @@ describe('控制指令', () => {
   it('无接收者时静默（回环无目标即丢弃）', () => {
     const ch = boot()
     expect(() => ch.sendControl('instA', { type: 'stop', payload: {} })).not.toThrow()
+  })
+})
+
+describe('relay 接入（broker 底座）', () => {
+  it('HMAC 签名与 dsh-agent-relay 协议一致（method\\npath\\nts\\nbody）', async () => {
+    const { signRequest } = await import('../src/index.ts')
+    // 与 vendored sign.js 对同一输入比对：secret/method/path/ts/body
+    const secret = 'test-secret'
+    const sig = signRequest(secret, 'POST', '/register', 1787372832, '{"agent":"web2"}')
+    // 用 vendored 的签名实现交叉验证
+    const { createHmac } = await import('node:crypto')
+    const expected = createHmac('sha256', secret)
+      .update(`POST\n/register\n1787372832\n{"agent":"web2"}`)
+      .digest('hex')
+    expect(sig).toBe(expected)
+  })
+
+  it('配置 relay 后启动即保活注册（POST /register 带签名头）', async () => {
+    const calls: Array<{ url: string; method: string; headers: Record<string, string>; body: string }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string }) => {
+      calls.push({ url, method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body ?? '' })
+      return new Response('{}', { status: 200 })
+    }))
+    const ch = boot({
+      tokens: {},
+      relay: { brokerUrl: 'http://127.0.0.1:19121', agent: 'web2', secret: 's', pollPeersMs: 0 },
+    })
+    // 等待异步注册
+    await new Promise((r) => setTimeout(r, 20))
+    expect(calls.length).toBeGreaterThan(0)
+    const reg = calls[0]
+    expect(reg.url).toBe('http://127.0.0.1:19121/register')
+    expect(reg.method).toBe('POST')
+    expect(JSON.parse(reg.body)).toEqual({ agent: 'web2' })
+    expect(reg.headers['x-relay-agent']).toBe('web2')
+    expect(reg.headers['x-relay-signature']).toBeTruthy()
+    vi.unstubAllGlobals()
+    ch[Symbol.dispose]?.()
+  })
+
+  it('轮询 peers 更新远端实例（online/offline 用 broker 判定）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/peers')) {
+        return new Response(JSON.stringify({ peers: [
+          { agent: 'web3', online: true },
+          { agent: 'web4', online: false },
+        ] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }))
+    const ch = boot({
+      tokens: {},
+      relay: { brokerUrl: 'http://x', agent: 'web2', secret: 's', pollPeersMs: 5000 },
+    })
+    // 等启动注册 + 手动触发一次轮询
+    await new Promise((r) => setTimeout(r, 20))
+    await (ch as unknown as { relayPollPeers(): Promise<void> }).relayPollPeers()
+    const list = ch.list()
+    const web3 = ch.get('web3')
+    expect(web3?.status).toBe('online')
+    expect(ch.get('web4')?.status).toBe('offline')
+    expect(list.length).toBeGreaterThanOrEqual(2)
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('relay 控制指令跨实例', () => {
+  it('sendControl 到远端（非本机 agent）经 broker POST /messages', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { method?: string; body?: string }) => {
+      calls.push(`${init.method} ${url} ${init.body ?? ''}`)
+      return new Response('{}', { status: 200 })
+    }))
+    const ch = boot({
+      tokens: {},
+      relay: { brokerUrl: 'http://x', agent: 'web2', secret: 's' },
+    })
+    ch.onControl(() => {})
+    ch.sendControl('web3', { type: 'restart-request', payload: { reason: 'test' } })
+    await new Promise((r) => setTimeout(r, 20))
+    const sent = calls.find((c) => c.startsWith('POST http://x/messages'))
+    expect(sent).toBeTruthy()
+    const msg = JSON.parse(sent!.slice(sent!.indexOf('{') || 0))
+    expect(msg.to).toBe('web3')
+    expect(msg.kind).toBe('request')
+    expect(msg.body.command.type).toBe('restart-request')
+    vi.unstubAllGlobals()
+  })
+
+  it('sendControl 到本机 agent 名走进程内回环', () => {
+    const ch = boot({
+      tokens: {},
+      relay: { brokerUrl: 'http://x', agent: 'web2', secret: 's' },
+    })
+    const got: string[] = []
+    ch.onControl((cmd, from) => { got.push(`${cmd.type}:${from}`) })
+    ch.sendControl('web2', { type: 'ping' })
+    expect(got).toEqual(['ping:web2'])
+  })
+
+  it('recv 控制指令消息触发 onControl（from 为发送方）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/messages?since=')) {
+        return new Response(JSON.stringify({
+          messages: [
+            { id: 'm1', from: 'web2', type: 'control', body: { command: { id: 'c1', type: 'restart-approved', payload: {} } } },
+            { id: 'm2', from: 'web2', type: 'message', body: {} },
+          ],
+          cursor: 'cur-1',
+        }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }))
+    const ch = boot({
+      tokens: {},
+      relay: { brokerUrl: 'http://x', agent: 'web3', secret: 's' },
+    })
+    const got: string[] = []
+    ch.onControl((cmd, from) => { got.push(`${cmd.type}:${from}`) })
+    await (ch as unknown as { relayRecvControls(): Promise<void> }).relayRecvControls()
+    expect(got).toEqual(['restart-approved:web2'])
+    expect((ch as unknown as { relaySince: string }).relaySince).toBe('cur-1')
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('主机守护识别（isHostAgent）', () => {
+  it('host<数字> 识别为守护；其他不是', () => {
+    expect(isHostAgent('host1')).toBe(true)
+    expect(isHostAgent('host12')).toBe(true)
+    expect(isHostAgent('web2')).toBe(false)
+    expect(isHostAgent('host-lab1')).toBe(false)
+    expect(isHostAgent('host')).toBe(false)
+  })
+})
+
+describe('relay 游标持久化（stateFile）', () => {
+  it('recv 后游标落盘，重启后从文件恢复（不再重读积压）', async () => {
+    const stateFile = join(tmpdir(), `dsh-relay-state-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
+    const seenUrls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seenUrls.push(url)
+      if (url.includes('/messages?since=')) {
+        return new Response(JSON.stringify({ messages: [], cursor: 'cur-9' }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }))
+    // 第一轮：消费后游标写盘
+    const ch1 = boot({ tokens: {}, relay: { brokerUrl: 'http://x', agent: 'web3', secret: 's', stateFile } })
+    await (ch1 as unknown as { relayRecvControls(): Promise<void> }).relayRecvControls()
+    expect(existsSync(stateFile)).toBe(true)
+    expect(JSON.parse(readFileSync(stateFile, 'utf8'))).toEqual({ since: 'cur-9' })
+    // 第二轮：新实例从文件恢复游标，recv 带 since=cur-9
+    const ch2 = boot({ tokens: {}, relay: { brokerUrl: 'http://x', agent: 'web3', secret: 's', stateFile } })
+    expect((ch2 as unknown as { relaySince: string }).relaySince).toBe('cur-9')
+    seenUrls.length = 0
+    await (ch2 as unknown as { relayRecvControls(): Promise<void> }).relayRecvControls()
+    expect(seenUrls.some((u) => u.includes('since=cur-9'))).toBe(true)
+    vi.unstubAllGlobals()
+    rmSync(stateFile, { force: true })
+  })
+
+  it('未配置 stateFile 时游标保持内存态（不回退）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/messages?since=')) {
+        return new Response(JSON.stringify({ messages: [], cursor: 'cur-5' }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }))
+    const ch = boot({ tokens: {}, relay: { brokerUrl: 'http://x', agent: 'web3', secret: 's' } })
+    await (ch as unknown as { relayRecvControls(): Promise<void> }).relayRecvControls()
+    expect((ch as unknown as { relaySince: string }).relaySince).toBe('cur-5')
+    vi.unstubAllGlobals()
   })
 })

@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-发行包 UI 插件（dsh-nav / dsh-tabs / dsh-my-ui / console 界面）需要统一的布局落点，否则各插件各自注入界面会混乱；皮肤中心（换肤）是否引入也需要定夺。
+发行包 UI 插件（dsh-quick-nav / dsh-tabs / dsh-my-ui / console 界面）需要统一的布局落点，否则各插件各自注入界面会混乱；皮肤中心（换肤）是否引入也需要定夺。
 
 ## Decision
 
@@ -12,7 +12,7 @@ Status: implemented
 
 | 区域 | 职责 | 插件 |
 | --- | --- | --- |
-| 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-nav + 快捷操作 |
+| 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-quick-nav + 快捷操作 |
 | tab 区 | 会话级切换（固定标签 + Alt+1..9 跨工作区） | dsh-tabs |
 | 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
 | 左侧设置上方按钮区 | 功能区快捷入口（console 管理、inbox/投递、命令面板） | console 入口 + 快捷按钮 |
@@ -26,6 +26,6 @@ Status: implemented
 
 ## Consequences
 
-- dsh-nav 定位于顶部区域、dsh-tabs 定位于 tab 区；console 界面入口在左侧按钮区；侧边栏走官方+better-sidebar。
+- dsh-quick-nav 定位于顶部区域、dsh-tabs 定位于 tab 区；console 界面入口在左侧按钮区；侧边栏走官方+better-sidebar。
 - §9 皮肤中心项已否决勾除；§5 矩阵 dsh-my-ui/全家桶描述去掉皮肤；AGENTS.md 分层图同步。
 - vendored dsh-web-ui 时按需组合（不装 skin-center），体现"组合自定义"。

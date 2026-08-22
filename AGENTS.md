@@ -35,7 +35,7 @@ pnpm test         # pnpm -r test
 
 ```
 业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
-UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
+UI                         dsh-my-ui（四区布局平台）· dsh-quick-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
 管理组件                    dsh-console（档案/生命周期/部署编排/inbox）+ 社区 dsh-update-checker / dsh-prometheus
 系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· 远程访问（社区）· LLM 记忆（社区 dsh-memento）
 内核                        官方 deepseek-harness（rc 锁定）
@@ -44,6 +44,7 @@ UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部�
 - **依赖严格向下**：业务 app→UI→管理组件→系统→内核，禁止反向或跨层依赖；UI 层内部允许聚合依赖（meta 包）。
 - **整体性**：一套概念模型（身份/主机/实例）贯穿所有层，**禁止逐插件私有模型**。
 - **控制面/执行面分离**：console 只编排决策，远程 agent 本地执行，SSH 仅一次性引导。
+- **UI 默认与官方一致（抄官方）**：任何 UI 元素以官方对应组件（DOM 结构 / CSS 机制 / 属性值）为唯一基准，默认直接照抄，不手写近似、不自由发挥——官方组件实现即样式契约（见 [.agents/notes/implemented/process/2026-08-22-ui-official-alignment.md](.agents/notes/implemented/process/2026-08-22-ui-official-alignment.md)）。
 - **UI 可替换**：UI 层不进入核心契约。
 - **自研边界**：系统层自研核心（dsh-user 身份模型 + dsh-channel 通信），**认证网关与远程访问采用社区 vendored**（接入件可替换）；管理组件自研主体 + 社区通用能力；UI/业务 app 以社区为主。完整矩阵见 `docs/architecture.md` §5。
 
@@ -84,7 +85,7 @@ UI                         dsh-my-ui（四区布局平台）· dsh-nav（顶部�
 - **main 保持稳定基线**：小改动/文档可直接在 main 提交（原子、单功能）；**大功能（跨多文件/多提交）一律走 worktree 分支**，分支命名 `feat/<功能名>`。
 - 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
 - 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
-- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console → dsh-console-ui → dsh-nav（type-only 依赖 channel）→ dsh-my-ui（聚合 nav/tabs）；**dsh-tabs 无内部依赖，独立**。无依赖关系的插件可并行。
+- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console → dsh-console-ui → dsh-quick-nav（type-only 依赖 channel）→ dsh-my-ui（聚合 nav/tabs）；**dsh-tabs 无内部依赖，独立**。无依赖关系的插件可并行。
 
 ## 提交规则（Commit Rules）
 
