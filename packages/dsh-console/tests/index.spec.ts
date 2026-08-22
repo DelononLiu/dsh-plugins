@@ -3,10 +3,18 @@
  * inbox（系统事件消息，按 owner 隔离）。
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
+import type { ChildProcess } from 'node:child_process'
+import * as childProcess from 'node:child_process'
 import { Context } from '@deepseek-ai/cordis'
 import ChannelService from 'dsh-channel'
-import ConsoleService, { type InstanceRecord } from '../src/index.ts'
+import ConsoleService, {
+  applyOverrideStatus,
+  resolveControlAction,
+  resolveControlRoute,
+  type InstanceRecord,
+} from '../src/index.ts'
 
 async function boot(): Promise<Context> {
   const ctx = new Context()
@@ -95,5 +103,289 @@ describe('inbox（系统事件消息）', () => {
     const ctx = await boot()
     ctx.channel.emit('task', 'job.run', { owner: 'alice' })
     expect(ctx.console.listInbox('alice')).toHaveLength(0)
+  })
+})
+
+describe('instance 角色（实例自退兜底，原 agent 改名）', () => {
+  it('resolveControlAction：restart/stop→exit、start→running、upgrade/deploy→pending', () => {
+    expect(resolveControlAction({ id: 'c', type: 'restart', payload: {} })).toBe('exit')
+    expect(resolveControlAction({ id: 'c', type: 'stop', payload: {} })).toBe('exit')
+    expect(resolveControlAction({ id: 'c', type: 'start', payload: {} })).toBe('running')
+    expect(resolveControlAction({ id: 'c', type: 'upgrade', payload: {} })).toBe('pending')
+    expect(resolveControlAction({ id: 'c', type: 'deploy', payload: {} })).toBe('pending')
+  })
+
+  it('instance 角色注册控制接收：收到 restart 指令触发 exit（mock）', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { role: 'instance' })
+    // sendControl 无 relay → 进程内回环，instance 端 onControl 收到
+    ctx.channel.sendControl('instX', { type: 'restart', payload: {} })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(exitSpy).toHaveBeenCalled()
+    exitSpy.mockRestore()
+  })
+
+  it('console 角色（默认）不注册 instance 执行器：restart 指令不回环执行', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const ctx = await boot()
+    ctx.channel.sendControl('instA', { type: 'restart', payload: {} })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(exitSpy).not.toHaveBeenCalled()
+    exitSpy.mockRestore()
+  })
+})
+
+describe('控制路由（console 决策面）', () => {
+  it('start：有守护→daemon（在线也发守护，绕开 broker TTL 滞后）；离线无守护→error', () => {
+    expect(resolveControlRoute('start', true, 'host-lab1')).toEqual({ action: 'daemon', daemonAgent: 'host-lab1', command: 'start' })
+    expect(resolveControlRoute('start', false, 'host-lab1')).toEqual({ action: 'daemon', daemonAgent: 'host-lab1', command: 'start' })
+    expect(resolveControlRoute('start', true, undefined)).toEqual({ action: 'noop' })
+    expect(resolveControlRoute('start', false, undefined)).toEqual({ action: 'error', reason: expect.any(String) })
+  })
+
+  it('stop：离线→noop；在线有守护→daemon；在线无守护→instance 自退', () => {
+    expect(resolveControlRoute('stop', false, 'host-lab1')).toEqual({ action: 'noop' })
+    expect(resolveControlRoute('stop', true, 'host-lab1')).toEqual({ action: 'daemon', daemonAgent: 'host-lab1', command: 'stop' })
+    expect(resolveControlRoute('stop', true, undefined)).toEqual({ action: 'instance', command: 'stop' })
+  })
+
+  it('restart：有守护→daemon；无守护在线→instance；无守护离线→error', () => {
+    expect(resolveControlRoute('restart', true, 'host-lab1')).toEqual({ action: 'daemon', daemonAgent: 'host-lab1', command: 'restart' })
+    expect(resolveControlRoute('restart', false, 'host-lab1')).toEqual({ action: 'daemon', daemonAgent: 'host-lab1', command: 'restart' })
+    expect(resolveControlRoute('restart', true, undefined)).toEqual({ action: 'instance', command: 'restart' })
+    expect(resolveControlRoute('restart', false, undefined)).toEqual({ action: 'error', reason: expect.any(String) })
+  })
+
+  it('controlInstance：start 经守护下发（payload 带 instanceId）', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { launch: { instA: { host: 'host-lab1', dshHome: '~/.dsh-a', profile: 'web' } } })
+    // 守护已注册（channel 发现），否则 controlInstance 报「守护未注册」。
+    ctx.channel.register({ id: 'host-lab1', name: 'host-lab1', addr: '', status: 'online' }, '')
+    const received: Array<{ target: string; type: string; payload: unknown }> = []
+    ctx.channel.onControl((cmd, instanceId) => received.push({ target: instanceId, type: cmd.type, payload: cmd.payload }))
+    const result = ctx.console.controlInstance('instA', 'start')
+    expect(result.ok).toBe(true)
+    expect(received).toEqual([{ target: 'host-lab1', type: 'start', payload: { instanceId: 'instA' } }])
+  })
+
+  it('controlInstance：守护未注册（launch.host 拼错）→ 失败并说明', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { launch: { instA: { host: 'host-nope', dshHome: '~/.dsh-a', profile: 'web' } } })
+    const result = ctx.console.controlInstance('instA', 'start')
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('host-nope')
+  })
+
+  it('controlInstance：离线且无守护配置 → 失败并说明原因', async () => {
+    const ctx = await boot()
+    const result = ctx.console.controlInstance('instA', 'start')
+    expect(result.ok).toBe(false)
+    expect(result.error).toBeTruthy()
+  })
+
+  it('controlInstance：upgrade 始终投给实例本身', async () => {
+    const ctx = await boot()
+    const received: string[] = []
+    ctx.channel.onControl((cmd) => received.push(cmd.type))
+    const result = ctx.console.controlInstance('instA', 'upgrade', { to: '0.1.0' })
+    expect(result.ok).toBe(true)
+    expect(received).toEqual(['upgrade'])
+  })
+})
+
+describe('离线覆盖（UI 即时显示，绕开 broker TTL 滞后）', () => {
+  it('无覆盖 → 原状态，不过期', () => {
+    expect(applyOverrideStatus('online', undefined, 0, 15000)).toEqual({ status: 'online', expired: false })
+    expect(applyOverrideStatus('offline', undefined, 0, 15000)).toEqual({ status: 'offline', expired: false })
+  })
+
+  it('stop 覆盖：强制 offline；实例真离线（channel offline）→ 过期可清', () => {
+    const ov = { op: 'stop' as const, ts: 1000 }
+    expect(applyOverrideStatus('online', ov, 2000, 15000)).toEqual({ status: 'offline', expired: false })
+    expect(applyOverrideStatus('offline', ov, 2000, 15000)).toEqual({ status: 'offline', expired: true })
+  })
+
+  it('restart 覆盖：窗口内强制 offline；窗口后过期回到 channel 状态', () => {
+    const ov = { op: 'restart' as const, ts: 1000 }
+    expect(applyOverrideStatus('online', ov, 2000, 15000)).toEqual({ status: 'offline', expired: false })
+    expect(applyOverrideStatus('online', ov, 20000, 15000)).toEqual({ status: 'online', expired: true })
+    expect(applyOverrideStatus('offline', ov, 20000, 15000)).toEqual({ status: 'offline', expired: true })
+  })
+})
+
+/** 构造一个伪子进程（EventEmitter + exitCode/kill/unref）。 */function fakeChild(exitCode: number | null = null): ChildProcess {
+  const child = new EventEmitter() as unknown as ChildProcess
+  Object.defineProperty(child, 'exitCode', { value: exitCode, writable: true })
+  ;(child as { kill: ReturnType<typeof vi.fn> }).kill = vi.fn(() => true)
+  ;(child as { unref: ReturnType<typeof vi.fn> }).unref = vi.fn()
+  return child
+}
+
+/** 替换 ConsoleService 的 spawn 实现（返回伪子进程），返回 spy。 */
+function mockSpawn(child: ChildProcess): ReturnType<typeof vi.fn> {
+  const fn = vi.fn(() => child)
+  ConsoleService.spawnImpl = fn as unknown as typeof childProcess.spawn
+  return fn
+}
+
+async function bootDaemon(config: Record<string, unknown>): Promise<Context> {
+  const ctx = new Context()
+  await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+  await ctx.plugin(ConsoleService, { role: 'daemon', hostId: 'lab1', instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } }, ...config })
+  return ctx
+}
+
+describe('daemon 角色（主机守护）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+    vi.useRealTimers()
+  })
+
+  it('start：spawn 清单内实例（env 合并 DSH_HOME + 实例 env）', async () => {
+    const child = fakeChild()
+    const spawnSpy = mockSpawn(child)
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, {
+      role: 'daemon',
+      hostId: 'lab1',
+      instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', env: { DSH_RELAY_AGENT: 'web3' } } },
+    })
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).toHaveBeenCalledWith('dsh', ['--profile', 'web'], expect.objectContaining({
+      env: expect.objectContaining({ DSH_HOME: '~/.dsh-web3', DSH_RELAY_AGENT: 'web3' }),
+      detached: true,
+    }))
+  })
+
+  it('start：已在运行则忽略（幂等，不重复 spawn）', async () => {
+    const child = fakeChild()
+    const spawnSpy = mockSpawn(child)
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('start：清单外实例拒绝（不 spawn）', async () => {
+    const spawnSpy = mockSpawn(fakeChild())
+    const ctx = await bootDaemon({})
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'intruder' } })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).not.toHaveBeenCalled()
+  })
+
+  it('stop：守护拉起的子进程 kill SIGTERM，宽限后 SIGKILL', async () => {
+    vi.useFakeTimers()
+    const child = fakeChild()
+    mockSpawn(child)
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    ctx.channel.sendControl('host-lab1', { type: 'stop', payload: { instanceId: 'web3' } })
+    expect((child as unknown as { kill: ReturnType<typeof vi.fn> }).kill).toHaveBeenCalledWith('SIGTERM')
+    // 宽限后仍未退出 → SIGKILL
+    Object.defineProperty(child, 'exitCode', { value: null })
+    vi.advanceTimersByTime(5000)
+    expect((child as unknown as { kill: ReturnType<typeof vi.fn> }).kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
+  it('stop：非守护拉起的在线实例 → 经 channel 发 stop 自退', async () => {
+    const ctx = await bootDaemon({})
+    // 实例在线（channel 注册）但守护无子进程 → 走自退兜底
+    ctx.channel.register({ id: 'web3', name: 'web3', addr: '', status: 'online' }, '')
+    const received: Array<{ target: string; type: string }> = []
+    ctx.channel.onControl((cmd, instanceId) => received.push({ target: instanceId, type: cmd.type }))
+    ctx.channel.sendControl('host-lab1', { type: 'stop', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(received.some((r) => r.target === 'web3' && r.type === 'stop')).toBe(true)
+  })
+
+  it('restart 守护拉起的实例：kill，exit 前不 spawn，exit 后 spawn 一次', async () => {
+    const child = fakeChild()
+    const spawnSpy = mockSpawn(child)
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
+    expect((child as unknown as { kill: ReturnType<typeof vi.fn> }).kill).toHaveBeenCalledWith('SIGTERM')
+    // exit 前不 spawn（避免端口冲突）
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+    child.emit('exit', 0, null)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('restart 离线实例：直接拉起', async () => {
+    const spawnSpy = mockSpawn(fakeChild())
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('restart 非守护拉起的在线实例：发 stop 自退，等固定窗口后拉起', async () => {
+    vi.useFakeTimers()
+    const spawnSpy = mockSpawn(fakeChild())
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    // 实例在线（channel 注册）但守护无子进程 → 分支 2
+    ctx.channel.register({ id: 'web3', name: 'web3', addr: '', status: 'online' }, '')
+    const received: string[] = []
+    ctx.channel.onControl((cmd, instanceId) => received.push(`${cmd.type}:${instanceId}`))
+    ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
+    expect(received).toContain('stop:web3')
+    // 固定窗口（STOP_SELF_EXIT_WAIT_MS=35000）后拉起
+    await vi.advanceTimersByTimeAsync(35000)
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('busy 锁：积压两条 restart → 只处理一次（不重复 spawn）', async () => {
+    const child = fakeChild()
+    const spawnSpy = mockSpawn(child)
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
+    ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    child.emit('exit', 0, null)
+    await new Promise((r) => setTimeout(r, 20))
+    // 1 (start) + 1 (restart 后 spawn)；第二条 restart 与 restart 期间的 start 被 busy 锁忽略
+    expect(spawnSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('spawn error：children 清理 + 解锁，后续 start 可恢复', async () => {
+    const child = fakeChild()
+    const spawnSpy = mockSpawn(child)
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    child.emit('error', new Error('ENOENT'))
+    // 清理后再 start → 重新 spawn（不被死条目阻塞）
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('restart watchdog：kill 后进程始终不退 → 超时解锁（下次 restart 仍工作）', async () => {
+    vi.useFakeTimers()
+    const child = fakeChild()
+    const spawnSpy = mockSpawn(child)
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
+    ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
+    // 进程不退（不 emit exit）→ watchdog 超时解锁
+    await vi.advanceTimersByTimeAsync(20000)
+    // 解锁后再次 restart（旧进程已退出）→ 走离线分支直接拉起
+    Object.defineProperty(child, 'exitCode', { value: 0 })
+    ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(spawnSpy).toHaveBeenCalledTimes(2)
   })
 })
