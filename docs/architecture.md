@@ -195,7 +195,18 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | **web2** | 单插件测试（隔离） | 官方基线（无自研）——测试时 `dsh plugin --profile web2 add <被测>` 临时装入 |
 | **web3** | 多插件测试（集成） | 官方基线 + 核心组合（user/channel/console + nav/tabs）——测试时临时增删 |
 
-原则：**web 是正式基线（~/.dsh），web2/web3 是测试隔离环境——用独立 DSH_HOME 目录隔离**（~/.dsh-web2 / ~/.dsh-web3，非共享 home 的 profile 隔离，sessions/settings/storages 完全独立）；自研插件经 cordis.patch.yml insert（不进 bundles）；webserver 端口独立配置（避开正式 3080）。版本矩阵锁（dsh.lock.json）三者各自维护。
+原则：**web 是正式基线（~/.dsh），测试环境用独立 DSH_HOME 目录隔离**（非共享 home 的 profile 隔离，sessions/settings/storages 完全独立）；自研插件经 cordis.patch.yml insert（不进 bundles）；webserver 端口独立配置（避开正式 3080）。版本矩阵锁（dsh.lock.json）各自维护。
+
+**测试环境固定矩阵**（2026-08 定，不靠猜——脚本 `scripts/dev-test-env.sh` 一键启停/status）：
+
+| 环境 | DSH_HOME | profile | 端口 | 角色 |
+| --- | --- | --- | --- | --- |
+| web2 | `~/.dsh-web2` | web | 3082 | 管理端 console（全家桶 + 组装器验证） |
+| web3 | `~/.dsh-web3` | web | 3083 | instance（`DSH_RELAY_AGENT=web3`） |
+| web4 | `~/.dsh-web4` | web | 3084 | instance（`DSH_RELAY_AGENT=web4`） |
+| daemon | `~/.dsh-daemon` | daemon | 无 web（headless） | 守护 host1（broker `http://127.0.0.1:19121` 出站连） |
+
+实例矩阵权威源 = 管理端 web2 的 `dsh-console.launch` 配置；quick-nav/console 从 `DSH_CONSOLE_ADDR=http://127.0.0.1:3082` 拉实例表。
 
 ---
 
