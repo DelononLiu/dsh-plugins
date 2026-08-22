@@ -653,6 +653,11 @@ export class ConsoleService extends Service {
     return [...this.instances.values()]
   }
 
+  /** 查询实例的访问地址（launch 配置 addr，跳转用；未配置返回 undefined）。 */
+  getLaunchAddr(instanceId: string): string | undefined {
+    return this.config.launch?.[instanceId]?.addr
+  }
+
   // --- 生命周期 / 部署编排（控制面：决策，执行在 daemon/instance） ---
 
   /**

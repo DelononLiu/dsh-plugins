@@ -111,7 +111,9 @@ export function QuickNav(props: QuickNavProps): React.JSX.Element {
                 )}
               </>
             )
-            return link.addr
+            // 可点击条件：在线且有地址、且非当前实例（当前实例不可点击，弱化显示）。
+            const clickable = link.addr && link.status === 'online' && !link.current
+            return clickable
               ? (
                 <a
                   key={link.id}
