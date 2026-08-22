@@ -14,7 +14,9 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 /** 实例基础身份（实例服务提供者——实例首先是通信层发现的实体）。 */
 export interface InstanceIdentity {
@@ -67,18 +69,35 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** 插件配置：实例令牌 + 心跳超时。 */
+/** 插件配置：实例令牌 + 心跳超时 + 可选 relay（社区 broker 底座）。 */
 export interface Config {
   /** 实例令牌映射：{instanceId: token}——bootstrap 时注入 agent，注册/心跳校验。 */
   tokens: Record<string, string>
   /** 心跳超时（ms），超时判定离线。默认 30000。 */
   heartbeatTimeoutMs: number
+  /** 可选：dsh-agent-relay broker 接入（实例联通底座）——配置即启用。 */
+  relay?: RelayConfig
+}
+
+/** Relay broker 接入配置（agent 保活 + 可选 peers 轮询）。 */
+export interface RelayConfig {
+  /** broker 基地址（如 http://127.0.0.1:19121）。 */
+  brokerUrl: string
+  /** 本实例在 broker 的 agent 名（唯一稳定名，如 web2）。 */
+  agent: string
+  /** 共享密钥（HMAC 签名）。 */
+  secret: string
+  /** peers 轮询周期（ms）；0/缺省 = 只保活不轮询。 */
+  pollPeersMs?: number
+  /** recv 增量游标持久化文件（长驻进程重启防重放积压指令；缺省不落盘）。 */
+  stateFile?: string
 }
 
 /** 运行时 schema。 */
 export const Config = z.object({
   tokens: z.dict(z.string()).default({}),
   heartbeatTimeoutMs: z.number().default(30000),
+  relay: z.any().default(undefined),
 }) as z<Config>
 
 /** 事件默认 TTL（7 天，已定投递语义）。 */
@@ -111,6 +130,142 @@ export class ChannelService extends Service {
     const timer = setInterval(() => this.sweep(), Math.min(config.heartbeatTimeoutMs, 60_000))
     timer.unref?.()
     ctx.effect(() => () => clearInterval(timer))
+    // Relay broker 接入：解析配置（config 优先，env 兜底——DSH_RELAY_*）。
+    const relay = config.relay ?? envRelayConfig()
+    if (relay !== undefined) {
+      this.relay = relay
+      this.pollPeersMs = relay.pollPeersMs ?? 0
+      // 游标持久化：重启后从 stateFile 恢复，避免重读 broker 积压消息。
+      if (relay.stateFile) {
+        try {
+          if (existsSync(relay.stateFile)) {
+            const saved = JSON.parse(readFileSync(relay.stateFile, 'utf8')) as { since?: string }
+            if (typeof saved.since === 'string') this.relaySince = saved.since
+          }
+        } catch {
+          // 文件缺失/损坏：从零开始（首轮全量，属正常冷启动）。
+        }
+      }
+      // 启动即保活注册；周期：poll 周期或默认 30s（保活 < broker HEARTBEAT_TTL）。
+      const period = this.pollPeersMs > 0 ? this.pollPeersMs : 30_000
+      void this.relayRegister()
+      const relayTimer = setInterval(() => this.relayTick(), Math.min(period, 30_000))
+      relayTimer.unref?.()
+      ctx.effect(() => () => clearInterval(relayTimer))
+    }
+  }
+
+  /** 当前 relay 配置（未接入为 undefined）。 */
+  readonly relay: RelayConfig | undefined
+  /** peers 轮询周期（ms；0 = 只保活不轮询）。 */
+  private readonly pollPeersMs: number = 0
+
+  /** recv 增量游标（relay 控制指令接收）。 */
+  private relaySince = ''
+
+  /** 周期任务：保活注册 + 可选 peers 轮询 + 控制指令接收。 */
+  private relayTick(): void {
+    void this.relayRegister()
+    if (this.pollPeersMs > 0) void this.relayPollPeers()
+    void this.relayRecvControls()
+  }
+
+  /** 向 broker 注册/保活（POST /register，HMAC 签名）。 */
+  private async relayRegister(): Promise<void> {
+    const relay = this.relay
+    if (relay === undefined) return
+    const body = JSON.stringify({ agent: relay.agent })
+    try {
+      await relayFetch(relay, 'POST', '/register', body)
+    } catch {
+      // broker 不可达：下次周期重试（保活失败不致命）。
+    }
+  }
+
+  /** 向远端实例发控制指令（经 broker POST /messages，type=control）。 */
+  private async relaySendControl(instanceId: string, command: ControlCommand): Promise<void> {
+    const relay = this.relay
+    if (relay === undefined) return
+    // broker 的 normalizeEnvelope 只接受 type message|ack——控制指令用
+    // kind='request' 承载，指令本体放 body.command。
+    const body = JSON.stringify({
+      id: randomUUID(),
+      to: instanceId,
+      body: { command },
+      type: 'message',
+      kind: 'request',
+      replyTo: null,
+      ack: false,
+    })
+    try {
+      await relayFetch(relay, 'POST', '/messages', body)
+    } catch {
+      // broker 不可达：指令投递失败不致命。
+    }
+  }
+
+  /** 拉取自己的控制指令消息（GET /messages?since=），触发 onControl。 */
+  private async relayRecvControls(): Promise<void> {
+    const relay = this.relay
+    if (relay === undefined) return
+    try {
+      const res = await relayFetch(
+        relay,
+        'GET',
+        `/messages?since=${encodeURIComponent(this.relaySince)}&limit=50`,
+        '',
+      )
+      const data = await res.json() as {
+        messages?: Array<{ id: string; from: string; type?: string; body?: { command?: ControlCommand } }>
+        cursor?: string | null
+      }
+      // 先处理全部消息，后推进游标落盘：崩溃在处理中途 → 游标未推进 → 重启重读
+      // （重复投递由消费方幂等吸收）——保证 at-least-once，不丢指令。
+      for (const msg of data.messages ?? []) {
+        if (!msg.body?.command) continue
+        for (const handler of this.controlHandlers) {
+          handler(msg.body.command, msg.from)
+        }
+      }
+      if (data.cursor) {
+        this.relaySince = data.cursor
+        if (relay.stateFile) {
+          try {
+            mkdirSync(dirname(relay.stateFile), { recursive: true })
+            writeFileSync(relay.stateFile, JSON.stringify({ since: data.cursor }))
+          } catch {
+            // 落盘失败不致命：下次成功写入前仍从上次内存游标继续。
+          }
+        }
+      }
+    } catch {
+      // broker 不可达：本轮跳过（下次重试）。
+    }
+  }
+
+  /** 轮询 broker peers，更新远端实例（进 instances，status 用 broker 判定）。 */
+  private async relayPollPeers(): Promise<void> {
+    const relay = this.relay
+    if (relay === undefined) return
+    try {
+      const res = await relayFetch(relay, 'GET', '/peers', '')
+      const data = await res.json() as { peers?: { agent: string; online: boolean }[] }
+      const now = Date.now()
+      for (const peer of data.peers ?? []) {
+        if (peer.agent === relay.agent) continue // 自己由保活维护
+        const entry = this.instances.get(peer.agent)
+        this.instances.set(peer.agent, {
+          id: peer.agent,
+          name: peer.agent,
+          addr: '',
+          status: peer.online ? 'online' : 'offline',
+          lastSeen: now,
+        })
+        void entry
+      }
+    } catch {
+      // broker 不可达：本轮跳过（下次重试）。
+    }
   }
 
   /**
@@ -201,12 +356,17 @@ export class ChannelService extends Service {
   }
 
   /**
-   * 发送控制指令到某实例（远程管理；v1 进程内回环——跨实例经传输层）。
-   * @param instanceId - 目标实例 id。
+   * 发送控制指令到某实例（远程管理）。目标为本机 agent 名或无 relay 时进程内
+   * 回环；否则经 broker（POST /messages，type=control）投递给远端实例。
+   * @param instanceId - 目标实例 id（agent 名）。
    * @param command - 指令（不含 id，自动生成幂等 id）。
    */
   sendControl<P = unknown>(instanceId: string, command: Omit<ControlCommand<P>, 'id'>): void {
     const full: ControlCommand<P> = { ...command, id: randomUUID() }
+    if (this.relay !== undefined && instanceId !== this.relay.agent) {
+      void this.relaySendControl(instanceId, full as ControlCommand)
+      return
+    }
     for (const handler of this.controlHandlers) {
       handler(full, instanceId)
     }
@@ -238,6 +398,55 @@ export class ChannelService extends Service {
 function toIdentity(entry: InstanceEntry): InstanceIdentity {
   const { lastSeen: _lastSeen, ...identity } = entry
   return identity
+}
+
+/** 从环境变量解析 relay 配置（DSH_RELAY_BROKER_URL/AGENT/SECRET/POLL_PEERS_MS/STATE_FILE）。 */
+function envRelayConfig(): RelayConfig | undefined {
+  const brokerUrl = process.env.DSH_RELAY_BROKER_URL
+  const agent = process.env.DSH_RELAY_AGENT
+  const secret = process.env.DSH_RELAY_SECRET
+  if (!brokerUrl || !agent || !secret) return undefined
+  const pollPeersMs = Number(process.env.DSH_RELAY_POLL_PEERS_MS ?? '0')
+  const stateFile = process.env.DSH_RELAY_STATE_FILE
+  return {
+    brokerUrl,
+    agent,
+    secret,
+    pollPeersMs: Number.isFinite(pollPeersMs) && pollPeersMs > 0 ? pollPeersMs : 0,
+    stateFile: stateFile || undefined,
+  }
+}
+
+/** HMAC-SHA256 请求签名（dsh-agent-relay wire 协议 v1：method\npath\nts\nbody）。 */
+export function signRequest(secret: string, method: string, path: string, tsSeconds: number, rawBody = ''): string {
+  return createHmac('sha256', secret)
+    .update(`${method}\n${path}\n${tsSeconds}\n${rawBody}`)
+    .digest('hex')
+}
+
+/** 主机守护 agent 名规则（host<hostId>，如 host1）：实例/守护的共享识别契约。 */
+export function isHostAgent(agentId: string): boolean {
+  return /^host\d+$/.test(agentId)
+}
+
+/** 带 HMAC 鉴权头发起 relay 请求（node 内置 fetch）。 */
+function relayFetch(
+  relay: RelayConfig,
+  method: 'GET' | 'POST',
+  path: string,
+  rawBody: string,
+): Promise<Response> {
+  const ts = Math.floor(Date.now() / 1000)
+  return fetch(`${relay.brokerUrl}${path}`, {
+    method,
+    headers: {
+      'content-type': 'application/json',
+      'x-relay-agent': relay.agent,
+      'x-relay-timestamp': String(ts),
+      'x-relay-signature': signRequest(relay.secret, method, path, ts, rawBody),
+    },
+    body: method === 'POST' ? rawBody : undefined,
+  })
 }
 
 /** 类插件入口：cordis 实例化时自动注册 `ctx.channel`（构造即注册，勿再 provide）。 */
