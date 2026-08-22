@@ -87,27 +87,28 @@ export function QuickNav(props: QuickNavProps): React.JSX.Element {
             zIndex: 1000,
             minWidth: 220,
             padding: '6px 0',
-            borderRadius: 6,
-            border: '1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
-            background: 'var(--dsw-alias-bg-base, #fff)',
-            color: 'inherit',
+            // 浮层风格对齐官方（与控制台面板一致）：层级背景 + 官方阴影 + 官方圆角/边框层级。
+            borderRadius: 8,
+            border: '1px solid var(--dsw-alias-border-l2)',
+            background: 'var(--dsw-alias-bg-layer-2)',
+            color: 'var(--dsw-alias-label-primary)',
             fontSize: 13,
-            boxShadow: '0 4px 12px rgba(0,0,0,.12)',
+            boxShadow: 'var(--dsw-shadow-lv2)',
           }}
         >
           {links.length === 0 && (
-            <div style={{ padding: '6px 12px', opacity: 0.6, fontSize: 12 }}>（无导航链接）</div>
+            <div style={{ padding: '6px 12px', color: 'var(--dsw-alias-label-secondary)', fontSize: 12 }}>（无导航链接）</div>
           )}
           {links.map((link) => {
             const row = (
               <>
-                <span style={{ color: link.status === 'online' ? '#4caf50' : '#888' }}>
+                <span style={{ color: link.status === 'online' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-label-tertiary)' }}>
                   {link.status === 'online' ? '●' : '○'}
                 </span>
                 <span>{link.name}</span>
-                {link.current && <span style={{ color: 'var(--dsw-alias-label-tertiary, rgba(0,0,0,.5))', fontSize: 11 }}>（当前）</span>}
+                {link.current && <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>（当前）</span>}
                 {link.addr && (
-                  <span style={{ marginLeft: 'auto', color: 'var(--dsw-alias-label-tertiary, rgba(0,0,0,.5))', fontSize: 11 }}>{portOf(link.addr)}</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 }}>{portOf(link.addr)}</span>
                 )}
               </>
             )
@@ -124,7 +125,7 @@ export function QuickNav(props: QuickNavProps): React.JSX.Element {
                     display: 'flex', alignItems: 'center', gap: 8,
                     padding: '6px 12px', color: 'inherit', textDecoration: 'none',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,.05))' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--dsw-alias-interactive-bg-hover)' }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
                   {row}
