@@ -77,7 +77,7 @@
 | --- | --- |
 | **U2 版本锁格式** | dsh-plugin-pack-web 的 **Plugin Pack Schema v1**（{schemaVersion,id,name,version,plugins:[{id,name,kind,spec,repository}]}，spec 三种安装源）可直接参考扩为 dsh.lock.json |
 | **U3 升级回滚** | dsh-update-checker 的**备份→更新→回滚闭环**（/rollback、lockfile 持久化防静默回退、watchdog 探活、写路由 loopback+confirm） |
-| **U8 皮肤中心接入** | 皮肤中心 v2（皮肤=纯资产目录，团队分发=拷贝目录）+ dsh-skin-switcher（双引擎协调：单一管理权威+启动迁移）——直接作为 dsh-desk 皮肤自定义的接入方案 |
+| **U8 皮肤中心接入** | 皮肤中心 v2（皮肤=纯资产目录，团队分发=拷贝目录）+ dsh-skin-switcher（双引擎协调：单一管理权威+启动迁移）——~~直接作为 dsh-desk 皮肤自定义的接入方案~~（**否决** 2026-08：用户明确"不喜欢换肤，功能优先"，不引入皮肤中心；dsh-desk 自定义维度=布局+插件组合，见 architecture.md §9） |
 
 ## 重要更正
 

@@ -67,9 +67,10 @@
 │ 会话树    │  Alt+1..9 跨工作区切换       │
 │          │                             │
 │ 左侧按钮区│  （内容区）                  │
-│ （设置上方）│                             │
+│ （foot 区）│                             │
+│ 工具入口  │                             │
 │ console 入口│                            │
-│ 快捷按钮  │                             │
+│ 设置      │                             │
 ├──────────┴─────────────────────────────┤
 ```
 
@@ -78,11 +79,13 @@
 | 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-quick-nav + 快捷操作 |
 | tab 区 | 会话级切换（固定标签 + Alt+1..9 跨工作区） | dsh-tabs |
 | 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
-| 左侧设置上方按钮区 | 功能区快捷入口（console 管理、inbox/投递、命令面板） | console 入口 + 快捷按钮 |
+| 侧边栏 foot 区 | 功能区快捷入口（工具/控制台/设置），**工具入口经 dsh-desk 组装器摆到控制台上方** | 全家桶工具入口（task-board/ssh/skill-explorer）+ console 入口 + 设置 |
 
 **皮肤中心（dsh-web-ui 的 skin-center v2）不引入**：用户明确"不喜欢换皮肤，功能优先"；dsh-desk 自定义维度收敛为**布局 + 插件组合**（vendored 全家桶时可不装 skin-center 包）。
 
 **布局自定义机制**（2026-08 定，v1 从简）：插件组合走 cordis.patch.yml（DSH 原生）；四区布局调整（显隐/顺序/宽度）走 dsh-desk 的 Config 字段（cordis.yml 可配）+ 设置页开关（参考顶栏治理模式）；**布局配置按实例存**（每实例一套）——"每用户布局"（跨实例一致）留 v2（需用户级配置存储）。
+
+**工具入口组装器**（2026-08 实现，dsh-desk client）：全家桶工具（task-board/ssh/skill-explorer）不走官方 sidebar 插槽，而是各自 MutationObserver + 直接 DOM 注入侧边栏 entry（落点 logoRow 后、工作区上）。dsh-desk 组装器接管摆位：re-parent 到 foot 区（控制台上方）+ 样式对齐官方 `.trigger` 契约 + 间距统一。开放边界见 §9 与 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)。
 
 ### 设计原则
 
@@ -211,7 +214,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 | dsh-console-ui | UI | 总览/管理界面（四区：左侧按钮区入口 + 内容区），消费 console 服务（type-only + ctx.remote） | 新立 |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | 已上线三端 |
 | dsh-tabs | UI | 固定会话标签页、Alt+1..9 跨工作区切换 | web2 试装 |
-| dsh-desk | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学 | 立项 |
+| dsh-desk | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：全家桶 entry 摆位到 foot 区控制台上方 + 样式对齐官方契约）** | 组装器已实现 |
 
 > dsh-quick-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
 
@@ -219,7 +222,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 
 | 插件 | 层 | 用途 | 说明 |
 | --- | --- | --- | --- |
-| dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（better-sidebar 侧边栏 / 布局；**不含 skin-center，皮肤否决**）+ 功能应用（task-board 任务看板 / git-graph / ssh / pet…） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除——不装皮肤则无关） |
+| dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（better-sidebar 侧边栏 / 布局；**不含 skin-center，皮肤否决**）+ 功能应用（task-board 任务看板 / git-graph / ssh / skill-explorer；**v1 引入 5 包**） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除——不装皮肤则无关） |
 | better-sidebar（omdsh-dev） | UI | 侧边栏框架（文件/编辑器/终端/Git 面板），registerTab/registerFileViewer 扩展点 | MIT；全家桶已集成，也可独立引入 |
 | dst-agent-teams | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员** |
 | dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
@@ -325,3 +328,4 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored submodule 机制落地~~（已定 2026-08）：dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装 + lock 锁版本 + patch 层改造
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合
+- [ ] **全家桶工具入口组装边界**（2026-08 提出，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；未定项——① 官方 slots 型插件（git-graph/better-sidebar）的组装语义 ② CSS 覆盖脆弱边界（类名 hash 变/inline 失效时的回退策略）③ 组装配置化（间距/显隐/顺序进设置页，默认与官方一致）④ rail 折叠态真实验证 ⑤ 通用性声明 vs 显式选择器列表
