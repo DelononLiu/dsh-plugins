@@ -81,17 +81,29 @@ ctx.remote.channel.callRemote('web3', 'console', 'listInstances', {})
 
 ### 联调落地事实（2026-08-23 目标侧部署，三实例真实互联）
 
-- **relay 接入默认轮询 peers**：接入 broker 即默认 30s 轮询（`DEFAULT_RELAY_POLL_MS`），显式 0 才关闭——
-  实例表依赖 peers 轮询填充，原默认只保活不轮询导致 channel/list 永空；env 未显式设置返回 undefined
-  （否则 0 吞掉 constructor 默认）。
-- **listInstances boundary**：HostRecord.version 必填而 broker peers 无版本 → hosts 组装补空串。
+- **listInstances boundary**：HostRecord.version 必填而 peers 无版本 → hosts 组装补空串。
 - **remoteControl wire args**：必填 payload 参数（target 侧校验）→ args 补 `payload: {}`。
 - **daemon 角色 RPC 面执行**：daemon 经 callRemote 收到 controlInstance → 本机清单内实例直接本机执行
   （复用 handleDaemonControl），不落入 console 决策路由（否则无 launch → route=instance 转发回实例）。
 - **目标实例自退短路**：RPC 到达本机（instanceId === relay.agent）直接自退，杜绝 RPC 递归。
-- **实例启动窗口过滤**（`STARTUP_CONTROL_GRACE_MS=15s`）：broker 消息队列持久补投，迟到的旧 stop/restart
-  会在守护重启链里"起来就被杀"死循环 → 启动 15s 内忽略（事件面 + RPC 面一致）；daemon 重试 stop
-  仅实例仍在线时发（减少积压）。
-- **实测**：web2(管理端)/web3/web4(instance)/daemon(headless host1) 连同一 broker（19121，HMAC 鉴权）；
-  web2 channel/list 发现全部远端、console/listInstances 返回实例+守护；web2→web3 restart 经 daemon
-  本机执行完整链路（RPC 回执 + 事件面自退 + spawn 拉起），连续 3 次重启稳定。
+- **接收端积压判定**：ControlCommand 带发送时间戳 ts（sendControl 自动打）——事件面按
+  `ts < 实例启动时刻` 忽略积压旧指令（broker 持久队列补投的旧 stop/restart 会"起来就被杀"），
+  当前指令（ts ≥ 启动）照常执行；RPC 面无 ts（官方协议不加字段）→ 保留启动窗口（45s）兜底。
+  注：去 broker 后主路径（直连 RPC + 本机进程管理）无持久队列，积压仅存在于 broker 兜底路径。
+
+### 去 broker 化（2026-08-23，用户确认"broker 仅作兜底"）
+
+- **实例发现权威源 = 管理端**：console 构造时把 launch 配置（实例矩阵）逐条 `channel.register`
+  （带 addr）；daemon 把 instances 清单同样注册（本机实例 addr 用 `127.0.0.1:port`）。
+  删除 channel 的 peers 轮询填充（peers 无地址信息，轮询覆盖会让 callRemote 直连失效）。
+- **直连状态探测**：注册即 online，但无心跳续期会被 sweep（30s）误标离线 → 管理端/daemon
+  周期（15s）探测 addr 可达性，可达 → `channel.heartbeat` 续期；不可达不续期（sweep 标离线）。
+- **daemon 本机控制端口**：`controlPort` 配置（headless 也有可直连 addr）——处理官方
+  client-request 信封（与 callRemote 直连路径一致），管理端经 launch 配置的 daemon addr 直连控制。
+- **无 broker 停非守护实例**：跨进程 sendControl 无 relay 时只本地回环（会递归）→ daemon 本机
+  端口定位 kill（`lsof -ti tcp:<port>` + SIGTERM），同机守护能力。
+- **callRemote**：直连失败降级 broker 兜底（原直连失败直接 reject）；启动即 recv + 周期 5s
+  （原 30s > 回执超时 15s，跨实例 RPC 回执必然超时）。
+- **实测（无 broker）**：web2(管理端)/web3(instance)/daemon(headless host1) 不带 relay env——
+  web2 发现 web3/web4/host1（launch 注册 + 探测续期）；web2→web3 restart 全链路
+  （web2 直连 daemon 3089 → 本机端口 kill → spawn 拉起），连续 3 次重启稳定，全程无 broker。
