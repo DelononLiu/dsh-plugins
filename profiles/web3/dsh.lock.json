@@ -3,7 +3,7 @@
   "id": "dsh-distro-web3",
   "name": "dsh 测试环境（web3：多插件集成测试）",
   "version": "0.0.0",
-  "kernel": "@deepseek-ai/dsh@0.1.0-rc.8",
+  "kernel": "@deepseek-ai/dsh@0.1.1-rc.2",
   "bundles": {
     "@deepseek-ai/dsh-base": "0.1.0-rc.8",
     "@deepseek-ai/dsh-web-app": "0.1.0-rc.8",
