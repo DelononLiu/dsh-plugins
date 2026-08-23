@@ -14,10 +14,10 @@ Status: proposed
 ## 开放问题
 
 1. **官方 slots 型插件如何组装**：git-graph（`conversation.input.selector.context` / `conversation.input.dock`）、better-sidebar（`conversation.chat.turnTail` / `settings.section`）走官方 slots，位置由官方宿主决定、**无 entry 元素可搬**。dsh-desk 对它们能做的只有插槽级组合（order / 承接 / 隐藏）——但 vendored 不改注册目标，"承接"即借用既有插槽名（如 web-ui.plugin.item 教训：借错槽=摆错位）。**待决策**：slots 型插件的组装语义是什么、是否需要 dsh-desk 统一声明 SlotMap 扩展来组合。
-2. **CSS 覆盖的脆弱边界**：覆盖依赖（a）插件类名/属性稳定（`data-dsh-part` 是全家桶约定，但非契约——插件升级可能改）；(b) 官方 css-modules hash 类名子串（`[class*="footArea"]` 等——hash 随构建变，子串比完整 hash 稳但非零风险）；(c) 插件若用 inline style / `!important` 则覆盖失效。**待决策**：覆盖选择器是否需要"失败静默"策略（覆盖不生效时回退默认摆位而非硬错误）。
-3. **组装配置化**：当前 foot 区间距（2px）硬编码在 CSS，工具入口列表（3 个选择器）硬编码在 `TOOL_ENTRY_SELECTORS`。dsh-desk 定位"可自定义是核心能力"——间距、工具显隐、摆位顺序应进设置页配置项（默认值仍与官方一致）。**待决策**：配置项范围与默认值（v1 先不加，需用户确认）。
-4. **Rail（折叠）态 entry**：已对齐官方 `.trigger.rail`（36px 圆、仅图标），但未在真实折叠态验证（测试环境无浏览器）。**待验证**：折叠/展开切换时 entry 在 footArea 内的表现（官方 `align-items:center` + entry 宽度）。
-5. **通用性声明 vs 硬编码**：note 声称"不限这三家，任何 `data-dsh-*-entry` 注入型插件都可被组装"，实现是显式选择器列表——新增插件要改代码。**待决策**：是否做运行时发现（扫描 `[data-dsh-part="sidebar-entry"]` 全部 entry）还是保持显式列表（可控、可排序）。
+2. **CSS 覆盖的脆弱边界**：覆盖依赖（a）插件类名/属性稳定（`data-dsh-part` 是全家桶约定，但非契约——插件升级可能改）；(b) 官方 css-modules hash 类名子串（`[class*="footArea"]` 等——hash 随构建变，子串比完整 hash 稳但非零风险）；(c) 插件若用 inline style / `!important` 则覆盖失效。**已落地**：失败静默策略（覆盖不生效时回退默认摆位而非硬错误）。
+3. **组装配置化**：当前 foot 区间距（2px）硬编码在 CSS，工具入口列表（3 个选择器）硬编码在 `TOOL_ENTRY_SELECTORS`。dsh-desk 定位"可自定义是核心能力"——间距、工具显隐、摆位顺序应进设置页配置项（默认值仍与官方一致）。**已落地**：footSpacing / tools 显隐进设置页（实时响应）。
+4. **Rail（折叠）态 entry**：已对齐官方 `.trigger.rail`（36px 圆、仅图标）。**已验收**（2026-08，web2 实测）：折叠/展开切换正常，图标居中、文字隐藏、无溢出。
+5. **通用性声明 vs 硬编码**：note 声称"不限这三家，任何 `data-dsh-*-entry` 注入型插件都可被组装"，实现是显式选择器列表——新增插件要改代码。**已落地**：运行时发现（扫描 `[data-dsh-part="sidebar-entry"]` 全部 entry）。
 
 ## Alternatives
 

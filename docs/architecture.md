@@ -356,9 +356,9 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 - [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored 机制落地~~（已定 2026-08 → **2026-08 改统一 npm**）：原"dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装"——**已改为统一 npm 安装 + lock 锁版本**（dsh-memento / dst-agent-teams npm 均有发布版，submodule 已移除；见 Vendoring policy）
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合
-- [ ] **全家桶工具入口组装边界**（2026-08 提出，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；**2026-08 已落地**——③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默；**剩余**——① 官方 slots 型插件（git-graph/better-sidebar）的组装语义（v1 只做显隐开关）、④ rail 折叠态视觉验收（缺浏览器）。
+- [ ] **全家桶工具入口组装边界**（2026-08 提出，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；**2026-08 已落地**——③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默、④ rail 折叠态视觉验收（web2 实测正常）；**剩余**——① 官方 slots 型插件（git-graph/better-sidebar）的组装语义（v1 只做显隐开关）。
 - [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」）：`typert → dsh-channel`（typert 调用帧经 channel 传输，broker 为 channel 可选后端）。**未实现**：① channel 的 typert transport 契约（`rpc.send`/`intercept`）② console/quick-nav client 面改 `ctx.remote` 消费（替换手写 HTTP /api/console/* + EventSource）③ 跨实例 `@RemoteScope` 控制指令（console→instance/daemon）④ transport 选择策略（直连 vs broker）⑤ typert forwardable events ↔ channel 三平面映射。当前跨实例仍走 relay+HTTP。
-- [x] ~~dsh-desk 布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-tabs / dsh-quick-nav 订阅 `my-ui-layout` **实时注册/注销**（slots.inject 内订阅配置，visible=false 注销、恢复重新注册）；组装器配置化（tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默。剩余：slots 型插件组装语义、rail 视觉验收（见组装边界）。
+- [x] ~~dsh-desk 布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-tabs / dsh-quick-nav 订阅 `my-ui-layout` **实时注册/注销**（slots.inject 内订阅配置，visible=false 注销、恢复重新注册）；组装器配置化（tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默。剩余：slots 型插件组装语义（见组装边界）。
 
 ### 实现状态总表（2026-08 核）
 
@@ -383,7 +383,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | 项 | 状态 | 差距 |
 | --- | --- | --- |
 | **typert 接入** | 待实现 | channel 无 transport 契约；console/quick-nav client 仍手写 HTTP/EventSource；无 @RemoteScope 跨实例指令；无 transport 选择策略；无事件映射 |
-| **组装器开放边界** | 部分（剩 ①④） | ③配置化/⑤通用性/②CSS 回退已落地；剩 slots 型插件组装语义（v1 显隐开关）、rail 视觉验收（缺浏览器） |
+| **组装器开放边界** | 部分（剩 ①） | ③配置化/⑤通用性/②CSS 回退/④rail 视觉验收（web2 实测正常）已落地；剩 slots 型插件组装语义（v1 显隐开关） |
 | **dsh-gateway 集成** | 待实现 | 选定未装（dsh-user 网关对接预留） |
 | **dsh-memento / dst-agent-teams** | 待接入 | 选定未接入（v1 无消费方 / 未来成员） |
 | **dsh-prometheus** | 挂起 | 指标总览非 v1 必需——console 总览先用手工数据，指标面后续评估 |
