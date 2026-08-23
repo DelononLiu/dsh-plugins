@@ -238,7 +238,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | --- | --- | --- | --- |
 | dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；认证实现已拆出走认证网关 | ✅ 已实现（13 测试；网关对接预留，见 §9） |
 | dsh-channel | 系统·通信 | 发现/心跳、事件总线（at-least-once/幂等/TTL/三平面）、鉴权、控制指令；**实例服务提供者**（实例类型 + 发现/状态服务） | ✅ 已实现（29 测试；Typert 远程化未接入——跨实例走 relay+HTTP，见 §9） |
-| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | ✅ 已实现（37 测试 + 3 HTTP 端点 instances/control/broker；daemon/instance 三角色；升级回滚为遗留项，见 §9） |
+| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | ✅ 已实现（37 测试 + 3 HTTP 端点 instances/control/broker；daemon/instance 三角色；升级回滚挂起，见 §9） |
 | dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示） | ✅ 已并入（非独立包） |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ✅ 已上线三端（2 测试） |
 | dsh-tabs | UI | 固定会话标签页（Alt+P 固定/取消、× 关闭、编号标题） | ✅ 已实现（2 测试，web2 验证） |
@@ -255,7 +255,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | dst-agent-teams（@nanmicoder） | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员**；npm 安装 + lock 锁版本（v0.1.12） |
 | dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
 | dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.4 活跃）；纯本地；npm 安装 + lock 锁版本；**消费方 = agent 会话/上层插件经 ctx.memory 运行时使用（非 type-only 协作）**；官方无 memory，社区填补 |
-| dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | console 总览复用 |
+| dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | 挂起（console 总览复用，见 §9） |
 
 > **已移除/已实现**：dsh-topbar-manager（顶栏治理）删除——nav/tabs 直接注入顶栏，不设统一注册表；dsh-update-checker（升级/备份/回滚）删除——作为 dsh-console 遗留项（console 生命周期未来补）；dsh-agent-relay（HMAC 事件总线骨架）submodule 移除——仅作 channel 设计蓝本，事件总线已由 channel 自研实现；dsh-daemon 已实现——**融入 dsh-console 的 daemon 角色**（守护进程：本机实例 spawn/kill/追踪/重启三分支/busy 锁，控制面在 console）。
 
@@ -376,12 +376,12 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 **❌ 未完成（开放项，见上）**
 
-| 项 | 差距 |
-| --- | --- |
-| **typert 接入** | channel 无 transport 契约；console/quick-nav client 仍手写 HTTP/EventSource；无 @RemoteScope 跨实例指令；无 transport 选择策略；无事件映射 |
-| **dsh-desk 四区布局消费方** | 配置开关无消费方（官方无 topbar 区；tabs/topbar 需跨插件契约） |
-| **组装器开放边界** | slots 型插件组装语义 / CSS 覆盖回退 / 组装配置化 / rail 视觉验收（缺浏览器）/ 通用性 |
-| **dsh-gateway 集成** | 选定未装（dsh-user 网关对接预留） |
-| **dsh-memento / dst-agent-teams** | 选定未接入（v1 无消费方 / 未来成员） |
-| **dsh-prometheus** | 未引入（TBD） |
-| **升级回滚** | console 遗留项（未来补） |
+| 项 | 状态 | 差距 |
+| --- | --- | --- |
+| **typert 接入** | 待实现 | channel 无 transport 契约；console/quick-nav client 仍手写 HTTP/EventSource；无 @RemoteScope 跨实例指令；无 transport 选择策略；无事件映射 |
+| **dsh-desk 四区布局消费方** | 待实现 | 配置开关无消费方（官方无 topbar 区；tabs/topbar 需跨插件契约） |
+| **组装器开放边界** | 部分（待定） | slots 型插件组装语义 / CSS 覆盖回退 / 组装配置化 / rail 视觉验收（缺浏览器）/ 通用性 |
+| **dsh-gateway 集成** | 待实现 | 选定未装（dsh-user 网关对接预留） |
+| **dsh-memento / dst-agent-teams** | 待接入 | 选定未接入（v1 无消费方 / 未来成员） |
+| **dsh-prometheus** | 挂起 | 指标总览非 v1 必需——console 总览先用手工数据，指标面后续评估 |
+| **升级回滚** | 挂起 | 生命周期核心 v1 已够用（stop/start/restart/deploy 三角色），快照回滚等后续补 |
