@@ -44,17 +44,15 @@ const ENTRY_SELECTOR = '[data-dsh-part="sidebar-entry"]'
  * data-dsh-part（全家桶 entry 统一标记），特异性高于插件 css-modules 类。
  * Rail（折叠）态对齐官方 `.trigger.rail`：36px 圆、仅图标。
  *
- * 间距（③ 配置化）：foot 区各行（entry/控制台/设置）统一为
- * `margin: {footSpacing}px -2px`（行间 2×footSpacing，默认 2px = 行间 4px，
- * 用户反馈官方 4px 上下边距间隔过大）；折叠态恢复官方 rail 的
- * `margin: 8px 0 10px`（覆盖规则在后面、特异性更高，折叠态优先）。
+ * 间距：foot 区各行（entry/控制台/设置）统一为 `margin: 2px -2px`
+ * （行间 4px，用户反馈官方 4px 上下边距间隔过大）；折叠态恢复官方 rail
+ * 的 `margin: 8px 0 10px`（覆盖规则在后面、特异性更高，折叠态优先）。
  */
-function footCss(footSpacing: number): string {
-  const spacing = Number.isFinite(footSpacing) && footSpacing >= 0 ? footSpacing : 2
+function footCss(): string {
   return [
-    `[class*="footArea"] [data-dsh-part="sidebar-entry"]{box-sizing:border-box;flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);height:42px;margin:${spacing}px -2px;padding:0 10px 0 8px;border:none;border-radius:12px;background:transparent;cursor:pointer;overflow:hidden;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px}`,
+    '[class*="footArea"] [data-dsh-part="sidebar-entry"]{box-sizing:border-box;flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);height:42px;margin:2px -2px;padding:0 10px 0 8px;border:none;border-radius:12px;background:transparent;cursor:pointer;overflow:hidden;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px}',
     '[class*="footArea"] [data-dsh-part="sidebar-entry"]:hover{background:var(--dsw-alias-interactive-bg-hover)}',
-    `[class*="footArea"] [class*="trigger"]{margin:${spacing}px -2px}`,
+    '[class*="footArea"] [class*="trigger"]{margin:2px -2px}',
     '[class*="collapsed"] [data-dsh-part="sidebar-entry"]{width:36px;height:36px;margin:8px 0 10px;justify-content:center;gap:0;padding:0;border-radius:50%}',
     '[class*="collapsed"] [data-dsh-part="sidebar-entry"] [class*="entryLabel"]{display:none}',
     '[class*="collapsed"] [class*="footArea"] [class*="trigger"]{margin:8px 0 10px}',
@@ -62,12 +60,12 @@ function footCss(footSpacing: number): string {
 }
 
 /** 幂等注入样式（bundle 加载即执行，与 ConsoleBadge 同机制）。返回移除函数。 */
-function injectEntryFootCss(footSpacing: number): () => void {
+function injectEntryFootCss(): () => void {
   if (typeof document === 'undefined' || document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')) return () => {}
   const tag = document.createElement('style')
   tag.dataset.plugin = 'dsh-desk'
   tag.dataset.pluginCss = '@dsh-desk/tool-assembler'
-  tag.textContent = footCss(footSpacing)
+  tag.textContent = footCss()
   document.head.appendChild(tag)
   return () => tag.remove()
 }
@@ -91,14 +89,13 @@ function footerActionsOf(foot: HTMLElement): HTMLElement | null {
 }
 
 /**
- * 组装器配置读取（③）：settings 快照里的 assembler（footSpacing + tools 排除）。
- * settings 缺席/未 ready 时回退默认（全可见、2px）。
+ * 组装器配置读取（③）：settings 快照里的 assembler.tools（工具排除）。
+ * settings 缺席/未 ready 时回退默认（全可见）。
  */
 function resolveAssembler(snapshot: unknown): AssemblerConfig {
   const value = snapshot as { value?: { assembler?: AssemblerConfig } } | undefined
   const assembler = value?.value?.assembler
   return {
-    footSpacing: assembler?.footSpacing ?? 2,
     tools: assembler?.tools ?? {},
   }
 }
@@ -109,7 +106,7 @@ export type ToolAssemblerDisposer = () => void
 /**
  * 启动工具入口组装器：观察 body，等 entry + footArea 都出现后摆位。
  * @param snapshot - 当前 settings 快照（读 assembler 配置；可传 undefined 用默认）。
- * @param subscribe - settings 订阅入口（可选：配置变更时重读并重摆位/重注入 CSS）。
+ * @param subscribe - settings 订阅入口（可选：配置变更时重读并重摆位）。
  * @param getSnapshot - settings 快照读取（配合 subscribe；变更回调里读新配置）。
  * @returns disposer（断开观察器；entry 留在 footArea，由插件自身 dispose 清理）。
  */
@@ -119,7 +116,7 @@ export function startToolAssembler(
   getSnapshot?: () => unknown,
 ): ToolAssemblerDisposer {
   let config = resolveAssembler(snapshot)
-  let removeCss = injectEntryFootCss(config.footSpacing)
+  const removeCss = injectEntryFootCss()
 
   /** 工具是否被配置排除（tools.<id>.visible=false → 不摆位）。 */
   const excluded = (entry: HTMLElement): boolean => {
@@ -144,20 +141,14 @@ export function startToolAssembler(
   }
 
   /**
-   * 配置变更（设置页改间距/工具显隐）：重读配置 → 重注入 CSS（间距变化）+
-   * 重摆位（新排除的移回默认落点 logoRow 后、恢复的重新摆位）。
+   * 配置变更（设置页改工具显隐）：重读配置 → 重摆位
+   * （新排除的移回默认落点 logoRow 后、恢复的重新摆位）。
    */
   const onSettingsChange = (): void => {
     if (getSnapshot === undefined) return
     const next = resolveAssembler(getSnapshot())
-    const spacingChanged = next.footSpacing !== config.footSpacing
-    const toolsChanged = JSON.stringify(next.tools) !== JSON.stringify(config.tools)
-    if (!spacingChanged && !toolsChanged) return
+    if (JSON.stringify(next.tools) === JSON.stringify(config.tools)) return
     config = next
-    if (spacingChanged) {
-      removeCss()
-      removeCss = injectEntryFootCss(config.footSpacing)
-    }
     const root = sidebarRoot()
     if (root === null) return
     const foot = footAreaOf(root)

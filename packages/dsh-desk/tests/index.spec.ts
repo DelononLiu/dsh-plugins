@@ -14,7 +14,7 @@ function boot(config: Partial<Config> = {}): MyUiService {
       sidebar: { visible: true, order: 2, size: '260px' },
       actions: { visible: true, order: 3 },
     },
-    assembler: { footSpacing: 2, tools: {} },
+    assembler: { tools: {} },
     ...config,
   })
 }
@@ -42,17 +42,15 @@ describe('四区布局配置', () => {
 })
 
 describe('组装器配置', () => {
-  it('默认：footSpacing 2、无工具排除', () => {
+  it('默认：无工具排除', () => {
     const svc = boot()
     const assembler = svc.assembler()
-    expect(assembler.footSpacing).toBe(2)
     expect(assembler.tools).toEqual({})
   })
 
-  it('自定义：footSpacing + 工具显隐', () => {
-    const svc = boot({ assembler: { footSpacing: 4, tools: { ssh: { visible: false } } } })
+  it('自定义：工具显隐', () => {
+    const svc = boot({ assembler: { tools: { ssh: { visible: false } } } })
     const assembler = svc.assembler()
-    expect(assembler.footSpacing).toBe(4)
     expect(assembler.tools.ssh?.visible).toBe(false)
   })
 })

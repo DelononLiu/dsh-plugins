@@ -117,19 +117,12 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
   }
 
   const toggleTool = (tool: AssembledToolId): void => {
-    const current = assembler ?? { footSpacing: 2, tools: {} }
+    const current = assembler ?? { tools: {} }
     const prev = current.tools[tool]?.visible ?? true
     const next: AssemblerConfig = {
       ...current,
       tools: { ...current.tools, [tool]: { visible: !prev } },
     }
-    setAssembler(next)
-    host.set('assembler', next)
-  }
-
-  const setSpacing = (value: number): void => {
-    const current = assembler ?? { footSpacing: 2, tools: {} }
-    const next: AssemblerConfig = { ...current, footSpacing: value }
     setAssembler(next)
     host.set('assembler', next)
   }
@@ -148,7 +141,7 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
           </Row>
         )
       })}
-      <Row title="工具入口（侧边栏 foot 区）" desc="task-board / SSH / 技能中心的入口行摆位开关（实时生效）">
+      <Row title="工具入口（侧边栏控制台上方）" desc="task-board / SSH / 技能中心的入口行摆位开关（实时生效）">
         <span />
       </Row>
       {TOOLS.map((tool) => {
@@ -159,17 +152,6 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
           </Row>
         )
       })}
-      <Row title="foot 区间距" desc="侧边栏 foot 区各入口行的上下边距（px）">
-        <input
-          type="number"
-          min={0}
-          max={8}
-          value={assembler?.footSpacing ?? 2}
-          onChange={(e) => setSpacing(Number(e.target.value))}
-          aria-label="foot 区间距"
-          style={{ width: 56, height: 32, boxSizing: 'border-box', background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, padding: '0 8px', fontSize: 13, flex: 'none' }}
-        />
-      </Row>
     </div>
   )
 }

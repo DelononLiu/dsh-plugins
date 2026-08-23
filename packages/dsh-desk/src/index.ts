@@ -31,17 +31,14 @@ export type LayoutConfig = Record<LayoutRegion, RegionLayout>
 /** 组装器工具（data-dsh-*-entry 注入型，v1 三家 + 可扩展）。 */
 export type AssembledToolId = 'taskboard' | 'ssh' | 'skill'
 
-/** 组装器配置（v1：foot 区间距 + 工具显隐；通用性 = 运行时发现 + 配置排除）。 */
+/** 组装器配置（工具显隐；通用性 = 运行时发现 + 配置排除）。 */
 export interface AssemblerConfig {
-  /** foot 区行间距（上下边距 px，默认 2——官方 trigger 4px 的用户偏好收紧）。 */
-  footSpacing: number
   /** 工具显隐（缺省可见；false = 组装器不摆位该工具）。 */
   tools: Partial<Record<AssembledToolId, { visible: boolean }>>
 }
 
 /** 默认组装器配置。 */
 export const DEFAULT_ASSEMBLER: AssemblerConfig = {
-  footSpacing: 2,
   tools: {},
 }
 
@@ -67,7 +64,6 @@ const layoutSchema = z.object({
 
 /** 组装器 schema 段（tools 为 dict，键可缺省，缺省 = 可见）。 */
 const assemblerSchema = z.object({
-  footSpacing: z.number().default(DEFAULT_ASSEMBLER.footSpacing),
   tools: z.dict(z.object({ visible: z.boolean().default(true) }).default({ visible: true })).default({}),
 }).default(DEFAULT_ASSEMBLER)
 
@@ -124,10 +120,9 @@ export class MyUiService extends Service {
     return this.layout()[region]
   }
 
-  /** 读取组装器配置（间距 + 工具显隐）。 */
+  /** 读取组装器配置（工具显隐）。 */
   assembler(): AssemblerConfig {
     return {
-      footSpacing: this.config.assembler.footSpacing,
       tools: this.config.assembler.tools,
     }
   }
