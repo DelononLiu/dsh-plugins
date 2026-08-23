@@ -97,6 +97,7 @@ function resolveAssembler(snapshot: unknown): AssemblerConfig {
   const assembler = value?.value?.assembler
   return {
     tools: assembler?.tools ?? {},
+    slots: assembler?.slots ?? {},
   }
 }
 

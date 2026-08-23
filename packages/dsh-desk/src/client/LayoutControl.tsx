@@ -8,7 +8,7 @@
 
 import { useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { AssemblerConfig, AssembledToolId } from '../index'
+import type { AssemblerConfig, AssembledSlotId, AssembledToolId } from '../index'
 
 /** 设置页 section 插槽注入的 props。 */
 export type LayoutControlProps = PropsRuntime<'settings.section'>
@@ -27,6 +27,12 @@ const TOOL_LABEL: Record<AssembledToolId, string> = {
   taskboard: '任务看板',
   ssh: 'SSH',
   skill: '技能中心',
+}
+
+/** slots 型插件（官方插槽 occupant，只能显隐）。 */
+export const SLOTS: AssembledSlotId[] = ['gitGraph']
+const SLOT_LABEL: Record<AssembledSlotId, string> = {
+  gitGraph: 'Git 分支选择器',
 }
 
 /** settingsScope host 契约（读快照/写字段/订阅）。 */
@@ -114,11 +120,22 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
   }
 
   const toggleTool = (tool: AssembledToolId): void => {
-    const current = assembler ?? { tools: {} }
+    const current = assembler ?? { tools: {}, slots: {} }
     const prev = current.tools[tool]?.visible ?? true
     const next: AssemblerConfig = {
       ...current,
       tools: { ...current.tools, [tool]: { visible: !prev } },
+    }
+    setAssembler(next)
+    host.set('assembler', next)
+  }
+
+  const toggleSlot = (slot: AssembledSlotId): void => {
+    const current = assembler ?? { tools: {}, slots: {} }
+    const prev = current.slots[slot]?.visible ?? true
+    const next: AssemblerConfig = {
+      ...current,
+      slots: { ...current.slots, [slot]: { visible: !prev } },
     }
     setAssembler(next)
     host.set('assembler', next)
@@ -142,10 +159,21 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
         <span />
       </Row>
       {TOOLS.map((tool) => {
-        const visible = assembler?.tools[tool]?.visible ?? true
+        const visible = assembler?.tools?.[tool]?.visible ?? true
         return (
           <Row key={tool} title={TOOL_LABEL[tool]}>
             <Switch checked={visible} onChange={() => toggleTool(tool)} label={TOOL_LABEL[tool]} />
+          </Row>
+        )
+      })}
+      <Row title="插槽型插件" desc="官方插槽 occupant（无 entry 可搬，仅显隐；Git 分支选择器 = 会话前 chip + 图谱对话框）">
+        <span />
+      </Row>
+      {SLOTS.map((slot) => {
+        const visible = assembler?.slots?.[slot]?.visible ?? true
+        return (
+          <Row key={slot} title={SLOT_LABEL[slot]}>
+            <Switch checked={visible} onChange={() => toggleSlot(slot)} label={SLOT_LABEL[slot]} />
           </Row>
         )
       })}

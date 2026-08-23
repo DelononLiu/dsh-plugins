@@ -31,15 +31,25 @@ export type LayoutConfig = Record<LayoutRegion, RegionLayout>
 /** 组装器工具（data-dsh-*-entry 注入型，v1 三家 + 可扩展）。 */
 export type AssembledToolId = 'taskboard' | 'ssh' | 'skill'
 
-/** 组装器配置（工具显隐；通用性 = 运行时发现 + 配置排除）。 */
+/**
+ * 组装器 slots 型插件（官方插槽 occupant，无 entry 可搬——只能显隐）。
+ * git-graph：会话前分支选择 chip + 图谱对话框（官方输入区插槽）。
+ * better-sidebar：整体工作台框架（自带面板 toggle），不纳入组装（它自己的配置管）。
+ */
+export type AssembledSlotId = 'gitGraph'
+
+/** 组装器配置（工具显隐 + slots 型插件显隐；通用性 = 运行时发现 + 配置排除）。 */
 export interface AssemblerConfig {
   /** 工具显隐（缺省可见；false = 组装器不摆位该工具）。 */
   tools: Partial<Record<AssembledToolId, { visible: boolean }>>
+  /** slots 型插件显隐（缺省可见；false = 隐藏该插件界面，CSS 覆盖）。 */
+  slots: Partial<Record<AssembledSlotId, { visible: boolean }>>
 }
 
 /** 默认组装器配置。 */
 export const DEFAULT_ASSEMBLER: AssemblerConfig = {
   tools: {},
+  slots: {},
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -61,9 +71,10 @@ const layoutSchema = z.object({
   sidebar: z.object({ visible: z.boolean().default(true), order: z.number().default(2), size: z.string().default('260px') }).default({ visible: true, order: 2, size: '260px' }),
 }).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' } })
 
-/** 组装器 schema 段（tools 为 dict，键可缺省，缺省 = 可见）。 */
+/** 组装器 schema 段（tools/slots 为 dict，键可缺省，缺省 = 可见）。 */
 const assemblerSchema = z.object({
   tools: z.dict(z.object({ visible: z.boolean().default(true) }).default({ visible: true })).default({}),
+  slots: z.dict(z.object({ visible: z.boolean().default(true) }).default({ visible: true })).default({}),
 }).default(DEFAULT_ASSEMBLER)
 
 /** 运行时 schema。 */
@@ -117,10 +128,11 @@ export class MyUiService extends Service {
     return this.layout()[region]
   }
 
-  /** 读取组装器配置（工具显隐）。 */
+  /** 读取组装器配置（工具/slots 显隐）。 */
   assembler(): AssemblerConfig {
     return {
       tools: this.config.assembler.tools,
+      slots: this.config.assembler.slots,
     }
   }
 }

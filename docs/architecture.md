@@ -356,7 +356,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 - [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored 机制落地~~（已定 2026-08 → **2026-08 改统一 npm**）：原"dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装"——**已改为统一 npm 安装 + lock 锁版本**（dsh-memento / dst-agent-teams npm 均有发布版，submodule 已移除；见 Vendoring policy）
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合
-- [ ] **全家桶工具入口组装边界**（2026-08 提出，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；**2026-08 已落地**——③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默、④ rail 折叠态视觉验收（web2 实测正常）；**剩余**——① 官方 slots 型插件（git-graph/better-sidebar）的组装语义（v1 只做显隐开关）。
+- [x] ~~全家桶工具入口组装边界~~（**已实现** 2026-08，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默、④ rail 折叠态视觉验收（web2 实测正常）、**① slots 型插件显隐（git-graph 开关：`assembler.slots.gitGraph`，CSS 覆盖 chip+dialog，实时生效）** 全部落地。better-sidebar 为整体工作台框架（自带面板 toggle），不纳入组装——它自己的配置管。
 - [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」）：`typert → dsh-channel`（typert 调用帧经 channel 传输，broker 为 channel 可选后端）。**未实现**：① channel 的 typert transport 契约（`rpc.send`/`intercept`）② console/quick-nav client 面改 `ctx.remote` 消费（替换手写 HTTP /api/console/* + EventSource）③ 跨实例 `@RemoteScope` 控制指令（console→instance/daemon）④ transport 选择策略（直连 vs broker）⑤ typert forwardable events ↔ channel 三平面映射。当前跨实例仍走 relay+HTTP。
 - [x] ~~dsh-desk 布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-tabs / dsh-quick-nav 订阅 `my-ui-layout` **实时注册/注销**（slots.inject 内订阅配置，visible=false 注销、恢复重新注册）；组装器配置化（tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默。剩余：slots 型插件组装语义（见组装边界）。
 
@@ -367,13 +367,14 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | 项 | 证据 |
 | --- | --- |
 | dsh-user 身份模型（current/instanceAccess/isOwner + IdentityResolver 适配层 + 侧边栏用户徽标/登出） | 29 测试 + web2 实测 |
+| dsh-gateway 集成（clarknu，HTTPS 3443：admin/user 登录 + 会话 + 登出） | 已部署（测试 home settings，不入库） |
 | dsh-channel 通信（发现/心跳/事件总线 at-least-once/鉴权/控制指令） | 29 测试 |
 | dsh-console（档案/生命周期/inbox/三角色 daemon·instance·console + 3 HTTP 端点） | 37 测试 |
 | console UI（并入 dsh-console client 半区：ConsoleBadge + 控制面板） | sidebar.footer.action，仅管理端 |
 | dsh-quick-nav 顶栏导航（三端在线） | 2 测试 |
 | dsh-tabs 固定会话标签（Alt+P/×/编号） | 2 测试 |
 | dsh-desk 工具入口组装器（re-parent 到 foot 区控制台上方 + 官方 trigger 契约样式 + 间距） | 10 测试 + web2 验证 |
-| dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关 + 组装器配置化/通用性） | 20 测试（含 layout-consumer 5、组装器 3） |
+| dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关 + 组装器配置化/通用性 + **slots 型插件显隐 git-graph 开关**） | 25 测试（含 slots-controller 5） |
 | vendored 全家桶 5 包（better-sidebar/git-graph/ssh/task-board/skill-explorer） | profile 依赖 + lock 锁版本 |
 | 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dev-test-env.sh | scripts/ 已实测 |
 | vendoring 统一 npm（submodule 归零） | AGENTS.md policy |
@@ -383,8 +384,6 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | 项 | 状态 | 差距 |
 | --- | --- | --- |
 | **typert 接入** | 待实现 | channel 无 transport 契约；console/quick-nav client 仍手写 HTTP/EventSource；无 @RemoteScope 跨实例指令；无 transport 选择策略；无事件映射 |
-| **组装器开放边界** | 部分（剩 ①） | ③配置化/⑤通用性/②CSS 回退/④rail 视觉验收（web2 实测正常）已落地；剩 slots 型插件组装语义（v1 显隐开关） |
-| **dsh-gateway 集成** | 待实现 | 选定未装（dsh-user 网关对接预留） |
 | **dsh-memento / dst-agent-teams** | 待接入 | 选定未接入（v1 无消费方 / 未来成员） |
 | **dsh-prometheus** | 挂起 | 指标总览非 v1 必需——console 总览先用手工数据，指标面后续评估 |
 | **升级回滚** | 挂起 | 生命周期核心 v1 已够用（stop/start/restart/deploy 三角色），快照回滚等后续补 |
