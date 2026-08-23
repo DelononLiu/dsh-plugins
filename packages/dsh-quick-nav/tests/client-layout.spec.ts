@@ -33,6 +33,12 @@ function makeCtx(initial: { topbar?: { visible?: boolean } }) {
         return () => { registered.push('unregister') }
       },
     },
+    remote: {
+      $mount: () => Promise.resolve(() => {}),
+      channel: {
+        list: async () => ({ ok: true, value: [] }),
+      },
+    },
   } as never
   return {
     ctx,

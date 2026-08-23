@@ -13,26 +13,17 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import { createHmac, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-/** 实例基础身份（实例服务提供者——实例首先是通信层发现的实体）。 */
-export interface InstanceIdentity {
-  /** 稳定实例 id。 */
-  id: string
-  /** 展示名。 */
-  name: string
-  /** 可达地址（跳转/连接用）。 */
-  addr: string
-  /** 在线状态（由心跳维护）。 */
-  status: 'online' | 'offline'
-  /** 健康状态（可选）。 */
-  health?: string
-  /** 发行包版本。 */
-  version?: string
-}
+// Remote 边界类型从 ./types 子路径导出（typert generator 规则：边界类型
+// 必须来自公共非根类型子路径，供跨包消费与类型契约）。
+import type { InstanceIdentity } from './types.ts'
+export type * from './types.ts'
+export type { InstanceIdentity } from './types.ts'
 
 /** 事件三平面（已定）：control 控制指令 / task 幂等投递 / session 仅显式共享。 */
 export type EventPlane = 'control' | 'task' | 'session'
@@ -111,7 +102,7 @@ interface InstanceEntry extends InstanceIdentity {
  * 通信服务（实例服务提供者 + 事件总线 + 控制指令）。所有插件经 `ctx.channel`
  * 注册/发现实例、收发事件与控制指令。
  */
-export class ChannelService extends Service {
+export class ChannelService extends TypertRemoteService {
   static Config = Config
 
   /** 已知实例表（id → 含心跳时间的条目）。 */
@@ -299,11 +290,13 @@ export class ChannelService extends Service {
    * 发现：列出全部已知实例（含离线——离线由心跳超时标记）。
    * @returns 实例基础身份列表。
    */
+  @Remote
   list(): InstanceIdentity[] {
     return [...this.instances.values()].map(toIdentity)
   }
 
   /** 查询单个实例；未知返回 undefined。 */
+  @Remote
   get(instanceId: string): InstanceIdentity | undefined {
     const entry = this.instances.get(instanceId)
     return entry ? toIdentity(entry) : undefined
@@ -318,7 +311,7 @@ export class ChannelService extends Service {
    * @param ttl - 存活毫秒（默认 7 天）。
    * @returns 事件 id（订阅方可回执/去重）。
    */
-  emit<P = unknown>(plane: EventPlane, type: string, payload: P, ttl = EVENT_TTL_MS): string {
+  emit<P = unknown>(plane: EventPlane, type: string, payload: P, ttl: number = EVENT_TTL_MS): string {
     const event: ChannelEvent<P> = { id: randomUUID(), plane, type, payload, ts: Date.now(), ttl }
     this.eventTimes.set(event.id, event.ts)
     for (const handler of this.subscribers.get(plane) ?? []) {
