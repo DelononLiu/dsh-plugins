@@ -220,6 +220,9 @@ export class ConsoleService extends TypertRemoteService {
   private static readonly STOP_POLL_LIMIT = 60
   /** restart 离线覆盖窗口（ms）：重启中显示离线，窗口后回到 channel 状态。 */
   private static readonly RESTART_OVERRIDE_MS = 15000
+  /** 实例启动控制宽限（ms）：启动窗口内忽略 stop/restart——broker 消息队列
+   * 持久补投，迟到的旧指令会在"起来就被杀"循环里杀死刚拉起的实例。 */
+  private static readonly STARTUP_CONTROL_GRACE_MS = 15000
 
   /** spawn 实现（测试可替换为伪子进程；生产 = node:child_process.spawn）。 */
   static spawnImpl: typeof spawn = spawn
@@ -240,6 +243,8 @@ export class ConsoleService extends TypertRemoteService {
   private readonly ops = new Map<string, InstanceOp>()
   /** UI 离线覆盖（stop/restart 发出后即时显示 offline，绕开 broker TTL 滞后）。 */
   private readonly offlineOverride = new Map<string, OfflineOverride>()
+  /** 实例进程启动时刻（启动窗口过滤用）。 */
+  private readonly startedAt = Date.now()
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'console')
@@ -314,7 +319,10 @@ export class ConsoleService extends TypertRemoteService {
       return applied.status === inst.status ? withSelf : { ...withSelf, status: applied.status }
     })
     // 主机守护（host<hostId>）与普通实例分开返回，UI 分别呈现。
-    const hosts = view.filter((i) => isHostAgent(i.id))
+    // HostRecord.version 必填，但守护经 broker peers 发现（无版本信息）→ 补默认空串（未知）。
+    const hosts = view
+      .filter((i) => isHostAgent(i.id))
+      .map((h) => ({ ...h, version: h.version ?? '' }))
     const instanceList = view.filter((i) => !isHostAgent(i.id))
     return { instances: instanceList as unknown as InstanceRecord[], hosts: hosts as unknown as HostRecord[] }
   }
@@ -494,8 +502,9 @@ export class ConsoleService extends TypertRemoteService {
         }
         return
       }
-      // 每轮重试 stop（实例可能没收到第一条）。
-      if (i > 0 && i % 10 === 0) {
+      // 每轮重试 stop（实例可能没收到第一条；已离线则不再发，避免 broker 积压
+      // 旧指令——新拉起实例会被迟到 stop 杀死）。
+      if (i > 0 && i % 10 === 0 && this.ctx.channel.get(instanceId)?.status === 'online') {
         this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
       }
       await sleep(500)
@@ -535,6 +544,12 @@ export class ConsoleService extends TypertRemoteService {
     const action = resolveControlAction(command)
     switch (action) {
       case 'exit':
+        // 启动窗口内忽略迟到 stop/restart（broker 持久补投的旧指令；否则
+        // 守护重启链会"拉起→被杀→再拉起"死循环）。窗口后正常执行。
+        if (Date.now() - this.startedAt < ConsoleService.STARTUP_CONTROL_GRACE_MS) {
+          console.log(`[dsh-console/instance] 启动窗口内忽略 ${from} 的 ${command.type} 指令（迟到的旧指令）`)
+          return
+        }
         console.log(`[dsh-console/instance] 收到 ${from} 的 ${command.type} 指令，执行重启/停止（进程退出，守护拉起）`)
         setTimeout(() => process.exit(0), 300)
         break
@@ -599,6 +614,27 @@ export class ConsoleService extends TypertRemoteService {
    */
   @Remote
   controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart', payload: { version?: string }): ControlResult {
+    // 目标侧短路（本机即目标实例）：跨实例 RPC 到达这里时直接执行自退，
+    // 不再 remoteControl 递归（否则管理端→实例→再调自己→死循环）。
+    if (instanceId === this.ctx.channel.relay?.agent) {
+      const action = resolveControlAction({ id: 'rpc', type: command, payload })
+      if (action === 'exit') {
+        // 与事件面一致：启动窗口内忽略迟到的旧指令（broker 补投）。
+        if (Date.now() - this.startedAt < ConsoleService.STARTUP_CONTROL_GRACE_MS) {
+          console.log(`[dsh-console/instance] 启动窗口内忽略 RPC 面 ${command} 指令（迟到的旧指令）`)
+          return { ok: true }
+        }
+        console.log(`[dsh-console/instance] 收到控制指令（RPC 面）${command}，进程退出（守护拉起）`)
+        setTimeout(() => process.exit(0), 300)
+      }
+      return { ok: true }
+    }
+    // daemon 角色（RPC 面到达）：本机清单内的实例直接本机执行（进程管理在守护侧），
+    // 不落入 console 决策路由（否则无 launch 配置 → route=instance → 转发回实例）。
+    if (this.config.role === 'daemon' && this.config.instances?.[instanceId] !== undefined) {
+      this.handleDaemonControl({ id: 'rpc', type: command, payload: { instanceId } }, 'rpc')
+      return { ok: true }
+    }
     if (command === 'upgrade') {
       this.ctx.channel.sendControl(instanceId, { type: command, payload })
       return { ok: true }
@@ -633,7 +669,8 @@ export class ConsoleService extends TypertRemoteService {
     const result = this.ctx.channel.callRemote<ControlResult>(targetId, {
       namespace: 'console',
       method: 'controlInstance',
-      args,
+      // wire 参数必填 payload（target 侧 boundary 校验）——跨实例控制 v1 不带载荷。
+      args: { ...args, payload: {} },
     }, 15_000)
     // 同步返回（v1）：发起后即视为成功（回执异步——真结果经 UI 刷新/事件呈现）。
     // 目标不可达（无 addr 且无 broker）→ 降级 sendControl（原行为）。

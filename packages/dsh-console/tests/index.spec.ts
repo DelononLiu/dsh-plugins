@@ -120,10 +120,24 @@ describe('instance 角色（实例自退兜底，原 agent 改名）', () => {
     const ctx = new Context()
     await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
     await ctx.plugin(ConsoleService, { role: 'instance' })
+    // 实例已运行超过启动窗口（否则迟到指令被窗口过滤，见下一条用例）。
+    ;(ctx.console as unknown as { startedAt: number }).startedAt = Date.now() - ConsoleService.STARTUP_CONTROL_GRACE_MS - 1000
     // sendControl 无 relay → 进程内回环，instance 端 onControl 收到
     ctx.channel.sendControl('instX', { type: 'restart', payload: {} })
     await new Promise((r) => setTimeout(r, 400))
     expect(exitSpy).toHaveBeenCalled()
+    exitSpy.mockRestore()
+  })
+
+  it('instance 角色：启动窗口内收到迟到 stop/restart 忽略（不自杀）', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { role: 'instance' })
+    // 刚启动（默认 startedAt=now）→ 窗口内迟到 restart 被忽略。
+    ctx.channel.sendControl('instX', { type: 'restart', payload: {} })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(exitSpy).not.toHaveBeenCalled()
     exitSpy.mockRestore()
   })
 
