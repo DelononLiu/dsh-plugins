@@ -357,7 +357,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 - [x] ~~vendored 机制落地~~（已定 2026-08 → **2026-08 改统一 npm**）：原"dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装"——**已改为统一 npm 安装 + lock 锁版本**（dsh-memento / dst-agent-teams npm 均有发布版，submodule 已移除；见 Vendoring policy）
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合
 - [x] ~~全家桶工具入口组装边界~~（**已实现** 2026-08，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默、④ rail 折叠态视觉验收（web2 实测正常）、**① slots 型插件显隐（git-graph 开关：`assembler.slots.gitGraph`，CSS 覆盖 chip+dialog，实时生效）** 全部落地。better-sidebar 为整体工作台框架（自带面板 toggle），不纳入组装——它自己的配置管。
-- [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」；**第一期已落地**，见 [typert-integration](../.agents/notes/implemented/architecture/2026-08-23-typert-integration.md)）：`typert → dsh-channel`（typert 调用帧经 channel 传输，broker 为 channel 可选后端）。内核 0.1.1-rc.2 内置 typert 运行时；构建期 generator 需源码（vendored typert-protocol）。**第一期完成**：channel @Remote（list/get）+ 构建管线（build-typert.mjs）+ quick-nav `ctx.remote.channel.list()`（替换 /api/quick-nav/instances）+ 版本统一 rc.2。**剩余（第二期）**：① console 服务 @Remote（listInstances/control）+ client 改 ctx.remote ② 跨实例 @RemoteScope 控制指令（console→instance/daemon）③ transport 选择策略（直连 vs broker）④ typert forwardable events ↔ channel 三平面映射。
+- [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」；**第一二期已落地**，见 [typert-integration](../.agents/notes/implemented/architecture/2026-08-23-typert-integration.md)）：`typert → dsh-channel`（typert 调用帧经 channel 传输，broker 为 channel 可选后端）。内核 0.1.1-rc.2 内置 typert 运行时；构建期 generator 需源码（vendored typert-protocol）。**第一期**：channel @Remote（list/get/brokerStatus）+ 构建管线 + quick-nav `ctx.remote.channel.list()`。**第二期**：console @Remote（listInstances/controlInstance）+ ConsoleBadge 改 ctx.remote；**broker 下沉 channel**（console 无 broker 接口，经 `ctx.remote.channel.brokerStatus()`）。**剩余（第三期）**：① 跨实例 @RemoteScope 控制指令（console→instance/daemon）② transport 选择策略（直连 vs broker）③ typert forwardable events ↔ channel 三平面映射。
 - [x] ~~dsh-desk 布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-tabs / dsh-quick-nav 订阅 `my-ui-layout` **实时注册/注销**（slots.inject 内订阅配置，visible=false 注销、恢复重新注册）；组装器配置化（tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默 + **slots 型插件显隐（git-graph 开关）** 全部落地。
 
 ### 实现状态总表（2026-08 核）
@@ -383,7 +383,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 | 项 | 状态 | 差距 |
 | --- | --- | --- |
-| **typert 接入**（传输分层已定；**第一期完成** 2026-08——channel @Remote + 构建管线 + quick-nav ctx.remote） | 部分（剩第二期） | 第二期：① console @Remote（listInstances/control）+ client 改 ctx.remote ② 跨实例 @RemoteScope 控制指令 ③ transport 选择策略（直连 vs broker）④ typert forwardable events ↔ channel 三平面映射 |
+| **typert 接入**（传输分层已定；**第一二期完成** 2026-08——channel/console @Remote + 构建管线 + broker 下沉 channel） | 部分（剩第三期） | 第三期：① 跨实例 @RemoteScope 控制指令（console→instance/daemon）② transport 选择策略（直连 vs broker）③ typert forwardable events ↔ channel 三平面映射 |
 | **dsh-memento / dst-agent-teams** | 待接入 | 选定未接入（v1 无消费方 / 未来成员） |
 | **dsh-prometheus** | 挂起 | 指标总览非 v1 必需——console 总览先用手工数据，指标面后续评估 |
 | **升级回滚** | 挂起 | 生命周期核心 v1 已够用（stop/start/restart/deploy 三角色），快照回滚等后续补 |

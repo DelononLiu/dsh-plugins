@@ -94,3 +94,11 @@ typert 接入（传输分层已定：`typert → dsh-channel`）。第一期 = �
 - **quick-nav client**：inject `remote` + `$mount(channelRemote)` → `ctx.remote.channel.list()`；本地 declare module cordis `remote: TypertClientRemote`（官方 api-remotes 只聚合官方 7 包，不含自研 channel）。
 - **踩坑**：① protocol 版本必须全仓统一 rc.2（pnpm peer 组合残留 rc.8 导致 declare module 合并分离——`remote.channel` 类型缺失）；② build-typert 的 workspaceRoot 须从脚本位置推导（build cwd=包目录）；③ 生成物依赖 zod（channel 加依赖）；④ TS6 移除 @types 默认包含（tsconfig.base 补 types:["node"]）。
 - **验证**：`channel/list|get` RPC 端点经 gateway 暴露（loader 自动注册 ./typert），web2 curl 实测 `ok:true`；全仓 115 测试 + build 全绿。
+
+## Implementation（第二期，2026-08-23 落地）
+
+- **console @Remote**：`listInstances()` / `controlInstance()` 加 @Remote（TypertRemoteService）；边界类型移 `./types` 子路径；`Record<string,unknown>` payload 改 `{version?: string}`（generator 无法投影 unconstrained unknown）。
+- **broker 下沉 channel**（用户分层纠正）：brokerStatus 从 console 移到 channel（channel 持有 relay + signRequest）；console 删除 broker 路由/方法/BrokerStatusView——broker 是 channel 传输后端，上层经 `ctx.remote.channel.brokerStatus()` 消费。
+- **构建分离**：console `tsconfig.host.json`（generator 只分析 host 面，exclude client——避免 client import dsh-console/remote 死循环）；tsconfig.json 全量 typecheck；build 顺序 build-typert 前置。
+- **踩坑**：① composite+exclude 组合致 tsc 静默不输出（host/build tsconfig 分离）；② 跨包类型 import（console types import dsh-channel）致 generator flags 崩溃（内联身份字段解决）。
+- **验证**：console/listInstances|controlInstance + channel/brokerStatus RPC 经 gateway 暴露（web2 curl 实测 ok:true）；全仓 115 测试 + build 全绿。
