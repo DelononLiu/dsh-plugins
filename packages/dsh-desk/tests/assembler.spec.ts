@@ -189,6 +189,36 @@ describe('startToolAssembler', () => {
     expect(css).not.toContain('margin:2px -2px')
   })
 
+  it('配置变更：排除后移回默认落点、恢复后重摆位、间距重注入 CSS', async () => {
+    const logoRow = root.querySelector(`.${H('logoRow')}`) as HTMLElement
+    const region = root.querySelector(`.${H('regionArea')}`) as HTMLElement
+    const taskboard = injectEntry('data-dsh-taskboard-entry', root, region)
+    const ssh = injectEntry('data-dsh-ssh-entry', root, region)
+    // 可编程 settings：初始全可见 2px，可切到排除 ssh + 间距 4
+    let value = { value: { assembler: { footSpacing: 2, tools: {} } } }
+    const listeners: Array<() => void> = []
+    const subscribe = (fn: () => void) => { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1) } }
+    const getSnapshot = () => value
+    disposers.push(startToolAssembler(getSnapshot(), subscribe, getSnapshot))
+
+    // 初始：两个都摆到 foot
+    await vi.waitFor(() => { expect(parentOf(taskboard)).toBe(root.querySelector(`.${H('footArea')}`)) })
+    expect(parentOf(ssh)).toBe(root.querySelector(`.${H('footArea')}`))
+
+    // 配置变更：排除 ssh + 间距 4 → ssh 移回 root、taskboard 留在 foot、CSS 更新
+    value = { value: { assembler: { footSpacing: 4, tools: { ssh: { visible: false } } } } }
+    for (const fn of [...listeners]) fn()
+    await vi.waitFor(() => { expect(parentOf(ssh)).toBe(root) })
+    expect(parentOf(taskboard)).toBe(root.querySelector(`.${H('footArea')}`))
+    const css = (document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]') as HTMLStyleElement).textContent ?? ''
+    expect(css).toContain('margin:4px -2px')
+
+    // 恢复 ssh → 重新摆位回 foot
+    value = { value: { assembler: { footSpacing: 4, tools: {} } } }
+    for (const fn of [...listeners]) fn()
+    await vi.waitFor(() => { expect(parentOf(ssh)).toBe(root.querySelector(`.${H('footArea')}`)) })
+  })
+
   it('disposer 断开观察器（后续注入不再摆位）', async () => {
     const disposer = startToolAssembler()
     disposer()

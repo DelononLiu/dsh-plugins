@@ -109,11 +109,17 @@ export type ToolAssemblerDisposer = () => void
 /**
  * 启动工具入口组装器：观察 body，等 entry + footArea 都出现后摆位。
  * @param snapshot - 当前 settings 快照（读 assembler 配置；可传 undefined 用默认）。
+ * @param subscribe - settings 订阅入口（可选：配置变更时重读并重摆位/重注入 CSS）。
+ * @param getSnapshot - settings 快照读取（配合 subscribe；变更回调里读新配置）。
  * @returns disposer（断开观察器；entry 留在 footArea，由插件自身 dispose 清理）。
  */
-export function startToolAssembler(snapshot?: unknown): ToolAssemblerDisposer {
-  const config = resolveAssembler(snapshot)
-  const removeCss = injectEntryFootCss(config.footSpacing)
+export function startToolAssembler(
+  snapshot?: unknown,
+  subscribe?: (fn: () => void) => () => void,
+  getSnapshot?: () => unknown,
+): ToolAssemblerDisposer {
+  let config = resolveAssembler(snapshot)
+  let removeCss = injectEntryFootCss(config.footSpacing)
 
   /** 工具是否被配置排除（tools.<id>.visible=false → 不摆位）。 */
   const excluded = (entry: HTMLElement): boolean => {
@@ -136,11 +142,48 @@ export function startToolAssembler(snapshot?: unknown): ToolAssemblerDisposer {
       else foot.appendChild(entry)
     }
   }
+
+  /**
+   * 配置变更（设置页改间距/工具显隐）：重读配置 → 重注入 CSS（间距变化）+
+   * 重摆位（新排除的移回默认落点 logoRow 后、恢复的重新摆位）。
+   */
+  const onSettingsChange = (): void => {
+    if (getSnapshot === undefined) return
+    const next = resolveAssembler(getSnapshot())
+    const spacingChanged = next.footSpacing !== config.footSpacing
+    const toolsChanged = JSON.stringify(next.tools) !== JSON.stringify(config.tools)
+    if (!spacingChanged && !toolsChanged) return
+    config = next
+    if (spacingChanged) {
+      removeCss()
+      removeCss = injectEntryFootCss(config.footSpacing)
+    }
+    const root = sidebarRoot()
+    if (root === null) return
+    const foot = footAreaOf(root)
+    if (foot === null) return
+    const anchor = footerActionsOf(foot) ?? foot.firstElementChild
+    const logoRow = root.querySelector('[class*="logoRow"]')
+    const entries = Array.from(root.querySelectorAll<HTMLElement>(ENTRY_SELECTOR))
+    for (const entry of entries) {
+      if (entry.parentElement !== foot) continue // 未摆位的交给 tryPlace 处理
+      if (excluded(entry)) {
+        // 新排除：移回插件默认落点（logoRow 后）；找不到则留在 foot（静默回退）。
+        if (logoRow !== null && logoRow.nextSibling !== null) root.insertBefore(entry, logoRow.nextSibling)
+      } else if (anchor !== null) {
+        foot.insertBefore(entry, anchor) // 保持顺序（已在该处的 insertBefore 无副作用）
+      }
+    }
+    tryPlace()
+  }
+
   tryPlace()
   const observer = new MutationObserver(() => { tryPlace() })
   observer.observe(document.body, { childList: true, subtree: true })
+  const unsubscribe = subscribe === undefined ? () => {} : subscribe(onSettingsChange)
   return () => {
     observer.disconnect()
+    unsubscribe()
     removeCss()
   }
 }

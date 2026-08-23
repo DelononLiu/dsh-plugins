@@ -40,8 +40,12 @@ export function apply(ctx: ClientContext): void {
     (fn) => host.subscribe(fn),
     () => host.getSnapshot(),
   )
-  // 组装器：运行时发现 entry + 读 assembler 配置（间距/工具显隐）。
-  const assemblerDisposer = startToolAssembler(host.getSnapshot())
+  // 组装器：运行时发现 entry + 读 assembler 配置（间距/工具显隐）+ 订阅配置变更。
+  const assemblerDisposer = startToolAssembler(
+    host.getSnapshot(),
+    (fn) => host.subscribe(fn),
+    () => host.getSnapshot(),
+  )
   ctx.effect(() => () => {
     consumerDisposer()
     assemblerDisposer()

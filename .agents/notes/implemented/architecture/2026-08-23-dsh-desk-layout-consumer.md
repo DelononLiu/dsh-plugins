@@ -23,6 +23,7 @@ Status: implemented
 - **sidebar 显隐**（dsh-desk client）：订阅 `my-ui-layout`，`sidebar.visible=false` 且当前未折叠（读 `data-sidebar-collapsed`）→ `ctx.layout.toggleSidebar()` 折叠一次；`visible=true` 且已折叠 → 展开。用 DOM 属性对齐翻转语义，避免状态错乱。
 - **tabs 显隐**（dsh-tabs client）：bind `my-ui-layout`，`tabs.visible=false` → **不注册** `conversation.view`（插件级跳过）。
 - **topbar/actions 显隐**（dsh-quick-nav / dsh-desk client）：`topbar.visible=false` → quick-nav 不注册 `conversation.session.header.actions`；`actions` 随 sidebar 折叠（foot 区在侧边栏内）。
+- **生效边界（v1）**：sidebar 显隐**实时生效**（LayoutConsumer 订阅 settings）；tabs/topbar 显隐为**启动时快照**（`slots.inject` 回调不重跑，配置变更需刷新页面——v1 接受，动态重注册留后续）。
 - 设置页 LayoutControl 已是入口（读写同一配置），无需改 UI。
 
 ### 2. 组装器开放边界（v1 范围）
