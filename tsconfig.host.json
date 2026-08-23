@@ -1,0 +1,24 @@
+{
+  // Host aggregate for Typert generation（官方 WorkspaceAnalyzer 需求）。
+  // 经 references 指向各包 tsconfig.json——generator 的 loadRegistrations
+  // 只读 projectReferences 发现包。typert-protocol 为 vendored 源码
+  // （构建期 @Remote 符号解析必需）。paths 仅此配置生效——包的 tsc
+  // 编译用 node_modules 解析 protocol（npm 已装），不受源码干扰。
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@deepseek-ai/dsh-typert-protocol": ["./packages/typert-protocol/src/index.ts"],
+      "@deepseek-ai/dsh-typert-protocol/types": ["./packages/typert-protocol/src/types.ts"]
+    }
+  },
+  "references": [
+    { "path": "./packages/typert-protocol" },
+    { "path": "./packages/dsh-user" },
+    { "path": "./packages/dsh-channel" },
+    { "path": "./packages/dsh-console/tsconfig.host.json" },
+    { "path": "./packages/dsh-quick-nav" },
+    { "path": "./packages/dsh-tabs" },
+    { "path": "./packages/dsh-desk" }
+  ]
+}

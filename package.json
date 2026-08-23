@@ -11,6 +11,8 @@
   "packageManager": "pnpm@9.15.0",
   "license": "MIT",
   "devDependencies": {
-    "esbuild": "^0.28.0"
+    "@deepseek-ai/dsh-typert-generator": "0.1.1-rc.2",
+    "esbuild": "^0.28.0",
+    "typescript": "6.0.3"
   }
 }

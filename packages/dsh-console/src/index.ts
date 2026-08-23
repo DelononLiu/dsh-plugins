@@ -18,6 +18,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import 'dsh-channel'
 import { isHostAgent, signRequest, type ControlCommand, type InstanceIdentity } from 'dsh-channel'
@@ -30,34 +31,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { connect } from 'node:net'
 
-/** 实例特殊类型（可扩展枚举，已定）。 */
-export type InstanceType = 'normal' | 'shared' | 'host'
-
-/** 实例管理档案：在通信层实例身份上扩展管理概念。 */
-export interface InstanceRecord extends InstanceIdentity {
-  /** 归属者用户 id（全部实例皆 personal）。 */
-  owner: string
-  /** 实例类型（normal/shared/host）。 */
-  type: InstanceType
-  /** 所在主机 id。 */
-  host: string
-  /** 已部署的发行包版本。 */
-  version: string
-  /** shared 实例授权（owner 授权其他用户：read/full）。 */
-  sharedAuth?: Record<string, 'read' | 'full'>
-}
-
-/** 主机档案（部署单元）。 */
-export interface HostRecord {
-  /** 主机 id。 */
-  id: string
-  /** 主机名/地址。 */
-  addr: string
-  /** 在线状态（聚合自其下实例心跳）。 */
-  status: 'online' | 'offline'
-  /** 已部署的发行包版本。 */
-  version: string
-}
+// Remote 边界类型从 ./types 子路径导出（typert generator 规则）——唯一来源，
+// index 本地引用经 import type，re-export 供外部消费。
+import type {
+  ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType,
+} from './types.ts'
+export type * from './types.ts'
+export type { ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType } from './types.ts'
 
 /** 系统事件消息（inbox，聚焦系统级消息——升级/任务/健康/部署）。 */
 export interface InboxMessage {
@@ -172,13 +152,6 @@ export function resolveControlRoute(
   }
 }
 
-/** 控制指令结果（console.controlInstance 返回；HTTP 端点据此响应）。 */
-export interface ControlResult {
-  ok: boolean
-  /** 失败原因（ok=false 时）。 */
-  error?: string
-}
-
 /** per-instance 操作状态（busy 锁：防并发指令交错；start/restart 共用）。 */
 type InstanceOp = 'starting' | 'restarting'
 
@@ -233,7 +206,7 @@ export function applyOverrideStatus(
  * 管理服务（实例管理服务提供者 + 生命周期执行者）：档案、生命周期编排、inbox。
  * 角色决定执行面：console 决策编排；daemon 本机进程管理；instance 自退。
  */
-export class ConsoleService extends Service {
+export class ConsoleService extends TypertRemoteService {
   static Config = Config
   /** 依赖注入：ctx.channel 必需；webServer 经 ctx.inject 等待（daemon/instance 角色不装也能加载）。 */
   static inject = ['channel']
@@ -306,11 +279,6 @@ export class ConsoleService extends Service {
               path: '/api/console/control',
               handler: (req, res) => this.handleControlRoute(req, res),
             }),
-            injected.webServer.register({
-              kind: 'exact',
-              path: '/api/console/broker',
-              handler: (req, res) => this.handleBrokerRoute(req, res),
-            }),
           ]
           injected.effect(() => () => { for (const dispose of disposers) dispose() })
         })
@@ -318,8 +286,12 @@ export class ConsoleService extends Service {
     }
   }
 
-  /** GET /api/console/instances：实例列表 + 守护 peers（host-* 前缀，UI 分别呈现）。 */
-  private handleInstancesRoute(_req: IncomingMessage, res: ServerResponse): void {
+  /**
+   * 实例列表视图（typert @Remote）：实例 + 主机守护分开返回（UI 分别呈现）。
+   * 复用原 /api/console/instances 路由逻辑（进程内数据面）。
+   */
+  @Remote
+  listInstances(): ConsoleInstanceView {
     let instances = this.ctx.channel.list()
     // 加本机实例（console 端自己，channel 发现的是远端）。
     const self = this.ctx.channel.relay?.agent
@@ -345,8 +317,14 @@ export class ConsoleService extends Service {
     // 主机守护（host<hostId>）与普通实例分开返回，UI 分别呈现。
     const hosts = view.filter((i) => isHostAgent(i.id))
     const instanceList = view.filter((i) => !isHostAgent(i.id))
+    return { instances: instanceList as unknown as InstanceRecord[], hosts: hosts as unknown as HostRecord[] }
+  }
+
+  /** GET /api/console/instances：实例列表 + 守护 peers（host-* 前缀，UI 分别呈现）。 */
+  private handleInstancesRoute(_req: IncomingMessage, res: ServerResponse): void {
+    const view = this.listInstances()
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ instances: instanceList, hosts }))
+    res.end(JSON.stringify(view))
   }
 
   /** POST /api/console/control：下发控制指令（body: {instanceId, command}）。 */
@@ -358,7 +336,7 @@ export class ConsoleService extends Service {
         const { instanceId, command } = JSON.parse(body || '{}') as { instanceId?: string; command?: 'stop' | 'start' | 'upgrade' | 'restart' }
         if (typeof instanceId !== 'string' || !instanceId) throw new Error('instanceId required')
         if (!command || !['stop', 'start', 'upgrade', 'restart'].includes(command)) throw new Error(`unsupported command: ${String(command)}`)
-        const result = this.controlInstance(instanceId, command)
+        const result = this.controlInstance(instanceId, command, {})
         res.writeHead(result.ok ? 200 : 400, { 'content-type': 'application/json' })
         res.end(JSON.stringify(result.ok ? { ok: true, instanceId, command } : { ok: false, instanceId, command, error: result.error }))
       } catch (error) {
@@ -366,55 +344,6 @@ export class ConsoleService extends Service {
         res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }))
       }
     })
-  }
-
-  /**
-   * GET /api/console/broker：broker 运行状态（连接/在线 agent/消息队列计数）。
-   * 控制台面板的「Broker 状态」区块数据面（自实现，不依赖 dsh-agent-relay 插件）。
-   */
-  private async handleBrokerRoute(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const relay = this.ctx.channel.relay
-    const reply = (body: Record<string, unknown>): void => {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(body))
-    }
-    if (relay === undefined) {
-      reply({ connected: false, reason: 'relay 未配置', agents: [], queueCount: 0 })
-      return
-    }
-    try {
-      const ts = Math.floor(Date.now() / 1000)
-      const peersRes = await fetch(`${relay.brokerUrl}/peers`, {
-        headers: {
-          'x-relay-agent': relay.agent,
-          'x-relay-timestamp': String(ts),
-          'x-relay-signature': signRequest(relay.secret, 'GET', '/peers', ts),
-        },
-      })
-      if (!peersRes.ok) {
-        reply({ connected: false, reason: `broker http ${peersRes.status}`, agents: [], queueCount: 0 })
-        return
-      }
-      const peers = (await peersRes.json() as { peers?: Array<{ agent: string; online: boolean }> }).peers ?? []
-      // 队列计数：console 自己的收件箱待处理消息（since 空 → 从最新游标起）。
-      const ts2 = Math.floor(Date.now() / 1000)
-      const path2 = '/messages?since=&limit=50'
-      const msgRes = await fetch(`${relay.brokerUrl}${path2}`, {
-        headers: {
-          'x-relay-agent': relay.agent,
-          'x-relay-timestamp': String(ts2),
-          'x-relay-signature': signRequest(relay.secret, 'GET', path2, ts2),
-        },
-      })
-      const queueCount = msgRes.ok ? ((await msgRes.json() as { messages?: unknown[] }).messages ?? []).length : -1
-      reply({
-        connected: true,
-        agents: peers.map((p) => ({ id: p.agent, online: p.online })),
-        queueCount,
-      })
-    } catch (error) {
-      reply({ connected: false, reason: error instanceof Error ? error.message : String(error), agents: [], queueCount: 0 })
-    }
   }
 
   /** daemon 角色：处理控制指令（只认本机清单内的实例；指令载荷携带 instanceId）。 */
@@ -661,15 +590,16 @@ export class ConsoleService extends Service {
   // --- 生命周期 / 部署编排（控制面：决策，执行在 daemon/instance） ---
 
   /**
-   * 启停/重启实例：按路由决定执行路径（见 resolveControlRoute）——有守护配置
-   * 经守护执行（start 离线也可靠），否则在线实例自退兜底；upgrade/deploy 始终
-   * 投给实例本身（v1 占位）。
+   * 启停/重启实例（typert @Remote）：按路由决定执行路径（见 resolveControlRoute）——
+   * 有守护配置经守护执行（start 离线也可靠），否则在线实例自退兜底；upgrade/deploy
+   * 始终投给实例本身（v1 占位）。
    * @param instanceId - 目标实例 id。
    * @param command - 控制指令类型（stop/start/upgrade/restart）。
-   * @param payload - 载荷（如 upgrade 的目标版本）。
-   * @returns 下发结果（ok=false 时 error 说明原因，供 HTTP 端点响应）。
+   * @param payload - 载荷（如 upgrade 的目标版本；缺省空对象）。
+   * @returns 下发结果（ok=false 时 error 说明原因）。
    */
-  controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart', payload: Record<string, unknown> = {}): ControlResult {
+  @Remote
+  controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart', payload: { version?: string }): ControlResult {
     if (command === 'upgrade') {
       this.ctx.channel.sendControl(instanceId, { type: command, payload })
       return { ok: true }

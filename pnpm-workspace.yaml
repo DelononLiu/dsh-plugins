@@ -1,2 +1,8 @@
 packages:
   - 'packages/*'
+
+# 强制 @deepseek-ai/dsh-typert-protocol 全仓单实例（workspace 版）——
+# typert 的 declare module 合并要求所有消费者解析到同一 protocol 模块，
+# 否则 ctx.remote 类型（api-remotes 注入）与 channel remote 合并分离。
+overrides:
+  '@deepseek-ai/dsh-typert-protocol': 'workspace:*'

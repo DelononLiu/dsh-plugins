@@ -1,6 +1,7 @@
 /**
  * 快捷导航（顶栏）：纯粹链接导航——浮层一行一个链接，点击跳转。
- * 数据：host `/api/quick-nav/instances`（channel.list + 地址表）。
+ * 数据：经 `host.list()`（ctx.remote.channel.list()，typert 远程化——
+ * 替换手写 `/api/quick-nav/instances`）。
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -10,13 +11,18 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 /** 会话头部动作插槽注入的 props。 */
 export type QuickNavProps = PropsRuntime<'conversation.session.header.actions'>
 
-/** 一个实例导航链接。 */
-interface InstanceLink {
+/** 一个实例导航链接（channel 实例身份 + 当前标记）。 */
+export interface InstanceLink {
   id: string
   name: string
   addr: string
   status: 'online' | 'offline'
   current?: boolean
+}
+
+/** QuickNav 数据源（apply 注入：typert remote 面）。 */
+export interface QuickNavHost {
+  list(): Promise<InstanceLink[]>
 }
 
 /** 从地址提取端口（显示用）。 */
@@ -27,9 +33,10 @@ function portOf(addr: string): string {
 
 /**
  * 渲染「快捷导航」入口 + 链接列表浮层（一行一个链接）。
- * @param props - 插槽注入的运行时 props。
+ * @param props - 插槽注入的运行时 props + host（typert 数据源）。
  */
-export function QuickNav(props: QuickNavProps): React.JSX.Element {
+export function QuickNav(props: QuickNavProps & { host: QuickNavHost }): React.JSX.Element {
+  const { host } = props
   const [open, setOpen] = useState(false)
   const [links, setLinks] = useState<InstanceLink[]>([])
   const rootRef = useRef<HTMLSpanElement>(null)
@@ -44,18 +51,15 @@ export function QuickNav(props: QuickNavProps): React.JSX.Element {
     return () => document.removeEventListener('click', onDocClick)
   }, [open])
 
-  // 打开浮层时拉取实例链接。
+  // 打开浮层时经 typert 拉取实例列表（host.list → ctx.remote.channel.list）。
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    fetch('/api/quick-nav/instances')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`http ${r.status}`))))
-      .then((data: { instances?: InstanceLink[] }) => {
-        if (!cancelled) setLinks(data.instances ?? [])
-      })
+    host.list()
+      .then((list) => { if (!cancelled) setLinks(list) })
       .catch(() => { /* 数据面不可用：浮层保持空 */ })
     return () => { cancelled = true }
-  }, [open])
+  }, [open, host])
 
   return (
     <span ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>

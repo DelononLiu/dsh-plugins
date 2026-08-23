@@ -2,16 +2,24 @@
  * dsh-console：管理组件 client 半区（原 dsh-console-ui 并入，UI 与实现同包）。
  *
  * v1 可见 UI：在左侧栏底部（sidebar.footer.action，设置上方）注册
- * 「Console」徽标按钮入口。数据面（实例列表/控制指令/broker 状态经
- * console 服务 HTTP 端点）在 Typert 远程化接入后补全。
+ * 「Console」徽标按钮入口。数据面（实例列表/控制指令/broker 状态）经
+ * **typert 远程化**消费（`ctx.remote.console.listInstances()` /
+ * `controlInstance()` + `ctx.remote.channel.brokerStatus()`——broker 是
+ * channel 的传输后端，状态由 channel 暴露）。
  *
  * 控制台入口只对管理端（console 角色）显示：/api/console/* 端点只由
  * console 角色挂载，client 启动时探测该端点，200 才注册入口——
  * 非管理端（instance/daemon 角色）不显示控制台按钮。
  */
 
+import { createElement } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import { ConsoleBadge } from './ConsoleBadge'
+import consoleRemote from 'dsh-console/remote'
+import channelRemote from 'dsh-channel/remote'
+import type {} from 'dsh-console/remote'
+import type {} from 'dsh-channel/remote'
+import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
+import { ConsoleBadge, type ConsoleHost } from './ConsoleBadge'
 
 /**
  * sidebar.footer.action 插槽类型扩展（官方 sidebar 包未在公开 types 暴露
@@ -27,11 +35,19 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** 需要的 client 服务：插槽注册（sidebar footer 插槽需 sidebar 已加载）。 */
-export const inject = ['slots']
+/** ctx.remote 类型注入（本编译面已合并 channel/console namespace——本地声明）。 */
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    remote: TypertClientRemote
+  }
+}
+
+/** 需要的 client 服务：插槽注册 + typert remote。 */
+export const inject = ['slots', 'remote']
 
 /**
  * Client 插件体：管理端注册侧栏底部「Console」入口（非管理端不注册）。
+ * 数据面经 ctx.remote（console @Remote + channel brokerStatus）。
  * @param ctx - client 根上下文。
  */
 export function apply(ctx: ClientContext): void {
@@ -41,11 +57,32 @@ export function apply(ctx: ClientContext): void {
       if (!r.ok) return
       ctx.slots.inject(
         'sidebar.footer.action',
-        () => ctx.slots.register({
-          name: 'sidebar.footer.action',
-          id: 'console-ui',
-          order: 120,
-        }, ConsoleBadge),
+        () => {
+          // 装配 remote（console + channel contribution），注入 ConsoleBadge。
+          void ctx.remote.$mount(consoleRemote)
+          void ctx.remote.$mount(channelRemote)
+          const host: ConsoleHost = {
+            listInstances: async () => {
+              const result = await ctx.remote.console.listInstances()
+              if (!result.ok) throw new Error(`console.listInstances failed: ${result.error.code}: ${result.error.message}`)
+              return result.value
+            },
+            controlInstance: async (instanceId, command) => {
+              const result = await ctx.remote.console.controlInstance(instanceId, command, {})
+              return result.ok ? { ok: true } : { ok: false, error: result.error.message }
+            },
+            brokerStatus: async () => {
+              // broker 是 channel 的传输后端——状态由 channel 暴露。
+              const result = await ctx.remote.channel.brokerStatus()
+              return result.ok ? result.value : { connected: false, reason: result.error.message, agents: [], queueCount: 0 }
+            },
+          }
+          return ctx.slots.register({
+            name: 'sidebar.footer.action',
+            id: 'console-ui',
+            order: 120,
+          }, (props) => createElement(ConsoleBadge, { ...props, host }))
+        },
       )
     })
     .catch(() => { /* 端点不可用：非管理端，控制台入口不注册 */ })
