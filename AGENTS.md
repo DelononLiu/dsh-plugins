@@ -71,6 +71,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
   | daemon | `~/.dsh-daemon` | `DSH_HOME=~/.dsh-daemon dsh --profile daemon` | 无 web（headless） | 守护 host1（broker `http://127.0.0.1:19121`，出站连） |
 
   实例矩阵权威源 = 管理端 web2 的 `dsh-console.launch` 配置（cordis.patch.yml）；quick-nav/console 从 `DSH_CONSOLE_ADDR`（管理端 3082）拉实例表。启动脚本见 `scripts/dev-test-env.sh`。
+  登录入口：web2 直连（3082，静态兜底无登录）+ **gateway HTTPS（3443，clarknu/dsh-gateway，admin/user 登录 + 侧边栏登出）**——`gateway.users`（scrypt）与 dsh-user `users` 同源配置于测试 home 的 settings.yaml/cordis.patch.yml（不入库）。8080 HTTP 反代已移除（与 3082 重复）。
 - **🔴 硬性禁令：禁止启动/触碰正式 web（3080）**（2026-08 用户强调）：3080 是当前 DSH GUI 常驻端口，**绝不**用 `dsh web` 或 `dsh --profile web` 启动（默认 3080），**绝不**修改 `~/.dsh/profiles/web` 的配置（bundles/cordis.patch.yml/package.json）。测试一律走独立 DSH_HOME + 独立端口（3082/3083/3084）。误操作会占用 3080 导致 GUI 冲突或污染正式环境。
 - **client 构建**：声明 dsh.client 的插件必须产出 `lib/client.js`（官方 ModuleLoader closure 格式）——`scripts/build-client.mjs`（esbuild）生成，4 个 UI 插件 build 已接入。
 

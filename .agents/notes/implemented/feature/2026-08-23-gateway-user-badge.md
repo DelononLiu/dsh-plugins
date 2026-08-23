@@ -38,7 +38,8 @@ Status: implemented
 ## Consequences
 
 - dsh-user 增加 `IdentityResolver` 接口 + `gateway-cookie` 适配器（读私有 cookie + hmacSecret 验签，不改 vendor）；将来 APISIX 增 `jwt` 适配器，消费方零改动。
-- 用户显示：侧边栏底部（设置下方）显示当前用户（名称 + 角色徽标），样式对齐官方 foot 按钮；只消费身份模型，网关可替换。
-- 已验证（web2 实测通过）：gateway cookie 验签（`dsh_gw_sid` + hmacSecret 读取路径）；用户显示落点（设置下方）的官方 slots 支持（可能需要 DOM 注入或新插槽声明）。
+- 用户显示：侧边栏底部（设置下方）显示当前用户（人形图标 + 用户名 + 角色徽标），样式对齐官方 foot 按钮；只消费身份模型，网关可替换。
+- 登出：经网关（host 判定 `viaGateway`，/api/user/me 返回字段）时显示登出按钮，跳 gateway `/logout`；HTTP 直连（静态兜底）不显示。
+- 已验证（web2 实测通过）：gateway cookie 验签（`dsh_gw_sid` + secretFile 读 gateway state.json）；HTTP 直连拒绝 cookie（防重放）；secret 轮换即时生效；登出链路（/logout 清 cookie 回登录页）；`viaGateway` 直连 false / 经网关 true。
 - 依赖：dsh-user client 半区（新增 exports["./client"] + build-client 接入）。
 - 可替换性验收：实现后以"dsh-gateway 换成 APISIX，dsh-user/用户显示零改动"为设计验证标准。

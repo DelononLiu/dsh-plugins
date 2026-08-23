@@ -9,7 +9,7 @@ DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**
 | 业务 app | dst-agent-teams（vendored）· 全家桶功能应用 | 多 Agent 协作编排 / 任务看板 / SSH / Git 图谱等重业务逻辑应用 |
 | UI | dsh-desk · dsh-quick-nav · dsh-tabs · 全家桶 UI 能力（侧边栏） | UI 平台（布局/插件组合，无皮肤；工具入口组装器）/ 实例导航 / 会话标签页 / 界面增强（console UI 并入 dsh-console） |
 | 管理组件 | dsh-console（+社区 dsh-update-checker/dsh-prometheus） | 主机/实例档案、生命周期、部署编排、inbox/投递、总览 |
-| 系统 | dsh-channel · dsh-user · 认证网关（社区）· LLM 记忆（社区 dsh-memento） | 通信 · 身份模型 · 登录认证 · 跨会话记忆 |
+| 系统 | dsh-channel · dsh-user · 认证网关（社区）· LLM 记忆（社区 dsh-memento） | 通信 · 身份模型（侧边栏用户徽标/登出）· 登录认证 · 跨会话记忆 |
 | 内核 | deepseek-harness（rc 锁定） | 官方内核 + 内置插件 |
 
 ## 仓库结构

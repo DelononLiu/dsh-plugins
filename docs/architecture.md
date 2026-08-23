@@ -68,6 +68,7 @@
 │ 工具入口  │                             │
 │ console 入口│                            │
 │ 设置      │                             │
+│ 用户徽标  │                             │
 ├──────────┴─────────────────────────────┤
 ```
 
@@ -77,6 +78,7 @@
 | tab 区 | 会话级切换（固定标签 + Alt+1..9 跨工作区） | dsh-tabs |
 | 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
 | 侧边栏底部 | 功能区快捷入口（工具/控制台/设置），**工具入口经 dsh-desk 组装器摆到控制台上方** | 全家桶工具入口（task-board/ssh/skill-explorer）+ console 入口 + 设置 |
+| 侧边栏底部·用户徽标 | 当前用户（人形图标 + 用户名 + 角色 + 经网关时登出），**设置下方**，只消费身份模型 | dsh-user client 半区（/api/user/me） |
 
 **皮肤中心（dsh-web-ui 的 skin-center v2）不引入**：用户明确"不喜欢换皮肤，功能优先"；dsh-desk 自定义维度收敛为**布局 + 插件组合**（vendored 全家桶时可不装 skin-center 包）。
 
@@ -100,9 +102,11 @@
 
 - 多用户：同一部署可承载多个用户身份。
 - 身份是所有层的根：实例归属、通道鉴权、投递目标、部署授权都基于它。
-- **用户模型机制**（2026-08 定）：`ctx.user.current()` → `User { id, name, roles }`；身份来源**可插拔**（认证已拆走网关）：
-  - 网关注入：dsh-gateway 认证后注入身份头（如 `X-DSH-User-Id` / `X-DSH-User-Roles`），dsh-user 解析；
+- **用户模型机制**（2026-08 定）：`ctx.user.current()` → `User { id, name, roles }`；身份来源**可插拔**（`IdentityResolver` 接口——网关签发、dsh-user 验签，JWT 标准化方向，可替换 APISIX 类网关）：
+  - 网关注入：dsh-gateway 认证后注入身份头（`X-DSH-User-Id` / `X-DSH-User-Roles`），dsh-user 解析；
+  - 网关 cookie 验签：clarknu/dsh-gateway 私有 cookie（`dsh_gw_sid`，HMAC-SHA256 + secretFile 读 gateway state.json，**不改 vendor**）；仅接受经可信网关（`x-forwarded-proto: https`）的请求（防重放/CSRF）；
   - 静态配置：cordis.patch.yml 配置用户列表（id/name/roles）。
+  - **用户显示**：client 半区侧边栏左下角徽标（人形图标 + 用户名 + 角色 + 经网关时登出按钮，跳 gateway /logout），只消费身份模型、网关可替换。
 - **角色三档**（v1）：`admin`（全权）/ `member`（自有实例全权 + shared 按授权）/ `guest`（被授权实例只读）。
 - **归属**：实例档案 owner = userId；shared 实例授权记录（owner 授权其他用户可访问/只读）在实例档案。
 - **shared 跨实例访问路径**（2026-08 定，SSH 公钥式）：每个实例持有身份密钥对（私钥留本地，v1 每实例一对）；owner 在目标实例配置授权用户/实例的**公钥列表**（authorized_keys 式）；访问者用私钥签名请求 → 目标实例验证公钥 + 授权列表 → 放行（只读/可访问按授权）。不做证书链/CA（v2 再考虑用户级密钥与信任体系）。
@@ -235,7 +239,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 | 插件 | 层 | 职责 | 状态 |
 | --- | --- | --- | --- |
-| dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；认证实现已拆出走认证网关 | ✅ 已实现（13 测试；网关对接预留，见 §9） |
+| dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；**身份来源可插拔（IdentityResolver 接口）**；client 半区侧边栏用户徽标（/api/user/me） | ✅ 已实现（29 测试；gateway cookie 验签 + 侧边栏徽标/登出，见 §9） |
 | dsh-channel | 系统·通信 | 发现/心跳、事件总线（at-least-once/幂等/TTL/三平面）、鉴权、控制指令；**实例服务提供者**（实例类型 + 发现/状态服务） | ✅ 已实现（29 测试；Typert 远程化未接入——跨实例走 relay+HTTP，见 §9） |
 | dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | ✅ 已实现（37 测试 + 3 HTTP 端点 instances/control/broker；daemon/instance 三角色；升级回滚挂起，见 §9） |
 | dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示） | ✅ 已并入（非独立包） |
@@ -252,7 +256,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（better-sidebar 侧边栏 / 布局；**不含 skin-center，皮肤否决**）+ 功能应用（task-board 任务看板 / git-graph / ssh / skill-explorer；**v1 引入 5 包**） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除——不装皮肤则无关） |
 | better-sidebar（omdsh-dev） | UI | 侧边栏框架（文件/编辑器/终端/Git 面板），registerTab/registerFileViewer 扩展点 | MIT；全家桶已集成，也可独立引入 |
 | dst-agent-teams（@nanmicoder） | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员**；npm 安装 + lock 锁版本（v0.1.12） |
-| dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定（2026-08）；dsh-user 身份接口对接；dsh-webui-auth 安全手法作补强参考 |
+| dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定 + web2 接入（3443 登录/登出；dsh-user 验签其 cookie 会话）；强制 HTTPS——HTTP 直连走 web2 3082（静态兜底，无登录） |
 | dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.4 活跃）；纯本地；npm 安装 + lock 锁版本；**消费方 = agent 会话/上层插件经 ctx.memory 运行时使用（非 type-only 协作）**；官方无 memory，社区填补 |
 | dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | 挂起（console 总览复用，见 §9） |
 
@@ -339,7 +343,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 > 标注"有答案"的项，答案来自社区调研（docs/community-reference.md），补定时先读对应条目。
 
-- [x] ~~身份模型的具体机制~~（已定 2026-08）：`ctx.user.current()` → User{id,name,roles}；身份来源可插拔（网关注入 header / 静态配置）；角色 admin/member/guest；授权查询 instanceAccess + console 校验
+- [x] ~~身份模型的具体机制~~（已定 2026-08 → **2026-08 实现**）：`ctx.user.current()` → User{id,name,roles}；身份来源可插拔（`IdentityResolver` 接口：网关注入头 / gateway cookie 验签 / 静态配置）；角色 admin/member/guest；授权查询 instanceAccess + console 校验；侧边栏用户徽标（client 半区 /api/user/me + 登出）
 - [x] ~~认证网关选型~~（已定 2026-08）：**dsh-gateway（clarknu）** 为主选（成熟/多站点/fail-closed/热生效），dsh-webui-auth 安全手法作补强参考；vendored 实测二选一
 - [x] ~~通道鉴权细节~~（已定 2026-08）：agent↔console 用**实例令牌**（bootstrap 注入，32 hex）+ 操作级鉴权；令牌与用户会话分离；浏览器端走网关 cookie（WS 无法带 Authorization 的解法）
 - [x] ~~事件总线传输与投递语义~~（已定 2026-08）：**at-least-once + UUID 幂等去重 + 7 天 TTL + 指数退避**；事件三平面分类 control（request/ack）/ task（幂等）/ session（仅显式共享）——参考 dsh-weave（dsh-agent-relay 曾作蓝本，submodule 已移除——channel 已自研实现）
@@ -362,7 +366,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 | 项 | 证据 |
 | --- | --- |
-| dsh-user 身份模型（current/instanceAccess/isOwner） | 13 测试 |
+| dsh-user 身份模型（current/instanceAccess/isOwner + IdentityResolver 适配层 + 侧边栏用户徽标/登出） | 29 测试 + web2 实测 |
 | dsh-channel 通信（发现/心跳/事件总线 at-least-once/鉴权/控制指令） | 29 测试 |
 | dsh-console（档案/生命周期/inbox/三角色 daemon·instance·console + 3 HTTP 端点） | 37 测试 |
 | console UI（并入 dsh-console client 半区：ConsoleBadge + 控制面板） | sidebar.footer.action，仅管理端 |
