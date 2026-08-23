@@ -98,6 +98,9 @@ export const Config = z.object({
 /** 事件默认 TTL（7 天，已定投递语义）。 */
 export const EVENT_TTL_MS = 7 * 24 * 3600_000
 
+/** relay 接入后 peers 轮询默认周期（ms；未显式配置时启用，否则只保活不轮询=实例表永空）。 */
+export const DEFAULT_RELAY_POLL_MS = 30_000
+
 interface InstanceEntry extends InstanceIdentity {
   lastSeen: number
 }
@@ -138,7 +141,8 @@ export class ChannelService extends TypertRemoteService {
     const relay = config.relay ?? envRelayConfig()
     if (relay !== undefined) {
       this.relay = relay
-      this.pollPeersMs = relay.pollPeersMs ?? 0
+      // 接入 broker 即默认轮询 peers（实例表依赖它填充）；显式 0 才关闭。
+      this.pollPeersMs = relay.pollPeersMs ?? DEFAULT_RELAY_POLL_MS
       // 游标持久化：重启后从 stateFile 恢复，避免重读 broker 积压消息。
       if (relay.stateFile) {
         try {
@@ -161,8 +165,8 @@ export class ChannelService extends TypertRemoteService {
 
   /** 当前 relay 配置（未接入为 undefined）。 */
   readonly relay: RelayConfig | undefined
-  /** peers 轮询周期（ms；0 = 只保活不轮询）。 */
-  private readonly pollPeersMs: number = 0
+  /** peers 轮询周期（ms；0 = 显式关闭，只保活不轮询）。 */
+  private readonly pollPeersMs: number = DEFAULT_RELAY_POLL_MS
 
   /** recv 增量游标（relay 控制指令接收）。 */
   private relaySince = ''
@@ -596,13 +600,14 @@ function envRelayConfig(): RelayConfig | undefined {
   const agent = process.env.DSH_RELAY_AGENT
   const secret = process.env.DSH_RELAY_SECRET
   if (!brokerUrl || !agent || !secret) return undefined
-  const pollPeersMs = Number(process.env.DSH_RELAY_POLL_PEERS_MS ?? '0')
+  // 未显式设置时缺省（undefined → constructor 给默认轮询周期）。
+  const pollPeersMs = Number(process.env.DSH_RELAY_POLL_PEERS_MS ?? '')
   const stateFile = process.env.DSH_RELAY_STATE_FILE
   return {
     brokerUrl,
     agent,
     secret,
-    pollPeersMs: Number.isFinite(pollPeersMs) && pollPeersMs > 0 ? pollPeersMs : 0,
+    pollPeersMs: Number.isFinite(pollPeersMs) && pollPeersMs > 0 ? pollPeersMs : undefined,
     stateFile: stateFile || undefined,
   }
 }
