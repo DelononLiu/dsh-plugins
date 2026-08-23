@@ -13,6 +13,9 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, isAbsolute } from 'node:path'
 import type { User, UserRole } from './index'
 
 /** 身份解析器接口（稳定边界）：从请求头解析当前用户；无法解析返回 undefined。 */
@@ -83,10 +86,39 @@ export function safeEqual(a: Buffer, b: Buffer): boolean {
 export interface GatewayCookieResolverConfig {
   /** 网关 cookie 名（clarknu/dsh-gateway 默认 `dsh_gw_sid`）。 */
   cookieName: string
-  /** 会话签名密钥（gateway 持久 hmacSecret，`$DSH_HOME/gateway/state.json`）。 */
+  /** 会话签名密钥（gateway 持久 hmacSecret）。 */
   hmacSecret: string
   /** 用户名 → 已知用户映射（gateway 账号与 dsh-user 用户表对齐；未知用户名构造 guest）。 */
   users: ReadonlyMap<string, User>
+}
+
+/** gatewayCookie 配置（index.ts Config 的一部分，避免循环 import）。 */
+export interface GatewayCookieConfig {
+  cookieName: string
+  secretFile: string
+  hmacSecret: string
+}
+
+/**
+ * 解析 gateway cookie 签名密钥：secretFile 读 gateway 持久 state.json
+ * （`{hmacSecret}`，gateway 自动生成/轮换——读文件避免失步）；文件不可用
+ * 时回退手配 hmacSecret；都无 → 空串（不启用 cookie 解析）。
+ * @param config - gatewayCookie 配置。
+ * @returns 签名密钥；未配置返回空串。
+ */
+export function resolveCookieSecret(config: GatewayCookieConfig): string {
+  if (config.secretFile !== '') {
+    const resolved = isAbsolute(config.secretFile)
+      ? config.secretFile
+      : join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), config.secretFile)
+    try {
+      if (existsSync(resolved)) {
+        const state = JSON.parse(readFileSync(resolved, 'utf8')) as { hmacSecret?: unknown }
+        if (typeof state.hmacSecret === 'string' && state.hmacSecret.length >= 32) return state.hmacSecret
+      }
+    } catch { /* 文件不可读 → 回退 */ }
+  }
+  return config.hmacSecret
 }
 
 /**

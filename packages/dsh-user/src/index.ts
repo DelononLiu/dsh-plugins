@@ -11,7 +11,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
-import { GatewayCookieResolver, type IdentityResolver } from './gateway-resolver'
+import { GatewayCookieResolver, resolveCookieSecret, type IdentityResolver } from './gateway-resolver'
 
 /** 角色三档（v1）：admin 全权 / member 自有实例全权 + shared 按授权 / guest 被授权实例只读。 */
 export type UserRole = 'admin' | 'member' | 'guest'
@@ -53,11 +53,13 @@ export interface Config {
   users: Array<{ id: string; name: string; roles: UserRole[] }>
   /** 网关注入的身份头名（认证网关注入后，本插件按名解析）。 */
   gatewayHeaders: { userId: string; userRoles: string }
-  /** gateway cookie 验签（clarknu/dsh-gateway 会话）：cookie 名 + 持久签名密钥。 */
+  /** gateway cookie 验签（clarknu/dsh-gateway 会话）：cookie 名 + 签名密钥来源。 */
   gatewayCookie: {
     /** 网关 cookie 名（默认 `dsh_gw_sid`）。 */
     cookieName: string
-    /** 会话签名密钥（gateway 持久 hmacSecret，`$DSH_HOME/gateway/state.json`）。 */
+    /** 签名密钥文件（gateway 持久 state.json 路径，默认 `$DSH_HOME/gateway/state.json`）。 */
+    secretFile: string
+    /** 直接签名密钥（备用；secretFile 存在时优先读文件，避免与 gateway 轮换失步）。 */
     hmacSecret: string
   }
   /** shared 实例授权：{instanceId: {userId: 'read'|'full'}}——owner 授权映射。 */
@@ -77,8 +79,9 @@ export const Config = z.object({
   }).default({ userId: 'x-dsh-user-id', userRoles: 'x-dsh-user-roles' }),
   gatewayCookie: z.object({
     cookieName: z.string().default('dsh_gw_sid'),
+    secretFile: z.string().default(''),
     hmacSecret: z.string().default(''),
-  }).default({ cookieName: 'dsh_gw_sid', hmacSecret: '' }),
+  }).default({ cookieName: 'dsh_gw_sid', secretFile: '', hmacSecret: '' }),
   sharedAuth: z.dict(z.dict(z.union(['read', 'full'] as const))).default({}),
 }) as z<Config>
 
@@ -106,9 +109,11 @@ export class UserService extends Service {
     for (const entry of config.users) {
       this.byId.set(entry.id, { id: entry.id, name: entry.name, roles: entry.roles })
     }
-    // 网关 cookie 验签适配器（hmacSecret 配置才启用；不改 vendor——适配层复刻验签）。
-    this.resolvers = config.gatewayCookie.hmacSecret !== ''
-      ? [new GatewayCookieResolver({ cookieName: config.gatewayCookie.cookieName, hmacSecret: config.gatewayCookie.hmacSecret, users: this.byId })]
+    // 网关 cookie 验签适配器（密钥来源：secretFile 读 gateway state.json，或手配 hmacSecret；
+    // 都无 → 不启用。读文件避免与 gateway 轮换失步——不改 vendor）。
+    const cookieSecret = resolveCookieSecret(config.gatewayCookie)
+    this.resolvers = cookieSecret !== ''
+      ? [new GatewayCookieResolver({ cookieName: config.gatewayCookie.cookieName, hmacSecret: cookieSecret, users: this.byId })]
       : []
     // 当前用户端点（client 用户显示消费）：web profile 挂 /api/user/me。
     ctx.inject(['webServer'], (injected) => {
