@@ -10,6 +10,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { GatewayCookieResolver, type IdentityResolver } from './gateway-resolver'
 
 /** 角色三档（v1）：admin 全权 / member 自有实例全权 + shared 按授权 / guest 被授权实例只读。 */
 export type UserRole = 'admin' | 'member' | 'guest'
@@ -38,12 +39,19 @@ export interface SharedGrant {
   [userId: string]: 'read' | 'full'
 }
 
-/** 插件配置：静态用户列表 + 网关注入头名 + shared 实例授权映射。 */
+/** 插件配置：静态用户列表 + 网关注入头名 + 网关 cookie 验签 + shared 实例授权映射。 */
 export interface Config {
   /** 静态配置的用户列表（cordis.yml 可配；网关注入模式可留空）。 */
   users: Array<{ id: string; name: string; roles: UserRole[] }>
-  /** 网关注入的身份头名（dsh-gateway 认证后注入，本插件按名解析）。 */
+  /** 网关注入的身份头名（认证网关注入后，本插件按名解析）。 */
   gatewayHeaders: { userId: string; userRoles: string }
+  /** gateway cookie 验签（clarknu/dsh-gateway 会话）：cookie 名 + 持久签名密钥。 */
+  gatewayCookie: {
+    /** 网关 cookie 名（默认 `dsh_gw_sid`）。 */
+    cookieName: string
+    /** 会话签名密钥（gateway 持久 hmacSecret，`$DSH_HOME/gateway/state.json`）。 */
+    hmacSecret: string
+  }
   /** shared 实例授权：{instanceId: {userId: 'read'|'full'}}——owner 授权映射。 */
   sharedAuth: Record<string, SharedGrant>
 }
@@ -59,6 +67,10 @@ export const Config = z.object({
     userId: z.string().default('x-dsh-user-id'),
     userRoles: z.string().default('x-dsh-user-roles'),
   }).default({ userId: 'x-dsh-user-id', userRoles: 'x-dsh-user-roles' }),
+  gatewayCookie: z.object({
+    cookieName: z.string().default('dsh_gw_sid'),
+    hmacSecret: z.string().default(''),
+  }).default({ cookieName: 'dsh_gw_sid', hmacSecret: '' }),
   sharedAuth: z.dict(z.dict(z.union(['read', 'full'] as const))).default({}),
 }) as z<Config>
 
@@ -78,22 +90,34 @@ export class UserService extends Service {
   /** 配置中的用户表（按 id 索引）。 */
   private readonly byId = new Map<string, User>()
 
+  /** 身份解析器链（可插拔：网关注入头 → 网关 cookie 验签 → …；空 = 未启用）。 */
+  private readonly resolvers: IdentityResolver[]
+
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'user')
     for (const entry of config.users) {
       this.byId.set(entry.id, { id: entry.id, name: entry.name, roles: entry.roles })
     }
+    // 网关 cookie 验签适配器（hmacSecret 配置才启用；不改 vendor——适配层复刻验签）。
+    this.resolvers = config.gatewayCookie.hmacSecret !== ''
+      ? [new GatewayCookieResolver({ cookieName: config.gatewayCookie.cookieName, hmacSecret: config.gatewayCookie.hmacSecret, users: this.byId })]
+      : []
   }
 
   /**
-   * 解析当前用户：优先网关注入头，回退静态配置（取第一个或按 header 指定 id）。
-   * 网关注入模式下，网关认证后把用户 id 写入 `gatewayHeaders.userId` 头。
-   * @param headers - 请求头（含网关注入的身份头）；缺省时回退静态配置。
+   * 解析当前用户：优先网关注入头 → 网关 cookie 验签 → 回退静态配置。
+   * 网关注入模式下，网关认证后把用户 id 写入 `gatewayHeaders.userId` 头；
+   * 网关 cookie 模式（clarknu/dsh-gateway）验 `dsh_gw_sid` 签名取用户名。
+   * @param headers - 请求头（含网关注入的身份头或网关 cookie）；缺省时回退静态配置。
    * @returns 当前用户；无法解析时返回 guest 匿名用户。
    */
   current(headers?: Record<string, string | undefined>): User {
     const injected = this.resolveFromHeaders(headers)
     if (injected) return injected
+    for (const resolver of this.resolvers) {
+      const user = resolver.resolve(headers)
+      if (user) return user
+    }
     const fallback = this.byId.values().next().value
     if (fallback) return fallback
     return { id: 'anonymous', name: 'Guest', roles: ['guest'] }
