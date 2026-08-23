@@ -70,12 +70,12 @@ start_one() {
   echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
   local env_args=()
   if [[ -n "$relay" ]]; then
-    # 通信插件部署：relay 三件套（agent/broker/secret）+ 显式 peers 轮询（10s，便于联调观察）。
+    # 通信插件部署：relay 三件套（agent/broker/secret）——broker 仅作跨实例传输
+    # 兜底（实例发现权威源是管理端 launch 配置，不依赖 broker）。
     env_args+=(
       "DSH_RELAY_AGENT=$relay"
       "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL"
       "DSH_RELAY_SECRET=$RELAY_SECRET"
-      "DSH_RELAY_POLL_PEERS_MS=10000"
     )
   fi
   env DSH_HOME="$home" "${env_args[@]}" nohup "$DSH_BIN" --profile "$profile" > "/tmp/dsh-$name.log" 2>&1 &
