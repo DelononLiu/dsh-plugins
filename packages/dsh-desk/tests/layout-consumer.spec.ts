@@ -42,8 +42,8 @@ function makeLayout() {
   }
 }
 
-const LAYOUT_SHOWN = { value: { layout: { topbar: { visible: true }, tabs: { visible: true }, sidebar: { visible: true }, actions: { visible: true } } } }
-const LAYOUT_HIDDEN = { value: { layout: { topbar: { visible: true }, tabs: { visible: true }, sidebar: { visible: false }, actions: { visible: true } } } }
+const LAYOUT_SHOWN = { value: { layout: { topbar: { visible: true }, tabs: { visible: true }, sidebar: { visible: true } } } }
+const LAYOUT_HIDDEN = { value: { layout: { topbar: { visible: true }, tabs: { visible: true }, sidebar: { visible: false } } } }
 
 describe('startLayoutConsumer', () => {
   let disposers: Array<LayoutConsumerDisposer>

@@ -14,7 +14,7 @@
 │  dst-agent-teams（多 Agent 协作编排，第一个成员）      │
 │  全家桶功能应用（task-board/ssh/git-graph…，按需组合） │
 ├─ UI（可替换）────────────────────────────────────────┤
-│   dsh-desk：UI 平台（四区布局/插件组合自定义；         │
+│   dsh-desk：UI 平台（布局/插件组合自定义；            │
 │   不做换肤——皮肤否决；meta-package；"我的"=personal）  │
 │   dsh-quick-nav · dsh-tabs · 各界面（console UI 并入   │
 │   dsh-console client 半区）· 消费管理组件与系统数据，   │
@@ -52,9 +52,9 @@
 - **dsh-quick-nav = 消费者**：`import type` 引用提供者的类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用服务（client 面）；dsh-quick-nav → channel（导航只需实例身份/状态，依赖降到系统层）；**console-ui 已并入 dsh-console 包**（client 半区），其管理界面消费同一 console 服务面。
 - 依赖方向向下；"一套概念模型"由提供者唯一定义类型保证。
 
-### UI 四区布局（2026-08 定）
+### UI 布局（2026-08 定）
 
-发行包 UI 利用**四个区域**，**功能优先（不采用皮肤中心，不做换肤）**：
+发行包 UI 利用**三个区域**（topbar/tabs/sidebar；官方无独立 actions 区），**功能优先（不采用皮肤中心，不做换肤）**：
 
 ```
 ┌─ 顶部区域 ─────────────────────────────┐
@@ -64,8 +64,7 @@
 │ 工作区/   │  dsh-tabs：固定会话标签       │
 │ 会话树    │  Alt+1..9 跨工作区切换       │
 │          │                             │
-│ 左侧按钮区│  （内容区）                  │
-│ （foot 区）│                             │
+│ 底部      │  （内容区）                  │
 │ 工具入口  │                             │
 │ console 入口│                            │
 │ 设置      │                             │
@@ -77,11 +76,11 @@
 | 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-quick-nav + 快捷操作 |
 | tab 区 | 会话级切换（固定标签 + Alt+1..9 跨工作区） | dsh-tabs |
 | 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
-| 侧边栏 foot 区 | 功能区快捷入口（工具/控制台/设置），**工具入口经 dsh-desk 组装器摆到控制台上方** | 全家桶工具入口（task-board/ssh/skill-explorer）+ console 入口 + 设置 |
+| 侧边栏底部 | 功能区快捷入口（工具/控制台/设置），**工具入口经 dsh-desk 组装器摆到控制台上方** | 全家桶工具入口（task-board/ssh/skill-explorer）+ console 入口 + 设置 |
 
 **皮肤中心（dsh-web-ui 的 skin-center v2）不引入**：用户明确"不喜欢换皮肤，功能优先"；dsh-desk 自定义维度收敛为**布局 + 插件组合**（vendored 全家桶时可不装 skin-center 包）。
 
-**布局自定义机制**（2026-08 定，v1 从简）：插件组合走 cordis.patch.yml（DSH 原生）；四区布局调整（显隐/顺序/宽度）走 dsh-desk 的 Config 字段（cordis.yml 可配）+ 设置页开关（参考顶栏治理模式）；**布局配置按实例存**（每实例一套）——"每用户布局"（跨实例一致）留 v2（需用户级配置存储）。
+**布局自定义机制**（2026-08 定，v1 从简）：插件组合走 cordis.patch.yml（DSH 原生）；布局调整（显隐/顺序/宽度）走 dsh-desk 的 Config 字段（cordis.yml 可配）+ 设置页开关（参考顶栏治理模式）；**布局配置按实例存**（每实例一套）——"每用户布局"（跨实例一致）留 v2（需用户级配置存储）。
 
 **工具入口组装器**（2026-08 实现，dsh-desk client）：全家桶工具（task-board/ssh/skill-explorer）不走官方 sidebar 插槽，而是各自 MutationObserver + 直接 DOM 注入侧边栏 entry（落点 logoRow 后、工作区上）。dsh-desk 组装器接管摆位：re-parent 到 foot 区（控制台上方）+ 样式对齐官方 `.trigger` 契约 + 间距统一。开放边界见 §9 与 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)。
 
@@ -242,7 +241,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示） | ✅ 已并入（非独立包） |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ✅ 已上线三端（2 测试） |
 | dsh-tabs | UI | 固定会话标签页（Alt+P 固定/取消、× 关闭、编号标题） | ✅ 已实现（2 测试，web2 验证） |
-| dsh-desk | UI（平台） | 布局（四区）/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：全家桶 entry 摆位到 foot 区控制台上方 + 样式对齐官方契约）** | ✅ 组装器已实现（10 测试）；四区布局配置开关待消费方，见 §9 |
+| dsh-desk | UI（平台） | 布局/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：全家桶 entry 摆位到控制台上方 + 样式对齐官方契约）** | ✅ 组装器已实现（10 测试）；布局配置开关已实现，见 §9 |
 
 > dsh-quick-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
 
@@ -355,7 +354,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合
 - [ ] **全家桶工具入口组装边界**（2026-08 提出，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；**2026-08 已落地**——③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默；**剩余**——① 官方 slots 型插件（git-graph/better-sidebar）的组装语义（v1 只做显隐开关）、④ rail 折叠态视觉验收（缺浏览器）。
 - [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」）：`typert → dsh-channel`（typert 调用帧经 channel 传输，broker 为 channel 可选后端）。**未实现**：① channel 的 typert transport 契约（`rpc.send`/`intercept`）② console/quick-nav client 面改 `ctx.remote` 消费（替换手写 HTTP /api/console/* + EventSource）③ 跨实例 `@RemoteScope` 控制指令（console→instance/daemon）④ transport 选择策略（直连 vs broker）⑤ typert forwardable events ↔ channel 三平面映射。当前跨实例仍走 relay+HTTP。
-- [x] ~~dsh-desk 四区布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-tabs / dsh-quick-nav 读 `my-ui-layout` 决定是否注册（**启动时快照，配置变更需刷新**）；组装器配置化（footSpacing/tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默。剩余：slots 型插件组装语义、rail 视觉验收（见组装边界）。
+- [x] ~~dsh-desk 布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-tabs / dsh-quick-nav 读 `my-ui-layout` 决定是否注册（**启动时快照，配置变更需刷新**）；组装器配置化（tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默。剩余：slots 型插件组装语义、rail 视觉验收（见组装边界）。
 
 ### 实现状态总表（2026-08 核）
 

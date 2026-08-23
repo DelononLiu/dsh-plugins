@@ -1,7 +1,7 @@
 /**
- * dsh-desk：UI 平台（host 面）——四区布局 + 插件组合自定义。
+ * dsh-desk：UI 平台（host 面）——布局 + 插件组合自定义。
  *
- * meta-package 定位：聚合 UI 插件（dsh-quick-nav / dsh-tabs），提供四区布局
+ * meta-package 定位：聚合 UI 插件（dsh-quick-nav / dsh-tabs），提供布局
  * （顶部/tab/侧边栏/左侧按钮区）的显隐/顺序/宽度配置（Config，实例级
  * 本地配置——cordis.yml 可配；"my"= personal 哲学，不做换肤）。
  * 浏览器半区经 exports["./client"] 提供。
@@ -12,8 +12,8 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 
-/** 四区（已定布局）。 */
-export type LayoutRegion = 'topbar' | 'tabs' | 'sidebar' | 'actions'
+/** 布局区（官方/自研真实结构：顶部导航、tab 区、侧边栏；无独立 actions 区）。 */
+export type LayoutRegion = 'topbar' | 'tabs' | 'sidebar'
 
 /** 单区布局配置。 */
 export interface RegionLayout {
@@ -25,7 +25,7 @@ export interface RegionLayout {
   size?: string
 }
 
-/** 四区布局配置（实例级，v1 本地配置）。 */
+/** 布局配置（实例级，v1 本地配置）。 */
 export type LayoutConfig = Record<LayoutRegion, RegionLayout>
 
 /** 组装器工具（data-dsh-*-entry 注入型，v1 三家 + 可扩展）。 */
@@ -48,7 +48,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** 插件配置：四区布局 + 组装器（默认全部可见，顺序 topbar/tabs/sidebar/actions）。 */
+/** 插件配置：布局 + 组装器（默认全部可见，顺序 topbar/tabs/sidebar）。 */
 export interface Config {
   layout: LayoutConfig
   assembler: AssemblerConfig
@@ -59,8 +59,7 @@ const layoutSchema = z.object({
   topbar: z.object({ visible: z.boolean().default(true), order: z.number().default(0), size: z.string().default('') }).default({ visible: true, order: 0, size: '' }),
   tabs: z.object({ visible: z.boolean().default(true), order: z.number().default(1), size: z.string().default('') }).default({ visible: true, order: 1, size: '' }),
   sidebar: z.object({ visible: z.boolean().default(true), order: z.number().default(2), size: z.string().default('260px') }).default({ visible: true, order: 2, size: '260px' }),
-  actions: z.object({ visible: z.boolean().default(true), order: z.number().default(3), size: z.string().default('') }).default({ visible: true, order: 3, size: '' }),
-}).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' }, actions: { visible: true, order: 3, size: '' } })
+}).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' } })
 
 /** 组装器 schema 段（tools 为 dict，键可缺省，缺省 = 可见）。 */
 const assemblerSchema = z.object({
@@ -87,11 +86,10 @@ export const DEFAULT_LAYOUT: LayoutConfig = {
   topbar: { visible: true, order: 0 },
   tabs: { visible: true, order: 1 },
   sidebar: { visible: true, order: 2, size: '260px' },
-  actions: { visible: true, order: 3 },
 }
 
 /**
- * UI 平台服务（布局配置）：所有 UI 插件经 `ctx.myUi` 查询四区布局。
+ * UI 平台服务（布局配置）：所有 UI 插件经 `ctx.myUi` 查询布局配置。
  * v1 只读配置（实例级）；"每用户布局"（跨实例一致）留 v2。
  */
 export class MyUiService extends Service {
@@ -105,13 +103,12 @@ export class MyUiService extends Service {
     })
   }
 
-  /** 读取完整四区布局配置。 */
+  /** 读取完整布局配置。 */
   layout(): LayoutConfig {
     return {
       topbar: { ...DEFAULT_LAYOUT.topbar, ...this.config.layout.topbar },
       tabs: { ...DEFAULT_LAYOUT.tabs, ...this.config.layout.tabs },
       sidebar: { ...DEFAULT_LAYOUT.sidebar, ...this.config.layout.sidebar },
-      actions: { ...DEFAULT_LAYOUT.actions, ...this.config.layout.actions },
     }
   }
 

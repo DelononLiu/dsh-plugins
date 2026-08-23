@@ -1,5 +1,5 @@
 /**
- * dsh-desk 布局消费方：让「四区显隐」配置真正生效。
+ * dsh-desk 布局消费方：让「布局显隐」配置真正生效。
  *
  * 机制（2026-08-23，源码确认）：
  * - 官方无 topbar 区域；quick-nav 在 `conversation.session.header.actions`、

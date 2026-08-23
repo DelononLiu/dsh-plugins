@@ -1,5 +1,5 @@
 /**
- * 布局设置页（settings.section 内容）：四区显隐 + 工具入口 + foot 间距。
+ * 布局设置页（settings.section 内容）：布局区显隐 + 工具入口。
  *
  * 样式对齐官方设置行契约（ui-conversation EnterBehaviorRow 同款）：
  * `.row`（flex、padding 16px 0、border-bottom l2）+ title 14/primary +
@@ -13,8 +13,8 @@ import type { AssemblerConfig, AssembledToolId } from '../index'
 /** 设置页 section 插槽注入的 props。 */
 export type LayoutControlProps = PropsRuntime<'settings.section'>
 
-/** 四区。 */
-export const REGIONS = ['topbar', 'tabs', 'sidebar', 'actions'] as const
+/** 布局区。 */
+export const REGIONS = ['topbar', 'tabs', 'sidebar'] as const
 export type Region = (typeof REGIONS)[number]
 
 /** 单区布局。 */
@@ -40,14 +40,12 @@ const REGION_LABEL: Record<Region, string> = {
   topbar: '顶部区域',
   tabs: 'tab 区',
   sidebar: '侧边栏',
-  actions: '左侧按钮区',
 }
 
 const REGION_DESC: Record<Region, string> = {
   topbar: '实例导航入口（quick-nav）',
   tabs: '固定会话标签（dsh-tabs）',
   sidebar: '侧边栏（折叠/展开；tabs/topbar 变更需刷新页面生效）',
-  actions: '左侧按钮区（控制台等，随侧边栏折叠）',
 }
 
 /** 默认布局。 */
@@ -55,7 +53,6 @@ const DEFAULT_LAYOUT: LayoutRecord = {
   topbar: { visible: true, order: 0 },
   tabs: { visible: true, order: 1 },
   sidebar: { visible: true, order: 2, size: '260px' },
-  actions: { visible: true, order: 3 },
 }
 
 /** 布局控制组件 props（含 apply 闭包注入的 settings host）。 */
@@ -129,7 +126,7 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-      <Row title="布局（四区显隐）" desc="各区域显隐配置；侧边栏实时生效，tab/顶部区域变更需刷新页面">
+      <Row title="布局" desc="各区域显隐配置；侧边栏实时生效，tab/顶部区域变更需刷新页面">
         <span />
       </Row>
       {REGIONS.map((region) => {
