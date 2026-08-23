@@ -21,14 +21,13 @@ Status: implemented
 **核心机制：各插件读同一 `my-ui-layout` 配置决定是否注册**，不需要 dsh-desk 提供服务（settingsScope 天然共享）。
 
 - **sidebar 显隐**（dsh-desk client）：订阅 `my-ui-layout`，`sidebar.visible=false` 且当前未折叠（读 `data-sidebar-collapsed`）→ `ctx.layout.toggleSidebar()` 折叠一次；`visible=true` 且已折叠 → 展开。用 DOM 属性对齐翻转语义，避免状态错乱。
-- **tabs 显隐**（dsh-tabs client）：bind `my-ui-layout`，`tabs.visible=false` → **不注册** `conversation.view`（插件级跳过）。
-- **topbar/actions 显隐**（dsh-quick-nav / dsh-desk client）：`topbar.visible=false` → quick-nav 不注册 `conversation.session.header.actions`；`actions` 随 sidebar 折叠（foot 区在侧边栏内）。
-- **生效边界（v1）**：sidebar 显隐**实时生效**（LayoutConsumer 订阅 settings）；tabs/topbar 显隐为**启动时快照**（`slots.inject` 回调不重跑，配置变更需刷新页面——v1 接受，动态重注册留后续）。
-- 设置页 LayoutControl 已是入口（读写同一配置），无需改 UI。
+- **tabs 显隐**（dsh-tabs client）：订阅 `my-ui-layout`，`tabs.visible=false` → 注销全部 `conversation.view` 注册；恢复 → 重新注册（实时）。
+- **topbar 显隐**（dsh-quick-nav client）：订阅 `my-ui-layout`，`topbar.visible=false` → 注销 `conversation.session.header.actions` 注册；恢复 → 重新注册（实时）。
+- **生效边界**：sidebar/tabs/topbar 均**实时生效**（各插件订阅 settings 变更，注册/注销/折叠即时切换）。
 
 ### 2. 组装器开放边界（v1 范围）
 
-- **③ 配置化**：设置页扩展——foot 区间距（默认 2px）、工具显隐（taskboard/ssh/skill 三开关）。复用 LayoutControl 的 settings host，扩展配置 schema（`my-ui-layout` 加 `tools`/`footSpacing` 字段）。
+- **③ 配置化**：设置页「布局」section——工具显隐（taskboard/ssh/skill 三开关）。复用 LayoutControl 的 settings host，扩展配置 schema（`my-ui-layout` 加 `tools` 字段；foot 间距/actions 区经用户确认不需要，未实现）。
 - **⑤ 通用性**：组装器改为**运行时发现** `[data-dsh-part="sidebar-entry"]` 全部 entry（替代显式 3 选择器），配置可排除（`tools.<id>.visible=false` 不摆位）；顺序保持 DOM 出现序。
 - **② CSS 回退**：覆盖不生效时**静默回退默认摆位**（re-parent 失败 = 保持插件原位置），不抛错——现有实现已如此，补注释与测试断言。
 - **① slots 型组装语义**：git-graph/better-sidebar 是 slots 型——v1 **只做显隐开关**（配置控制注册，机制同 tabs），**不做 DOM 摆位**（位置由官方插槽语义决定，v2 评估）。

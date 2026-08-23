@@ -45,7 +45,7 @@ const REGION_LABEL: Record<Region, string> = {
 const REGION_DESC: Record<Region, string> = {
   topbar: '实例导航入口（quick-nav）',
   tabs: '固定会话标签（dsh-tabs）',
-  sidebar: '侧边栏（折叠/展开；tabs/topbar 变更需刷新页面生效）',
+  sidebar: '侧边栏（折叠/展开）',
 }
 
 /** 默认布局。 */
@@ -126,7 +126,7 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-      <Row title="布局" desc="各区域显隐配置；侧边栏实时生效，tab/顶部区域变更需刷新页面">
+      <Row title="布局" desc="各区域显隐配置（实时生效）">
         <span />
       </Row>
       {REGIONS.map((region) => {

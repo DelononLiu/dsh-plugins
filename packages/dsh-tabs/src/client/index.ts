@@ -254,12 +254,21 @@ export function apply(ctx: ClientContext): void {
   // —— 动态注册固定的会话 tab ——
   // 每次注册都须经 slots.inject 包装：conversation.view 仅在声明它的
   // 条目挂载时存在，inject 保证声明就绪才注册、声明重挂载时重跑。
-  // 布局配置 tabs.visible=false 时跳过注册（插件级显隐）。
+  // 布局配置 tabs.visible 实时控制：false → 注销全部 tab，true → 恢复。
   ctx.slots.inject('conversation.view', () => {
-    if (!tabsVisible()) return () => {}
     const disposers = new Map<string, () => void>()
 
+    /** 注销全部 tab 注册（tabs.visible=false 时）。 */
+    const clearAll = (): void => {
+      for (const dispose of [...disposers.values()]) dispose()
+      disposers.clear()
+    }
+
     const sync = (): void => {
+      if (!tabsVisible()) {
+        clearAll()
+        return
+      }
       const list = ctx.sessions.list.getSnapshot()
       // 只注册固定的会话（且仍存在）；去重保序。
       const toRegister = [...new Set(pinnedOf())].filter((id) => list.ids.includes(id as never))
@@ -308,11 +317,12 @@ export function apply(ctx: ClientContext): void {
       sync()
       applyActive()
     })
+    const unsubLayout = layoutScope.subscribe(sync)
     return () => {
       unsubList()
       unsubSettings()
-      for (const dispose of [...disposers.values()]) dispose()
-      disposers.clear()
+      unsubLayout()
+      clearAll()
     }
   })
 }
