@@ -10,6 +10,7 @@
 set -euo pipefail
 
 DSH_BIN="${DSH_BIN:-/home/long2015/nodejs/node-v24.13.0-linux-x64/bin/dsh}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 环境矩阵：name|DSH_HOME|profile|port|DSH_RELAY_AGENT(可空)
 ENVS=(

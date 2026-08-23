@@ -92,6 +92,16 @@ export interface GatewayCookieResolverConfig {
   users: ReadonlyMap<string, User>
 }
 
+/**
+ * 请求是否来自可信网关（HTTPS 入口）。gateway 透传时注入
+ * `x-forwarded-proto: https`（标准代理头）；cookie 为 `Secure` 属性——
+ * 浏览器只在 HTTPS 发送，HTTP 直连（无该头）不应接受 cookie 身份：
+ * 防 HTTP 明文下 cookie 被截获后重放（CSRF/中间人加固）。
+ */
+export function isTrustedGatewayRequest(headers: Record<string, string | undefined> | undefined): boolean {
+  return headers?.['x-forwarded-proto'] === 'https'
+}
+
 /** gatewayCookie 配置（index.ts Config 的一部分，避免循环 import）。 */
 export interface GatewayCookieConfig {
   cookieName: string
@@ -121,26 +131,42 @@ export function resolveCookieSecret(config: GatewayCookieConfig): string {
   return config.hmacSecret
 }
 
+/** gateway-cookie 适配器配置（运行时，含 secret 解析）。 */
+export interface GatewayCookieRuntimeConfig {
+  cookieName: string
+  /** 密钥来源（secretFile / hmacSecret 兜底）。 */
+  secretFile: string
+  hmacSecret: string
+  /** 用户名 → 已知用户映射。 */
+  users: ReadonlyMap<string, User>
+}
+
 /**
  * clarknu/dsh-gateway cookie 验签实现：验 `dsh_gw_sid`（HMAC-SHA256）。
  * 与 gateway `auth.js` 的 verify 逻辑一致（payload.签名 + 过期校验 +
- * 用户存在性），不改 vendor——适配层复刻其验签算法。
+ * 用户存在性），不改 vendor——适配层复刻其验签算法。签名密钥每次
+ * resolve 时重读（gateway 轮换/一键吊销即时生效，无需重启）。
  */
 export class GatewayCookieResolver implements IdentityResolver {
   readonly name = 'gateway-cookie'
 
-  constructor(private readonly config: GatewayCookieResolverConfig) {}
+  constructor(private readonly config: GatewayCookieRuntimeConfig) {}
 
   resolve(headers: Record<string, string | undefined> | undefined): User | undefined {
-    if (!headers) return undefined
+    // 仅接受经可信网关（HTTPS）的 cookie：Secure cookie 只在 HTTPS 发送，
+    // HTTP 直连带 cookie 视为不可信（防重放/CSRF）。
+    if (!headers || !isTrustedGatewayRequest(headers)) return undefined
     const token = parseCookieToken(headers.cookie, this.config.cookieName)
     const signed = splitSignedToken(token)
     if (!signed) return undefined
     const payloadBuf = b64urlDecode(signed.payload)
     if (!payloadBuf) return undefined
     const payloadText = payloadBuf.toString('utf8')
+    // 密钥每次重读（gateway 轮换即时生效）；无密钥 → 拒绝
+    const secret = resolveCookieSecret({ cookieName: this.config.cookieName, secretFile: this.config.secretFile, hmacSecret: this.config.hmacSecret })
+    if (secret === '') return undefined
     // 验签：HMAC-SHA256(payload, secret)，常量时间比较
-    const expected = createHmac('sha256', this.config.hmacSecret).update(payloadText).digest()
+    const expected = createHmac('sha256', secret).update(payloadText).digest()
     const given = b64urlDecode(signed.signature)
     if (!given || !safeEqual(expected, given)) return undefined
     // 解析载荷 {u, exp}

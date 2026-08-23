@@ -19,7 +19,11 @@ const USER_BADGE_CSS = [
   // 对齐官方 foot 按钮契约（ui-settings-general .trigger）：42px 行、12px 圆角、primary 文字。
   '[class*="footArea"] [data-dsh-user-badge]{box-sizing:border-box;flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);min-height:42px;margin:2px -2px;padding:0 10px 0 8px;border-radius:12px;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:14px;line-height:22px;overflow:hidden}',
   '[class*="footArea"] [data-dsh-user-badge] [data-dsh-user-name]{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+  '[class*="footArea"] [data-dsh-user-badge] [data-dsh-user-icon]{flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary)}',
   '[class*="footArea"] [data-dsh-user-badge] [data-dsh-user-role]{flex:none;font-size:11px;line-height:16px;padding:0 6px;border-radius:6px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+  // 登出按钮：官方 icon-button 契约（28px 圆、hover 圆形背景、secondary 墨）。
+  '[class*="footArea"] [data-dsh-user-badge] [data-dsh-user-logout]{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:50%;background:transparent;cursor:pointer;color:var(--dsw-alias-label-secondary)}',
+  '[class*="footArea"] [data-dsh-user-badge] [data-dsh-user-logout]:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
   '[class*="collapsed"] [data-dsh-user-badge]{display:none}',
 ].join('')
 
@@ -47,22 +51,32 @@ function sidebarRoot(): HTMLElement | null {
  */
 function mountUserBadge(): () => void {
   injectUserBadgeCss()
+  let host: HTMLElement | undefined
+  let rootNode: ReturnType<typeof createRoot> | undefined
   const mount = (): void => {
     const root = sidebarRoot()
     if (root === null) return
     const foot = root.querySelector('[class*="footArea"]')
     if (foot === null) return
-    if (foot.querySelector('[data-dsh-user-badge]') !== null) return
-    const host = document.createElement('div')
+    if (host !== undefined && host.isConnected) return
+    // 重建：旧 host 已脱离 DOM（官方重渲染/插件卸载）——清理旧 root 再注入
+    if (rootNode !== undefined) {
+      rootNode.unmount()
+      rootNode = undefined
+    }
+    host = document.createElement('div')
     host.dataset.dshUserBadgeHost = ''
-    const rootNode = createRoot(host)
+    rootNode = createRoot(host)
     rootNode.render(createElement(UserBadge))
     foot.appendChild(host)
   }
   mount()
   const observer = new MutationObserver(() => { mount() })
   observer.observe(document.body, { childList: true, subtree: true })
-  return () => observer.disconnect()
+  return () => {
+    observer.disconnect()
+    rootNode?.unmount()
+  }
 }
 
 /** Client 插件体：挂载侧边栏用户徽标。 */

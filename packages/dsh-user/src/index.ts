@@ -11,7 +11,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
-import { GatewayCookieResolver, resolveCookieSecret, type IdentityResolver } from './gateway-resolver.js'
+import { GatewayCookieResolver, isTrustedGatewayRequest, type IdentityResolver } from './gateway-resolver.js'
 
 /** 角色三档（v1）：admin 全权 / member 自有实例全权 + shared 按授权 / guest 被授权实例只读。 */
 export type UserRole = 'admin' | 'member' | 'guest'
@@ -111,9 +111,9 @@ export class UserService extends Service {
     }
     // 网关 cookie 验签适配器（密钥来源：secretFile 读 gateway state.json，或手配 hmacSecret；
     // 都无 → 不启用。读文件避免与 gateway 轮换失步——不改 vendor）。
-    const cookieSecret = resolveCookieSecret(config.gatewayCookie)
-    this.resolvers = cookieSecret !== ''
-      ? [new GatewayCookieResolver({ cookieName: config.gatewayCookie.cookieName, hmacSecret: cookieSecret, users: this.byId })]
+    const gatewayCookie = config.gatewayCookie
+    this.resolvers = (gatewayCookie.secretFile !== '' || gatewayCookie.hmacSecret !== '')
+      ? [new GatewayCookieResolver({ cookieName: gatewayCookie.cookieName, secretFile: gatewayCookie.secretFile, hmacSecret: gatewayCookie.hmacSecret, users: this.byId })]
       : []
     // 当前用户端点（client 用户显示消费）：web profile 挂 /api/user/me。
     ctx.inject(['webServer'], (injected) => {
@@ -121,10 +121,12 @@ export class UserService extends Service {
         kind: 'exact',
         path: '/api/user/me',
         handler: (req, res) => {
-          // 请求头含网关 cookie/注入头 → current() 完整解析链（头→cookie→静态）
-          const user = this.current(req.headers as Record<string, string | undefined>)
+          // 请求头含网关 cookie/注入头 → current() 完整解析链（头→cookie→静态）；
+          // viaGateway 由 host 判断（x-forwarded-proto: https）——client 据此显示登出。
+          const headers = req.headers as Record<string, string | undefined>
+          const user = this.current(headers)
           res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify(user))
+          res.end(JSON.stringify({ ...user, viaGateway: isTrustedGatewayRequest(headers) }))
         },
       })
       injected.effect(() => dispose, 'dsh-user: /api/user/me')
