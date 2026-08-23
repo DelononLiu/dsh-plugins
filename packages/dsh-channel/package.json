@@ -10,14 +10,34 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./typert": {
+      "types": "./lib/typert.host.d.ts",
+      "default": "./lib/typert.host.js"
+    },
+    "./remote": {
+      "types": "./lib/typert.remote-client.d.ts",
+      "default": "./lib/typert.remote-client.js"
+    },
+    "./types": {
+      "types": "./lib/types.d.ts",
+      "default": "./lib/types.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
-    "lib"
+    "lib/index.js",
+    "lib/types.js",
+    "lib/types.d.ts",
+    "lib/types/**/*.js",
+    "lib/types/**/*.d.ts",
+    "lib/typert.host.js",
+    "lib/typert.host.d.ts",
+    "lib/typert.remote-client.js",
+    "lib/typert.remote-client.d.ts"
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-typert.mjs . dsh-channel",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -25,12 +45,14 @@
     "@deepseek-ai/schemastery": "^3.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1"
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.1-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.1-rc.2",
     "@types/node": "^22.0.0",
-    "typescript": "^5.0.0",
+    "typescript": "^6.0.3",
     "vitest": "^3.0.0"
   }
 }
