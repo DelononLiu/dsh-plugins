@@ -2,9 +2,10 @@
  * dsh-desk：UI 平台（client 半区）——布局设置 + 布局消费方 + 工具入口组装器。
  *
  * 经官方 settingsScope 读写 host 布局/组装器配置（my-ui-layout 命名空间），
- * 注册到设置页 settings.general.item（用户反馈：布局不进顶部，进设置）；
- * 同时启动布局消费方（sidebar.visible 真正折叠官方侧边栏）与工具入口
- * 组装器（把全家桶 data-dsh-*-entry 入口摆到控制台上方）。
+ * 注册为设置页左侧导航的独立 section「布局」（settings.section，官方
+ * "one settings page per list entry"）；同时启动布局消费方（sidebar.visible
+ * 真正折叠官方侧边栏）与工具入口组装器（把全家桶 data-dsh-*-entry 入口
+ * 摆到控制台上方）。
  */
 
 import { createElement } from 'react'
@@ -19,18 +20,20 @@ import { startToolAssembler } from './ToolAssembler'
 export const inject = ['slots', 'settingsScope', 'layout']
 
 /**
- * Client 插件体：绑定布局 settings 命名空间并注册设置页布局项；
+ * Client 插件体：绑定布局 settings 命名空间并注册设置页「布局」section；
  * 启动布局消费方（sidebar 显隐生效）与工具入口组装器。
  * @param ctx - client 根上下文。
  */
 export function apply(ctx: ClientContext): void {
   const host = ctx.settingsScope.bind<{ layout: LayoutRecord }>({ namespace: 'my-ui-layout' })
   ctx.slots.inject(
-    'settings.general.item',
+    'settings.section',
     () => ctx.slots.register({
-      name: 'settings.general.item',
-      id: 'layout-control',
-      order: 20,
+      name: 'settings.section',
+      id: 'layout',
+      // 排在 General(0)/Models/Agent presets 之后（布局是部署态微调，非高频入口）。
+      order: 40,
+      label: '布局',
     }, (props) => createElement(LayoutControl, { ...props, host })),
   )
 

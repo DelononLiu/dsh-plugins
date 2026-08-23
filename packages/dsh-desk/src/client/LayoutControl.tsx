@@ -1,16 +1,17 @@
 /**
- * 布局控制（四区开关 + 组装器配置）：经 settingsScope host 读写布局/组装器配置。
+ * 布局设置页（settings.section 内容）：四区显隐 + 工具入口 + foot 间距。
  *
- * 样式对齐官方设计语言（ConsoleBadge 面板同款）：浮动层 bg-layer-2 +
- * shadow-lv2 + 圆角 8 + border-l2 + token 文字色（AGENTS.md「UI 默认与官方一致」）。
+ * 样式对齐官方设置行契约（ui-conversation EnterBehaviorRow 同款）：
+ * `.row`（flex、padding 16px 0、border-bottom l2）+ title 14/primary +
+ * desc 12/tertiary + 右侧控件（AGENTS.md「UI 默认与官方一致」）。
  */
 
 import { useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AssemblerConfig, AssembledToolId } from '../index'
 
-/** 会话头部动作插槽注入的 props。 */
-export type LayoutControlProps = PropsRuntime<'settings.general.item'>
+/** 设置页 section 插槽注入的 props。 */
+export type LayoutControlProps = PropsRuntime<'settings.section'>
 
 /** 四区。 */
 export const REGIONS = ['topbar', 'tabs', 'sidebar', 'actions'] as const
@@ -42,6 +43,13 @@ const REGION_LABEL: Record<Region, string> = {
   actions: '左侧按钮区',
 }
 
+const REGION_DESC: Record<Region, string> = {
+  topbar: '实例导航入口（quick-nav）',
+  tabs: '固定会话标签（dsh-tabs）',
+  sidebar: '侧边栏（折叠/展开；tabs/topbar 变更需刷新页面生效）',
+  actions: '左侧按钮区（控制台等，随侧边栏折叠）',
+}
+
 /** 默认布局。 */
 const DEFAULT_LAYOUT: LayoutRecord = {
   topbar: { visible: true, order: 0 },
@@ -55,13 +63,40 @@ export interface LayoutControlOwnProps {
   host: LayoutHost
 }
 
+/** 设置行：标题 + 描述 + 右侧控件（官方 .row 契约）。 */
+function Row(props: { title: string; desc?: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 0', borderBottom: '1px solid var(--dsw-alias-border-l2)' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 48 }}>
+        <div style={{ fontSize: 14, fontWeight: 400, lineHeight: '22px', color: 'var(--dsw-alias-label-primary)' }}>{props.title}</div>
+        {props.desc !== undefined && (
+          <div style={{ fontSize: 12, fontWeight: 400, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }}>{props.desc}</div>
+        )}
+      </div>
+      {props.children}
+    </div>
+  )
+}
+
+/** 复选框开关（官方 selector 形态：右侧控件）。 */
+function Switch(props: { checked: boolean; onChange: () => void; label: string }): React.JSX.Element {
+  return (
+    <input
+      type="checkbox"
+      aria-label={props.label}
+      checked={props.checked}
+      onChange={props.onChange}
+      style={{ width: 16, height: 16, accentColor: 'var(--dsw-alias-state-business-primary)', cursor: 'pointer', flex: 'none' }}
+    />
+  )
+}
+
 /**
- * 渲染「布局」入口 + 四区开关 + 组装器配置浮层。
+ * 渲染「布局」设置页（settings.section 内容列）。
  * @param props - 插槽注入 props + settings host。
  */
 export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps): React.JSX.Element {
   const { host } = props
-  const [open, setOpen] = useState(false)
   const [layout, setLayout] = useState<LayoutRecord | undefined>(() => host.getSnapshot().value?.layout)
   const [assembler, setAssembler] = useState<AssemblerConfig | undefined>(() => host.getSnapshot().value?.assembler)
 
@@ -100,80 +135,41 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
   }
 
   return (
-    <span style={{ position: 'relative', display: 'inline-flex' }}>
-      <button
-        type="button"
-        title="布局与工具设置"
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', padding: '2px 8px',
-          borderRadius: 4, border: '1px solid currentColor', background: 'transparent',
-          color: 'inherit', fontSize: 12, cursor: 'pointer',
-        }}
-      >
-        布局
-      </button>
-      {open && (
-        <div
-          style={{
-            position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 1000,
-            width: 240, padding: '8px 10px',
-            // 官方设计语言：层级背景 + 官方阴影 + 官方圆角/边框层级（同 ConsoleBadge 面板）
-            borderRadius: 8,
-            border: '1px solid var(--dsw-alias-border-l2)',
-            background: 'var(--dsw-alias-bg-layer-2)',
-            color: 'var(--dsw-alias-label-primary)',
-            fontSize: 12,
-            boxShadow: 'var(--dsw-shadow-lv2)',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>布局（四区显隐）</div>
-          {REGIONS.map((region) => {
-            const state = layout?.[region]
-            const visible = state?.visible ?? true
-            return (
-              <label key={region} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={visible}
-                  onChange={() => toggle(region)}
-                />
-                {REGION_LABEL[region]}
-              </label>
-            )
-          })}
-          <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--dsw-alias-border-l2)', fontWeight: 600, marginBottom: 4 }}>
-            工具入口（侧边栏 foot 区）
-          </div>
-          {TOOLS.map((tool) => {
-            const visible = assembler?.tools[tool]?.visible ?? true
-            return (
-              <label key={tool} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={visible}
-                  onChange={() => toggleTool(tool)}
-                />
-                {TOOL_LABEL[tool]}
-              </label>
-            )
-          })}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <span style={{ flex: 1 }}>foot 区间距</span>
-            <input
-              type="number"
-              min={0}
-              max={8}
-              value={assembler?.footSpacing ?? 2}
-              onChange={(e) => setSpacing(Number(e.target.value))}
-              style={{ width: 48, background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 4, padding: '1px 4px' }}
-            />
-          </label>
-          <div style={{ marginTop: 6, opacity: 0.6, fontSize: 11 }}>
-            配置经 settings 持久化（四区显隐/tool 摆位/foot 间距）
-          </div>
-        </div>
-      )}
-    </span>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+      <Row title="布局（四区显隐）" desc="各区域显隐配置；侧边栏实时生效，tab/顶部区域变更需刷新页面">
+        <span />
+      </Row>
+      {REGIONS.map((region) => {
+        const state = layout?.[region]
+        const visible = state?.visible ?? true
+        return (
+          <Row key={region} title={REGION_LABEL[region]} desc={REGION_DESC[region]}>
+            <Switch checked={visible} onChange={() => toggle(region)} label={REGION_LABEL[region]} />
+          </Row>
+        )
+      })}
+      <Row title="工具入口（侧边栏 foot 区）" desc="task-board / SSH / 技能中心的入口行摆位开关（实时生效）">
+        <span />
+      </Row>
+      {TOOLS.map((tool) => {
+        const visible = assembler?.tools[tool]?.visible ?? true
+        return (
+          <Row key={tool} title={TOOL_LABEL[tool]}>
+            <Switch checked={visible} onChange={() => toggleTool(tool)} label={TOOL_LABEL[tool]} />
+          </Row>
+        )
+      })}
+      <Row title="foot 区间距" desc="侧边栏 foot 区各入口行的上下边距（px）">
+        <input
+          type="number"
+          min={0}
+          max={8}
+          value={assembler?.footSpacing ?? 2}
+          onChange={(e) => setSpacing(Number(e.target.value))}
+          aria-label="foot 区间距"
+          style={{ width: 56, height: 32, boxSizing: 'border-box', background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, padding: '0 8px', fontSize: 13, flex: 'none' }}
+        />
+      </Row>
+    </div>
   )
 }
