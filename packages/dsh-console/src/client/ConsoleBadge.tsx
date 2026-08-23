@@ -100,7 +100,8 @@ export function ConsoleBadge(props: ConsoleBadgeProps & { host: ConsoleHost }): 
           setInstances(d.instances as unknown as InstanceView[])
           setHosts(d.hosts as unknown as HostView[])
         })
-        .catch(() => { setInstances([]); setHosts([]) })
+        // 区分加载失败与空数据：失败显示原因（认证/网络错误常被误读为"暂无实例"）。
+        .catch((e) => { setInstances([]); setHosts([]); setNotice(`加载失败：${e instanceof Error ? e.message : String(e)}`) })
       host.brokerStatus()
         .then((d) => setBroker(d))
         .catch(() => setBroker(null))

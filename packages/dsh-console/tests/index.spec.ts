@@ -323,7 +323,7 @@ describe('daemon 角色（主机守护）', () => {
     const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } } })
     ctx.channel.sendControl('host-lab1', { type: 'stop', payload: { instanceId: 'web3' } })
     await new Promise((r) => setTimeout(r, 50))
-    expect(execMock).toHaveBeenCalledWith('lsof -ti tcp:3083', expect.anything())
+    expect(execMock).toHaveBeenCalledWith('lsof -ti tcp:3083 -sTCP:LISTEN', expect.anything())
     expect(killSpy).toHaveBeenCalledWith(12345, 'SIGTERM')
     ConsoleService.execImpl = childProcess.exec
     killSpy.mockRestore()
@@ -409,5 +409,82 @@ describe('daemon 角色（主机守护）', () => {
     ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
     await vi.advanceTimersByTimeAsync(35000)
     expect(spawnSpy).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('review 修复回归（去 broker 化边界）', () => {
+  it('instance 角色经 env DSH_RELAY_AGENT 识别本机：直连本体 restart 短路自退（无守护/无 broker）', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const prev = process.env.DSH_RELAY_AGENT
+    process.env.DSH_RELAY_AGENT = 'web3'
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { role: 'instance' })
+    // 已运行超过窗口（RPC 面窗口兜底）
+    ;(ctx.console as unknown as { startedAt: number }).startedAt = Date.now() - ConsoleService.STARTUP_CONTROL_GRACE_MS - 1000
+    const result = (ctx.console as unknown as { controlInstance(id: string, c: string, p: object): unknown }).controlInstance('web3', 'restart', {})
+    await new Promise((r) => setTimeout(r, 400))
+    expect(exitSpy).toHaveBeenCalled()
+    expect((result as { ok: boolean }).ok).toBe(true)
+    exitSpy.mockRestore()
+    if (prev === undefined) delete process.env.DSH_RELAY_AGENT; else process.env.DSH_RELAY_AGENT = prev
+  })
+
+  it('daemon 角色不短路自己（env id 不触发自杀）', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const prev = process.env.DSH_RELAY_AGENT
+    process.env.DSH_RELAY_AGENT = 'host1'
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
+    const result = (ctx.console as unknown as { controlInstance(id: string, c: string, p: object): unknown }).controlInstance('host1', 'restart', {})
+    await new Promise((r) => setTimeout(r, 400))
+    expect(exitSpy).not.toHaveBeenCalled()
+    expect((result as { ok: boolean }).ok).toBe(false) // 无守护配置 → 显式失败，不自杀
+    exitSpy.mockRestore()
+    if (prev === undefined) delete process.env.DSH_RELAY_AGENT; else process.env.DSH_RELAY_AGENT = prev
+  })
+
+  it('直连探测：可达 → heartbeat 续期保持 online；不可达 → 不续期', async () => {
+    let reachable = true
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      if (!reachable) throw new Error('ECONNREFUSED')
+      return new Response('{}', { status: 200 })
+    }))
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { launch: { web3: { host: 'host1', addr: 'http://127.0.0.1:3083', dshHome: 'x', profile: 'web' } } })
+    const consoleSvc = ctx.console as unknown as { probeLaunch(): Promise<void> }
+    await consoleSvc.probeLaunch()
+    expect(ctx.channel.get('web3')?.status).toBe('online')
+    // 不可达 → 不续期（但声明仍在线；sweep 才会标离线）
+    reachable = false
+    await consoleSvc.probeLaunch()
+    expect(ctx.channel.get('web3')?.status).toBe('online') // lastSeen 未刷新，但未到 sweep 窗口
+    vi.unstubAllGlobals()
+  })
+
+  it('daemon 控制端口：client-request 信封 → controlInstance/listInstances 回执', async () => {
+    const port = 41100 + Math.floor(Math.random() * 500)
+    const ctx = await bootDaemon({
+      instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } },
+      controlPort: port,
+    })
+    // 等 server 起来
+    await new Promise((r) => setTimeout(r, 100))
+    const res = await fetch(`http://127.0.0.1:${port}/api/console/listInstances`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 't1', method: 'console/listInstances', payload: { args: {} } }),
+    })
+    const data = await res.json() as { result: { ok: boolean; value: { instances: Array<{ id: string }> } } }
+    expect(data.result.ok).toBe(true)
+    expect(data.result.value.instances.map((i) => i.id)).toContain('web3')
+    // 坏信封 → 400 + bad-request
+    const bad = await fetch(`http://127.0.0.1:${port}/api/console/listInstances`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'nope' }),
+    })
+    expect(bad.status).toBe(400)
+    ctx[Symbol.dispose]?.()
   })
 })

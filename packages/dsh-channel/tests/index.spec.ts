@@ -300,3 +300,66 @@ describe('relay 游标持久化（stateFile）', () => {
     vi.unstubAllGlobals()
   })
 })
+
+describe('callRemote 直连（请求-响应，broker 仅兜底）', () => {
+  it('直连成功：解析 server-response 业务结果', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      type: 'server-response', rpcId: 'x',
+      result: { ok: true, value: { ok: true } },
+    }), { status: 200 })))
+    const ch = boot({ tokens: {} })
+    ch.declare({ id: 'web3', name: 'web3', addr: 'http://127.0.0.1:3083', status: 'online' })
+    const r = await ch.callRemote('web3', { namespace: 'console', method: 'listInstances', args: {} }, 5000)
+    expect(r).toEqual({ ok: true, value: { ok: true } })
+    vi.unstubAllGlobals()
+  })
+
+  it('业务 4xx（带 server-response 信封）不降级重发', async () => {
+    const messages: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { method?: string; body?: string }) => {
+      if (String(url).includes('/api/')) {
+        // 目标已处理：业务失败 → HTTP 400 + server-response 信封（业务结果）
+        return new Response(JSON.stringify({
+          type: 'server-response', rpcId: 'x',
+          result: { ok: false, error: { code: 'control-error', message: '实例不在清单', details: {} } },
+        }), { status: 400 })
+      }
+      messages.push(`${init?.method} ${url}`)
+      return new Response('{}', { status: 200 })
+    }))
+    const ch = boot({ tokens: {}, relay: { brokerUrl: 'http://x', agent: 'web2', secret: 's' } })
+    ch.declare({ id: 'web3', name: 'web3', addr: 'http://127.0.0.1:3083', status: 'online' })
+    const r = await ch.callRemote('web3', { namespace: 'console', method: 'controlInstance', args: { instanceId: 'x', command: 'stop', payload: {} } }, 5000)
+    expect(r.ok).toBe(false)
+    expect((r as { error: { message: string } }).error.message).toBe('实例不在清单')
+    // 未降级重发（无 POST /messages 投递；?since= 是启动 recv 轮询，非投递）
+    expect(messages.some((m) => m.startsWith('POST') && m.includes('/messages'))).toBe(false)
+    vi.unstubAllGlobals()
+  })
+
+  it('直连传输失败（网络错误）→ 降级 broker 兜底投递', async () => {
+    const messages: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { method?: string; body?: string }) => {
+      if (String(url).includes('/api/')) throw new Error('ECONNREFUSED')
+      messages.push(`${init?.method} ${url}`)
+      return new Response('{}', { status: 200 })
+    }))
+    const ch = boot({ tokens: {}, relay: { brokerUrl: 'http://x', agent: 'web2', secret: 's' } })
+    ch.declare({ id: 'web3', name: 'web3', addr: 'http://127.0.0.1:3083', status: 'online' })
+    // 降级投递后无回执（broker 帧异步回执）→ 超时 reject，吸收即可
+    const p = ch.callRemote('web3', { namespace: 'console', method: 'listInstances', args: {} }, 500)
+    p.catch(() => { /* 超时预期 */ })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(messages.some((m) => m.includes('/messages'))).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
+  it('无 relay 时直连失败 → 降级抛"relay 未配置"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }))
+    const ch = boot({ tokens: {} })
+    ch.declare({ id: 'web3', name: 'web3', addr: 'http://127.0.0.1:3083', status: 'online' })
+    await expect(ch.callRemote('web3', { namespace: 'console', method: 'listInstances', args: {} }, 500))
+      .rejects.toThrow('relay 未配置')
+    vi.unstubAllGlobals()
+  })
+})

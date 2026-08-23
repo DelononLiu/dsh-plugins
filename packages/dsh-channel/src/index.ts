@@ -288,6 +288,15 @@ export class ChannelService extends TypertRemoteService {
   }
 
   /**
+   * 声明实例（管理端权威写入：launch/instances 配置清单）。不校验 agent 令牌——
+   * token 校验是 agent 自证身份的契约；管理端声明是配置事实，tokens 配置后
+   * 不应导致 launch 注册失败（否则管理端发现失效）。
+   */
+  declare(instance: InstanceIdentity): void {
+    this.instances.set(instance.id, { ...instance, status: 'online', lastSeen: Date.now() })
+  }
+
+  /**
    * 心跳上报（agent 周期调用）。未知实例或令牌不匹配抛错。
    * @param instanceId - 实例 id。
    * @param token - 实例令牌。
@@ -480,9 +489,16 @@ export class ChannelService extends TypertRemoteService {
         payload: { args: rpc.args },
       }),
     })
-    if (!res.ok) throw new Error(`directRpc ${url}: http ${res.status}`)
-    const data = await res.json() as { result?: { ok: boolean; value?: unknown; error?: { code: string; message: string; details?: object } } }
-    const result = data.result
+    // 业务 4xx（目标已处理并返回 server-response 信封）不算传输失败——先解析 body
+    // 的业务结果；只有无信封/5xx/网络错误才 throw（callRemote 据此降级 broker 兜底，
+    // 避免业务失败被当成传输失败重发同一指令）。
+    const data = await res.json().catch(() => null) as {
+      result?: { ok: boolean; value?: unknown; error?: { code: string; message: string; details?: object } }
+    } | null
+    const result = data?.result
+    if (result === undefined && !res.ok) {
+      throw new Error(`directRpc ${url}: http ${res.status}`)
+    }
     const pending = this.pendingRpc.get(rpc.id)
     if (pending === undefined) return
     this.pendingRpc.delete(rpc.id)

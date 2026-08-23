@@ -14,6 +14,8 @@
 
 import { createElement } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConsoleInstanceView, ControlResult } from 'dsh-console/types'
+import type { BrokerStatusView } from 'dsh-channel/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
 import type {} from 'dsh-console/remote'
@@ -58,22 +60,36 @@ export function apply(ctx: ClientContext): void {
       ctx.slots.inject(
         'sidebar.footer.action',
         () => {
-          // 装配 remote（console + channel contribution），注入 ConsoleBadge。
-          void ctx.remote.$mount(consoleRemote)
-          void ctx.remote.$mount(channelRemote)
+          // 装配 remote（console + channel contribution）。$mount 异步（等 namespace
+          // 服务就绪才 resolve）——缓存 Promise 并 await；且 remote.console /
+          // remote.channel 是 cordis 服务（'remote.console'），属性访问需在注入
+          // fiber 里进行（否则 "cannot get property without inject"）——用
+          // ctx.inject 进入注入 fiber 抓取 namespace 引用（服务注册在 ownerCtx，
+          // 引用在 fiber 结束后仍有效，可缓存）。
+          const consoleReady = ctx.remote.$mount(consoleRemote)
+          const channelReady = ctx.remote.$mount(channelRemote)
           const host: ConsoleHost = {
             listInstances: async () => {
-              const result = await ctx.remote.console.listInstances()
+              await consoleReady
+              let ns: { listInstances(): Promise<{ ok: boolean; value: ConsoleInstanceView; error: { code: string; message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.listInstances()
               if (!result.ok) throw new Error(`console.listInstances failed: ${result.error.code}: ${result.error.message}`)
               return result.value
             },
             controlInstance: async (instanceId, command) => {
-              const result = await ctx.remote.console.controlInstance(instanceId, command, {})
+              await consoleReady
+              let ns: { controlInstance(id: string, c: string, p: object): Promise<{ ok: boolean; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.controlInstance(instanceId, command, {})
               return result.ok ? { ok: true } : { ok: false, error: result.error.message }
             },
             brokerStatus: async () => {
               // broker 是 channel 的传输后端——状态由 channel 暴露。
-              const result = await ctx.remote.channel.brokerStatus()
+              await channelReady
+              let ns: { brokerStatus(): Promise<{ ok: boolean; value: BrokerStatusView; error: { message: string } }> }
+              await ctx.inject(['remote.channel'], (injected) => { ns = (injected as unknown as { remote: { channel: typeof ns } }).remote.channel })
+              const result = await ns!.brokerStatus()
               return result.ok ? result.value : { connected: false, reason: result.error.message, agents: [], queueCount: 0 }
             },
           }

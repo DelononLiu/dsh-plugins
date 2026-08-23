@@ -231,6 +231,8 @@ export class ConsoleService extends TypertRemoteService {
   /** 管理端直连探测周期（ms）：需小于 channel heartbeatTimeoutMs（30s），
    * 否则在线实例在探测间隙被 sweep 误标离线。 */
   private static readonly PROBE_INTERVAL_MS = 15_000
+  /** 直连探测请求超时（ms）：目标 hang 时中止，避免挂起请求堆积。 */
+  private static readonly PROBE_TIMEOUT_MS = 5_000
 
   /** spawn 实现（测试可替换为伪子进程；生产 = node:child_process.spawn）。 */
   static spawnImpl: typeof spawn = spawn
@@ -271,12 +273,9 @@ export class ConsoleService extends TypertRemoteService {
         const addr = config.launch
           ? (spec.addr ?? '')
           : (typeof spec.port === 'number' ? `http://127.0.0.1:${spec.port}` : '')
-        try {
-          // 注册即 online（launch = 期望在线的实例；实际可达性后续直连探测/心跳更新）。
-          ctx.channel.register({ id, name: id, addr, status: 'online' }, '')
-        } catch (error) {
-          console.warn(`[dsh-console] ${config.launch ? 'launch' : 'instances'} 实例 ${id} 注册失败: ${error instanceof Error ? error.message : String(error)}`)
-        }
+        // declare（管理端声明）：不校验 agent token（register 的 token 校验是
+        // agent 自证身份契约；配置清单声明不受 tokens 配置影响）。
+        ctx.channel.declare({ id, name: id, addr, status: 'online' })
       }
     }
     // 直连状态探测（管理端 launch / daemon 本机 instances 通用）：注册即 online，
@@ -370,7 +369,8 @@ export class ConsoleService extends TypertRemoteService {
   }
 
   /** 直连状态探测：对管理端 launch / daemon 本机 instances 的 addr 发轻量请求，
-   * 可达 → 心跳续期（保持 online）；不可达 → 不续期（sweep 会标离线）。 */
+   * 可达 → 心跳续期（保持 online）；不可达 → 不续期（sweep 会标离线）。
+   * 探测带 5s 超时（目标 hang 时不积累挂起请求）。 */
   private probeLaunch(): void {
     const specs = this.config.launch ?? this.config.instances ?? {}
     for (const [id, spec] of Object.entries(specs)) {
@@ -379,11 +379,11 @@ export class ConsoleService extends TypertRemoteService {
         ? spec.addr
         : (typeof spec.port === 'number' ? `http://127.0.0.1:${spec.port}` : undefined)
       if (!addr) continue
-      fetch(addr)
+      fetch(addr, { signal: AbortSignal.timeout(ConsoleService.PROBE_TIMEOUT_MS) })
         .then(() => {
           try { this.ctx.channel.heartbeat(id, '') } catch { /* 未注册 */ }
         })
-        .catch(() => { /* 不可达：不续期，sweep 会标离线 */ })
+        .catch(() => { /* 不可达/超时：不续期，sweep 会标离线 */ })
     }
   }
 
@@ -700,7 +700,13 @@ export class ConsoleService extends TypertRemoteService {
       console.log(`[dsh-console/daemon] ${instanceId} 无端口信息，无法本机定位停止`)
       return
     }
-    ConsoleService.execImpl(`lsof -ti tcp:${port}`, (error, stdout) => {
+    // 只定位监听者（-sTCP:LISTEN）——裸 `lsof -ti tcp:<port>` 会同时列出连接方
+    // （管理端/守护的探测 fetch 连接），误杀守护自身。
+    ConsoleService.execImpl(`lsof -ti tcp:${port} -sTCP:LISTEN`, (error, stdout) => {
+      if (error) {
+        console.log(`[dsh-console/daemon] ${instanceId} 端口定位失败（lsof: ${error.message}），无法本机停止`)
+        return
+      }
       const pids = stdout.trim().split('\n').filter(Boolean)
       if (pids.length === 0) {
         console.log(`[dsh-console/daemon] ${instanceId} 端口 ${port} 无占用进程（可能已离线）`)
@@ -791,7 +797,13 @@ export class ConsoleService extends TypertRemoteService {
   controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart', payload: { version?: string }): ControlResult {
     // 目标侧短路（本机即目标实例）：跨实例 RPC 到达这里时直接执行自退，
     // 不再 remoteControl 递归（否则管理端→实例→再调自己→死循环）。
-    if (instanceId === this.ctx.channel.relay?.agent) {
+    // instance 角色用部署 env 的本机 agent id（无 relay 也设 DSH_RELAY_AGENT，
+    // 无守护场景直连本体也能识别自己）；console/daemon 用 relay.agent
+    // （daemon 不短路自己——避免误杀守护，本机清单分支在前面处理）。
+    const selfId = this.config.role === 'instance'
+      ? process.env.DSH_RELAY_AGENT
+      : this.ctx.channel.relay?.agent
+    if (instanceId === selfId) {
       const action = resolveControlAction({ id: 'rpc', type: command, payload, ts: Date.now() })
       if (action === 'exit') {
         // RPC 帧无发送时间戳（官方协议不加字段）→ 用启动窗口兜底过滤积压帧
