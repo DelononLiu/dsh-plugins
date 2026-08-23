@@ -19,8 +19,8 @@
       "default": "./lib/typert.remote-client.js"
     },
     "./types": {
-      "types": "./lib/types.d.ts",
-      "default": "./lib/types.js"
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types/types.js"
     },
     "./package.json": "./package.json"
   },
@@ -37,7 +37,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-typert.mjs packages/dsh-channel dsh-channel",
+    "build": "node ../../scripts/build-typert.mjs packages/dsh-channel dsh-channel && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

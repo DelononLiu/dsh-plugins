@@ -1,12 +1,21 @@
 /**
  * Console 徽标按钮（会话头部可见 UI）——点击弹出实例控制面板。
- * 数据/操作经 host HTTP 端点：GET /api/console/instances（实例列表）、
- * POST /api/console/control（下发控制指令，如重启）。
+ * 数据/操作经 typert 远程化（host.listInstances / host.controlInstance /
+ * host.brokerStatus——broker 状态由 channel 暴露，替换手写 HTTP 端点）。
  */
 
 import { useEffect, useRef, useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { BrokerStatusView } from 'dsh-channel/types'
+import type { ConsoleInstanceView, ControlResult } from 'dsh-console/types'
+
+/** ConsoleBadge 数据源（apply 注入：typert remote 面）。 */
+export interface ConsoleHost {
+  listInstances(): Promise<ConsoleInstanceView>
+  controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart'): Promise<ControlResult>
+  brokerStatus(): Promise<BrokerStatusView>
+}
 
 /**
  * 按钮样式：照抄官方设置按钮（dsh-client-ui-settings-general .trigger）——
@@ -27,14 +36,6 @@ if (typeof document !== 'undefined' && !document.querySelector('style[data-plugi
 
 /** 侧栏底部动作插槽注入的 props（wide=false 为 56px 窄栏）。 */
 export type ConsoleBadgeProps = PropsRuntime<'sidebar.footer.action'>
-
-/** Broker 状态视图（/api/console/broker）。 */
-interface BrokerView {
-  connected: boolean
-  reason?: string
-  agents: Array<{ id: string; online: boolean }>
-  queueCount: number
-}
 
 /** 显示器图标（官方 SVG stroke 风格，与侧栏图标一致）。 */
 function MonitorIcon(props: { size: number }): React.JSX.Element {
@@ -70,11 +71,12 @@ interface HostView {
  * 渲染「Console」徽标 + 实例控制面板浮层。
  * @param props - 插槽注入的运行时 props。
  */
-export function ConsoleBadge(props: ConsoleBadgeProps): React.JSX.Element {
+export function ConsoleBadge(props: ConsoleBadgeProps & { host: ConsoleHost }): React.JSX.Element {
+  const { host } = props
   const [open, setOpen] = useState(false)
   const [instances, setInstances] = useState<InstanceView[] | null>(null)
   const [hosts, setHosts] = useState<HostView[] | null>(null)
-  const [broker, setBroker] = useState<BrokerView | null>(null)
+  const [broker, setBroker] = useState<BrokerStatusView | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [panelPos, setPanelPos] = useState<{ left: number; bottom: number } | null>(null)
   const rootRef = useRef<HTMLSpanElement>(null)
@@ -93,15 +95,13 @@ export function ConsoleBadge(props: ConsoleBadgeProps): React.JSX.Element {
           bottom: window.innerHeight - rect.top + 4,
         })
       }
-      fetch('/api/console/instances')
-        .then((r) => r.json() as Promise<{ instances: InstanceView[]; hosts?: HostView[] }>)
+      host.listInstances()
         .then((d) => {
-          setInstances(d.instances ?? [])
-          setHosts(d.hosts ?? [])
+          setInstances(d.instances as unknown as InstanceView[])
+          setHosts(d.hosts as unknown as HostView[])
         })
         .catch(() => { setInstances([]); setHosts([]) })
-      fetch('/api/console/broker')
-        .then((r) => r.json() as Promise<BrokerView>)
+      host.brokerStatus()
         .then((d) => setBroker(d))
         .catch(() => setBroker(null))
     }
@@ -109,12 +109,7 @@ export function ConsoleBadge(props: ConsoleBadgeProps): React.JSX.Element {
 
   const CONTROL_LABEL: Record<string, string> = { start: '启动', stop: '停止', restart: '重启' }
   const control = (id: string, name: string, command: 'start' | 'stop' | 'restart'): void => {
-    fetch('/api/console/control', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ instanceId: id, command }),
-    })
-      .then((r) => r.json() as Promise<{ ok: boolean; error?: string }>)
+    host.controlInstance(id, command)
       .then((d) => {
         setNotice(d.ok ? `已向 ${name} 下发${CONTROL_LABEL[command]}指令` : `失败：${d.error ?? 'unknown'}`)
       })

@@ -21,7 +21,7 @@ import { dirname } from 'node:path'
 
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则：边界类型
 // 必须来自公共非根类型子路径，供跨包消费与类型契约）。
-import type { InstanceIdentity } from './types.ts'
+import type { BrokerStatusView, InstanceIdentity } from './types.ts'
 export type * from './types.ts'
 export type { InstanceIdentity } from './types.ts'
 
@@ -300,6 +300,47 @@ export class ChannelService extends TypertRemoteService {
   get(instanceId: string): InstanceIdentity | undefined {
     const entry = this.instances.get(instanceId)
     return entry ? toIdentity(entry) : undefined
+  }
+
+  /**
+   * Broker 运行状态（typert @Remote）：连接/在线 agent/消息队列计数。
+   * broker 是 channel 的传输后端（relay）——状态由 channel 暴露，上层
+   * （console/UI）经 ctx.remote.channel.brokerStatus() 消费，不绕道直连。
+   */
+  @Remote
+  async brokerStatus(): Promise<BrokerStatusView> {
+    const relay = this.relay
+    if (relay === undefined) {
+      return { connected: false, reason: 'relay 未配置', agents: [], queueCount: 0 }
+    }
+    try {
+      const ts = Math.floor(Date.now() / 1000)
+      const peersRes = await fetch(`${relay.brokerUrl}/peers`, {
+        headers: {
+          'x-relay-agent': relay.agent,
+          'x-relay-timestamp': String(ts),
+          'x-relay-signature': signRequest(relay.secret, 'GET', '/peers', ts),
+        },
+      })
+      if (!peersRes.ok) {
+        return { connected: false, reason: `broker http ${peersRes.status}`, agents: [], queueCount: 0 }
+      }
+      const peers = (await peersRes.json() as { peers?: Array<{ agent: string; online: boolean }> }).peers ?? []
+      // 队列计数：本 agent 收件箱待处理消息（since 空 → 从最新游标起）。
+      const ts2 = Math.floor(Date.now() / 1000)
+      const path2 = '/messages?since=&limit=50'
+      const msgRes = await fetch(`${relay.brokerUrl}${path2}`, {
+        headers: {
+          'x-relay-agent': relay.agent,
+          'x-relay-timestamp': String(ts2),
+          'x-relay-signature': signRequest(relay.secret, 'GET', path2, ts2),
+        },
+      })
+      const queueCount = msgRes.ok ? ((await msgRes.json() as { messages?: unknown[] }).messages ?? []).length : -1
+      return { connected: true, agents: peers.map((p) => ({ id: p.agent, online: p.online })), queueCount }
+    } catch (error) {
+      return { connected: false, reason: error instanceof Error ? error.message : String(error), agents: [], queueCount: 0 }
+    }
   }
 
   /**

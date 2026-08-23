@@ -18,3 +18,11 @@ export interface InstanceIdentity {
   /** 发行包版本。 */
   version?: string
 }
+
+/** Broker 运行状态（channel 传输层状态——broker 是 channel 的可选后端）。 */
+export interface BrokerStatusView {
+  connected: boolean
+  reason?: string
+  agents: Array<{ id: string; online: boolean }>
+  queueCount: number
+}

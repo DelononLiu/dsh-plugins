@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "lib",
+    "declarationDir": "lib/types",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "exclude": ["src/client", "**/*.test.ts"]
+}

@@ -16,7 +16,7 @@
     { "path": "./packages/typert-protocol" },
     { "path": "./packages/dsh-user" },
     { "path": "./packages/dsh-channel" },
-    { "path": "./packages/dsh-console" },
+    { "path": "./packages/dsh-console/tsconfig.host.json" },
     { "path": "./packages/dsh-quick-nav" },
     { "path": "./packages/dsh-tabs" },
     { "path": "./packages/dsh-desk" }
