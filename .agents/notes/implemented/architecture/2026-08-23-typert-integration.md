@@ -64,6 +64,19 @@ typert 接入（传输分层已定：`typert → dsh-channel`）。第一期 = �
   ```
 - inject 加 `'remote'`。
 
+### client remote 消费纪律（fiber 注入，2026-08 实测）
+
+- `ctx.remote.<ns>` 不是普通对象属性，是 **cordis 服务**（`remoteServiceKey(ns)` = `'remote.<ns>'`）——dotted
+  访问解析为服务全名，**调用 fiber 的 store 链必须可见该服务**，否则抛
+  `cannot get property "remote.<ns>" without inject`。
+- **$mount 的 fiber 归属**：namespace 服务注册在 `$mount` 执行时的 fiber 的 store。若 `$mount` 在
+  **异步回调**里执行（如 `fetch(...).then()` 内），服务落在异步 fiber——后续点击/渲染 fiber 访问
+  必报 without inject（quick-nav 的 $mount 在 apply 同步 fiber，裸访问碰巧工作，是 fiber 巧合）。
+- **正道**：消费方用 `ctx.inject(['remote.<ns>'], (injected) => { ns = injected.remote.<ns> })` 显式
+  从 store 解析服务（不依赖 fiber 巧合）；`$mount` 仍需 await（异步挂载完成前 ns 不存在）。
+- 实例：dsh-console ConsoleBadge 的 host 方法（listInstances/controlInstance/brokerStatus）均经
+  `ctx.inject` 抓取 namespace 引用后调用。
+
 ### 验证
 
 - 构建：generator 产出 channel typert 产物（host + remote-client）。
