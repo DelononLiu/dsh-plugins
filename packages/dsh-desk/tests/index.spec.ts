@@ -1,5 +1,5 @@
 /**
- * dsh-desk 行为测试：四区布局配置（默认/自定义/单区查询）。
+ * dsh-desk 行为测试：四区布局配置 + 组装器配置（默认/自定义/单区查询）。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -14,6 +14,7 @@ function boot(config: Partial<Config> = {}): MyUiService {
       sidebar: { visible: true, order: 2, size: '260px' },
       actions: { visible: true, order: 3 },
     },
+    assembler: { footSpacing: 2, tools: {} },
     ...config,
   })
 }
@@ -37,5 +38,21 @@ describe('四区布局配置', () => {
     const svc = boot()
     expect(svc.region('actions').order).toBe(3)
     expect(svc.region('sidebar').size).toBe('260px')
+  })
+})
+
+describe('组装器配置', () => {
+  it('默认：footSpacing 2、无工具排除', () => {
+    const svc = boot()
+    const assembler = svc.assembler()
+    expect(assembler.footSpacing).toBe(2)
+    expect(assembler.tools).toEqual({})
+  })
+
+  it('自定义：footSpacing + 工具显隐', () => {
+    const svc = boot({ assembler: { footSpacing: 4, tools: { ssh: { visible: false } } } })
+    const assembler = svc.assembler()
+    expect(assembler.footSpacing).toBe(4)
+    expect(assembler.tools.ssh?.visible).toBe(false)
   })
 })

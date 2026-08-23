@@ -47,6 +47,11 @@ export function apply(ctx: ClientContext): void {
   const settings = ctx.settingsScope.bind<{ pinned: string[] }>({ namespace: PINNED_NS })
   const pinnedOf = (): string[] => (settings.getSnapshot().value as PinnedValue | undefined)?.pinned ?? []
 
+  // 布局配置（dsh-desk my-ui-layout）：tabs.visible=false → 不注册会话 tab
+  // （跨插件契约 = 共享 settings 配置，见 dsh-desk LayoutControl）。
+  const layoutScope = ctx.settingsScope.bind<{ layout?: { tabs?: { visible?: boolean } } }>({ namespace: 'my-ui-layout' })
+  const tabsVisible = (): boolean => layoutScope.getSnapshot().value?.layout?.tabs?.visible ?? true
+
   // —— 选中划线：注入官方 tabActive 同款样式（仅会话 tab）+ 抑制官方划线 ——
   const style = document.createElement('style')
   style.textContent = [
@@ -249,7 +254,9 @@ export function apply(ctx: ClientContext): void {
   // —— 动态注册固定的会话 tab ——
   // 每次注册都须经 slots.inject 包装：conversation.view 仅在声明它的
   // 条目挂载时存在，inject 保证声明就绪才注册、声明重挂载时重跑。
+  // 布局配置 tabs.visible=false 时跳过注册（插件级显隐）。
   ctx.slots.inject('conversation.view', () => {
+    if (!tabsVisible()) return () => {}
     const disposers = new Map<string, () => void>()
 
     const sync = (): void => {
