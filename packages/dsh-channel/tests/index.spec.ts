@@ -144,7 +144,7 @@ describe('relay 接入（broker 底座）', () => {
     }))
     const ch = boot({
       tokens: {},
-      relay: { brokerUrl: 'http://127.0.0.1:19121', agent: 'web2', secret: 's', pollPeersMs: 0 },
+      relay: { brokerUrl: 'http://127.0.0.1:19121', agent: 'web2', secret: 's' },
     })
     // 等待异步注册
     await new Promise((r) => setTimeout(r, 20))
@@ -159,7 +159,7 @@ describe('relay 接入（broker 底座）', () => {
     ch[Symbol.dispose]?.()
   })
 
-  it('轮询 peers 更新远端实例（online/offline 用 broker 判定）', async () => {
+  it('broker peers 不填充实例表（去 broker 化：发现权威源是管理端 launch/register）', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('/peers')) {
         return new Response(JSON.stringify({ peers: [
@@ -171,17 +171,15 @@ describe('relay 接入（broker 底座）', () => {
     }))
     const ch = boot({
       tokens: {},
-      relay: { brokerUrl: 'http://x', agent: 'web2', secret: 's', pollPeersMs: 5000 },
+      relay: { brokerUrl: 'http://x', agent: 'web2', secret: 's' },
     })
-    // 等启动注册 + 手动触发一次轮询
+    // 等启动注册 + 手动触发一次周期任务（register + recv，无 peers 轮询）
     await new Promise((r) => setTimeout(r, 20))
-    await (ch as unknown as { relayPollPeers(): Promise<void> }).relayPollPeers()
-    const list = ch.list()
-    const web3 = ch.get('web3')
-    expect(web3?.status).toBe('online')
-    expect(ch.get('web4')?.status).toBe('offline')
-    expect(list.length).toBeGreaterThanOrEqual(2)
+    await (ch as unknown as { relayTick(): Promise<void> }).relayTick()
+    expect(ch.get('web3')).toBeUndefined()
+    expect(ch.get('web4')).toBeUndefined()
     vi.unstubAllGlobals()
+    ch[Symbol.dispose]?.()
   })
 })
 
@@ -220,15 +218,22 @@ describe('relay 控制指令跨实例', () => {
   })
 
   it('recv 控制指令消息触发 onControl（from 为发送方）', async () => {
+    // 启动即 recv（constructor 首轮消费积压）——mock 有状态：首轮返回消息，
+    // 之后返回空（模拟游标推进），避免同一条消息被重复处理。
+    let recvCount = 0
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/messages?since=')) {
-        return new Response(JSON.stringify({
-          messages: [
-            { id: 'm1', from: 'web2', type: 'control', body: { command: { id: 'c1', type: 'restart-approved', payload: {} } } },
-            { id: 'm2', from: 'web2', type: 'message', body: {} },
-          ],
-          cursor: 'cur-1',
-        }), { status: 200 })
+        recvCount++
+        if (recvCount === 1) {
+          return new Response(JSON.stringify({
+            messages: [
+              { id: 'm1', from: 'web2', type: 'control', body: { command: { id: 'c1', type: 'restart-approved', payload: {} } } },
+              { id: 'm2', from: 'web2', type: 'message', body: {} },
+            ],
+            cursor: 'cur-1',
+          }), { status: 200 })
+        }
+        return new Response(JSON.stringify({ messages: [], cursor: 'cur-1' }), { status: 200 })
       }
       return new Response('{}', { status: 200 })
     }))
@@ -238,7 +243,8 @@ describe('relay 控制指令跨实例', () => {
     })
     const got: string[] = []
     ch.onControl((cmd, from) => { got.push(`${cmd.type}:${from}`) })
-    await (ch as unknown as { relayRecvControls(): Promise<void> }).relayRecvControls()
+    // 等待启动首轮 recv 完成
+    await new Promise((r) => setTimeout(r, 30))
     expect(got).toEqual(['restart-approved:web2'])
     expect((ch as unknown as { relaySince: string }).relaySince).toBe('cur-1')
     vi.unstubAllGlobals()

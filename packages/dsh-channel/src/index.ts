@@ -56,6 +56,8 @@ export interface ControlCommand<P = unknown> {
   payload: P
   /** 指令 id（幂等回执）。 */
   id: string
+  /** 发送时间戳（ms）——接收端用它区分积压旧指令（ts < 实例启动时刻）与当前指令。 */
+  ts: number
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -74,7 +76,8 @@ export interface Config {
   relay?: RelayConfig
 }
 
-/** Relay broker 接入配置（agent 保活 + 可选 peers 轮询）。 */
+/** Relay broker 接入配置（仅作跨实例传输兜底——实例发现不依赖 broker，
+ * 权威源是管理端 launch/register；peers 无地址信息，轮询填充会让直连失效）。 */
 export interface RelayConfig {
   /** broker 基地址（如 http://127.0.0.1:19121）。 */
   brokerUrl: string
@@ -82,8 +85,6 @@ export interface RelayConfig {
   agent: string
   /** 共享密钥（HMAC 签名）。 */
   secret: string
-  /** peers 轮询周期（ms）；0/缺省 = 只保活不轮询。 */
-  pollPeersMs?: number
   /** recv 增量游标持久化文件（长驻进程重启防重放积压指令；缺省不落盘）。 */
   stateFile?: string
 }
@@ -97,9 +98,6 @@ export const Config = z.object({
 
 /** 事件默认 TTL（7 天，已定投递语义）。 */
 export const EVENT_TTL_MS = 7 * 24 * 3600_000
-
-/** relay 接入后 peers 轮询默认周期（ms；未显式配置时启用，否则只保活不轮询=实例表永空）。 */
-export const DEFAULT_RELAY_POLL_MS = 30_000
 
 interface InstanceEntry extends InstanceIdentity {
   lastSeen: number
@@ -138,11 +136,10 @@ export class ChannelService extends TypertRemoteService {
       ctx.effect(() => () => { this.typertGateway = undefined })
     })
     // Relay broker 接入：解析配置（config 优先，env 兜底——DSH_RELAY_*）。
+    // broker 仅作跨实例传输兜底（无 addr 目标/直连失败），不做实例发现。
     const relay = config.relay ?? envRelayConfig()
     if (relay !== undefined) {
       this.relay = relay
-      // 接入 broker 即默认轮询 peers（实例表依赖它填充）；显式 0 才关闭。
-      this.pollPeersMs = relay.pollPeersMs ?? DEFAULT_RELAY_POLL_MS
       // 游标持久化：重启后从 stateFile 恢复，避免重读 broker 积压消息。
       if (relay.stateFile) {
         try {
@@ -154,10 +151,12 @@ export class ChannelService extends TypertRemoteService {
           // 文件缺失/损坏：从零开始（首轮全量，属正常冷启动）。
         }
       }
-      // 启动即保活注册；周期：poll 周期或默认 30s（保活 < broker HEARTBEAT_TTL）。
-      const period = this.pollPeersMs > 0 ? this.pollPeersMs : 30_000
+      // 启动即保活注册 + 立即 recv 一次（首轮消费 broker 积压，避免迟到的旧
+      // 控制指令在启动窗口后才被拉到）；周期 5s（recv 响应需快于 callRemote
+      // 回执超时 15s——30s 周期会让跨实例 RPC 回执必然超时）。
       void this.relayRegister()
-      const relayTimer = setInterval(() => this.relayTick(), Math.min(period, 30_000))
+      void this.relayRecvControls()
+      const relayTimer = setInterval(() => this.relayTick(), 5_000)
       relayTimer.unref?.()
       ctx.effect(() => () => clearInterval(relayTimer))
     }
@@ -165,16 +164,13 @@ export class ChannelService extends TypertRemoteService {
 
   /** 当前 relay 配置（未接入为 undefined）。 */
   readonly relay: RelayConfig | undefined
-  /** peers 轮询周期（ms；0 = 显式关闭，只保活不轮询）。 */
-  private readonly pollPeersMs: number = DEFAULT_RELAY_POLL_MS
 
   /** recv 增量游标（relay 控制指令接收）。 */
   private relaySince = ''
 
-  /** 周期任务：保活注册 + 可选 peers 轮询 + 控制指令接收。 */
+  /** 周期任务：保活注册 + 控制指令/回执接收（broker 仅兜底传输，不做发现）。 */
   private relayTick(): void {
     void this.relayRegister()
-    if (this.pollPeersMs > 0) void this.relayPollPeers()
     void this.relayRecvControls()
   }
 
@@ -272,30 +268,11 @@ export class ChannelService extends TypertRemoteService {
     }
   }
 
-  /** 轮询 broker peers，更新远端实例（进 instances，status 用 broker 判定）。 */
-  private async relayPollPeers(): Promise<void> {
-    const relay = this.relay
-    if (relay === undefined) return
-    try {
-      const res = await relayFetch(relay, 'GET', '/peers', '')
-      const data = await res.json() as { peers?: { agent: string; online: boolean }[] }
-      const now = Date.now()
-      for (const peer of data.peers ?? []) {
-        if (peer.agent === relay.agent) continue // 自己由保活维护
-        const entry = this.instances.get(peer.agent)
-        this.instances.set(peer.agent, {
-          id: peer.agent,
-          name: peer.agent,
-          addr: '',
-          status: peer.online ? 'online' : 'offline',
-          lastSeen: now,
-        })
-        void entry
-      }
-    } catch {
-      // broker 不可达：本轮跳过（下次重试）。
-    }
-  }
+  /**
+   * 轮询 broker peers 更新远端实例已移除（2026-08 去 broker 化）：broker 仅作
+   * 传输兜底，实例发现权威源是管理端 launch/register——peers 无地址信息，
+   * 轮询填充会让 callRemote 直连失效（addr 恒空 → 全走兜底）。
+   */
 
   /**
    * 注册实例（agent 上线时调用）。校验实例令牌；重复注册刷新状态。
@@ -433,8 +410,8 @@ export class ChannelService extends TypertRemoteService {
    * @param instanceId - 目标实例 id（agent 名）。
    * @param command - 指令（不含 id，自动生成幂等 id）。
    */
-  sendControl<P = unknown>(instanceId: string, command: Omit<ControlCommand<P>, 'id'>): void {
-    const full: ControlCommand<P> = { ...command, id: randomUUID() }
+  sendControl<P = unknown>(instanceId: string, command: Omit<ControlCommand<P>, 'id' | 'ts'>): void {
+    const full: ControlCommand<P> = { ...command, id: randomUUID(), ts: Date.now() }
     if (this.relay !== undefined && instanceId !== this.relay.agent) {
       void this.relaySendControl(instanceId, full as ControlCommand)
       return
@@ -476,11 +453,11 @@ export class ChannelService extends TypertRemoteService {
         timer,
       })
       // 传输双路径（broker 可选，直连优先）：目标 addr 可达 → 直连 HTTP RPC；
-      // 不可达（daemon 出站等）→ broker 消息通道帧。
+      // 直连失败（网络/HTTP 错误）→ 降级 broker 兜底；无 addr（daemon 出站等）→ broker。
       const target = this.instances.get(instanceId)
       const directAddr = target?.addr && target.status === 'online' ? target.addr : undefined
       const send = directAddr !== undefined
-        ? this.directRpc(directAddr, { id, ...request })
+        ? this.directRpc(directAddr, { id, ...request }).catch(() => this.relaySendRpc(instanceId, { id, ...request }))
         : this.relaySendRpc(instanceId, { id, ...request })
       send.catch((e) => {
         clearTimeout(timer)
@@ -600,14 +577,11 @@ function envRelayConfig(): RelayConfig | undefined {
   const agent = process.env.DSH_RELAY_AGENT
   const secret = process.env.DSH_RELAY_SECRET
   if (!brokerUrl || !agent || !secret) return undefined
-  // 未显式设置时缺省（undefined → constructor 给默认轮询周期）。
-  const pollPeersMs = Number(process.env.DSH_RELAY_POLL_PEERS_MS ?? '')
   const stateFile = process.env.DSH_RELAY_STATE_FILE
   return {
     brokerUrl,
     agent,
     secret,
-    pollPeersMs: Number.isFinite(pollPeersMs) && pollPeersMs > 0 ? pollPeersMs : undefined,
     stateFile: stateFile || undefined,
   }
 }
