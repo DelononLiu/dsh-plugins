@@ -28,25 +28,53 @@ export interface RegionLayout {
 /** 四区布局配置（实例级，v1 本地配置）。 */
 export type LayoutConfig = Record<LayoutRegion, RegionLayout>
 
+/** 组装器工具（data-dsh-*-entry 注入型，v1 三家 + 可扩展）。 */
+export type AssembledToolId = 'taskboard' | 'ssh' | 'skill'
+
+/** 组装器配置（v1：foot 区间距 + 工具显隐；通用性 = 运行时发现 + 配置排除）。 */
+export interface AssemblerConfig {
+  /** foot 区行间距（上下边距 px，默认 2——官方 trigger 4px 的用户偏好收紧）。 */
+  footSpacing: number
+  /** 工具显隐（缺省可见；false = 组装器不摆位该工具）。 */
+  tools: Partial<Record<AssembledToolId, { visible: boolean }>>
+}
+
+/** 默认组装器配置。 */
+export const DEFAULT_ASSEMBLER: AssemblerConfig = {
+  footSpacing: 2,
+  tools: {},
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     myUi: MyUiService
   }
 }
 
-/** 插件配置：四区布局（默认全部可见，顺序 topbar/tabs/sidebar/actions）。 */
+/** 插件配置：四区布局 + 组装器（默认全部可见，顺序 topbar/tabs/sidebar/actions）。 */
 export interface Config {
   layout: LayoutConfig
+  assembler: AssemblerConfig
 }
+
+/** 布局 schema 段（复用：Config 与 LayoutSettingsSchema 各一份）。 */
+const layoutSchema = z.object({
+  topbar: z.object({ visible: z.boolean().default(true), order: z.number().default(0), size: z.string().default('') }).default({ visible: true, order: 0, size: '' }),
+  tabs: z.object({ visible: z.boolean().default(true), order: z.number().default(1), size: z.string().default('') }).default({ visible: true, order: 1, size: '' }),
+  sidebar: z.object({ visible: z.boolean().default(true), order: z.number().default(2), size: z.string().default('260px') }).default({ visible: true, order: 2, size: '260px' }),
+  actions: z.object({ visible: z.boolean().default(true), order: z.number().default(3), size: z.string().default('') }).default({ visible: true, order: 3, size: '' }),
+}).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' }, actions: { visible: true, order: 3, size: '' } })
+
+/** 组装器 schema 段（tools 为 dict，键可缺省，缺省 = 可见）。 */
+const assemblerSchema = z.object({
+  footSpacing: z.number().default(DEFAULT_ASSEMBLER.footSpacing),
+  tools: z.dict(z.object({ visible: z.boolean().default(true) }).default({ visible: true })).default({}),
+}).default(DEFAULT_ASSEMBLER)
 
 /** 运行时 schema。 */
 export const Config = z.object({
-  layout: z.object({
-    topbar: z.object({ visible: z.boolean().default(true), order: z.number().default(0), size: z.string().default('') }).default({ visible: true, order: 0, size: '' }),
-    tabs: z.object({ visible: z.boolean().default(true), order: z.number().default(1), size: z.string().default('') }).default({ visible: true, order: 1, size: '' }),
-    sidebar: z.object({ visible: z.boolean().default(true), order: z.number().default(2), size: z.string().default('260px') }).default({ visible: true, order: 2, size: '260px' }),
-    actions: z.object({ visible: z.boolean().default(true), order: z.number().default(3), size: z.string().default('') }).default({ visible: true, order: 3, size: '' }),
-  }).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' }, actions: { visible: true, order: 3, size: '' } }),
+  layout: layoutSchema,
+  assembler: assemblerSchema,
 }) as z<Config>
 
 /** 布局设置命名空间（settings 持久化，client settingsScope 读写）。 */
@@ -54,13 +82,9 @@ export const LAYOUT_NAMESPACE = settingsNamespace('my-ui-layout')
 
 /** 布局设置 schema（settings 注册用）。 */
 export const LayoutSettingsSchema = z.object({
-  layout: z.object({
-    topbar: z.object({ visible: z.boolean().default(true), order: z.number().default(0), size: z.string().default('') }).default({ visible: true, order: 0, size: '' }),
-    tabs: z.object({ visible: z.boolean().default(true), order: z.number().default(1), size: z.string().default('') }).default({ visible: true, order: 1, size: '' }),
-    sidebar: z.object({ visible: z.boolean().default(true), order: z.number().default(2), size: z.string().default('260px') }).default({ visible: true, order: 2, size: '260px' }),
-    actions: z.object({ visible: z.boolean().default(true), order: z.number().default(3), size: z.string().default('') }).default({ visible: true, order: 3, size: '' }),
-  }).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' }, actions: { visible: true, order: 3, size: '' } }),
-}) as z<{ layout: LayoutConfig }>
+  layout: layoutSchema,
+  assembler: assemblerSchema,
+}) as z<{ layout: LayoutConfig; assembler: AssemblerConfig }>
 
 /** 默认布局（全部可见，标准顺序）。 */
 export const DEFAULT_LAYOUT: LayoutConfig = {
@@ -98,6 +122,14 @@ export class MyUiService extends Service {
   /** 查询单区布局配置。 */
   region(region: LayoutRegion): RegionLayout {
     return this.layout()[region]
+  }
+
+  /** 读取组装器配置（间距 + 工具显隐）。 */
+  assembler(): AssemblerConfig {
+    return {
+      footSpacing: this.config.assembler.footSpacing,
+      tools: this.config.assembler.tools,
+    }
   }
 }
 
