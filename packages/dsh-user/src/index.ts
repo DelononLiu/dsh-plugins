@@ -9,6 +9,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
 import { GatewayCookieResolver, type IdentityResolver } from './gateway-resolver'
 
@@ -31,6 +32,13 @@ export type AccessLevel = 'full' | 'read' | 'none'
 declare module '@deepseek-ai/cordis' {
   interface Context {
     user: UserService
+  }
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** 官方 webServer 服务（web profile 提供；headless/daemon 无）。 */
+    webServer: import('@deepseek-ai/dsh-host-webserver').WebServer
   }
 }
 
@@ -102,6 +110,20 @@ export class UserService extends Service {
     this.resolvers = config.gatewayCookie.hmacSecret !== ''
       ? [new GatewayCookieResolver({ cookieName: config.gatewayCookie.cookieName, hmacSecret: config.gatewayCookie.hmacSecret, users: this.byId })]
       : []
+    // 当前用户端点（client 用户显示消费）：web profile 挂 /api/user/me。
+    ctx.inject(['webServer'], (injected) => {
+      const dispose = injected.webServer.register({
+        kind: 'exact',
+        path: '/api/user/me',
+        handler: (req, res) => {
+          // 请求头含网关 cookie/注入头 → current() 完整解析链（头→cookie→静态）
+          const user = this.current(req.headers as Record<string, string | undefined>)
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(user))
+        },
+      })
+      injected.effect(() => dispose, 'dsh-user: /api/user/me')
+    })
   }
 
   /**
