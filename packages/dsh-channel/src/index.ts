@@ -22,6 +22,10 @@ import { dirname } from 'node:path'
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则：边界类型
 // 必须来自公共非根类型子路径，供跨包消费与类型契约）。
 import type { BrokerStatusView, InstanceIdentity } from './types.ts'
+// 跨实例 RPC 复用官方 typert 协议类型：帧 = InvokeRemoteRequest（gateway），
+// 回执 = RemoteResult（protocol）——channel 只做 carrier，不定义新协议。
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { InvokeRemoteRequest } from '@deepseek-ai/dsh-api-gateway/types'
 export type * from './types.ts'
 export type { InstanceIdentity } from './types.ts'
 
@@ -115,12 +119,21 @@ export class ChannelService extends TypertRemoteService {
   private readonly eventTimes = new Map<string, number>()
   /** 已确认事件 id（幂等回执）。 */
   private readonly ackedEvents = new Set<string>()
+  /** 跨实例 RPC 待回执：id → resolve/reject（callRemote 的 Promise 关联）。 */
+  private readonly pendingRpc = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+  /** 目标侧执行 RPC 的 typert gateway（经注入获取；缺席时 RPC 帧无法本地执行）。 */
+  private typertGateway: { invoke(request: InvokeRemoteRequest): Promise<unknown> } | undefined
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'channel')
     // 心跳超时扫描：setInterval + ctx.effect（fiber 卸载时清理）。
     const timer = setInterval(() => this.sweep(), Math.min(config.heartbeatTimeoutMs, 60_000))
     timer.unref?.()
     ctx.effect(() => () => clearInterval(timer))
+    // 目标侧执行跨实例 RPC 的 typert gateway（经注入等待——webServer 可用时挂载）。
+    ctx.inject(['typertGateway'], (g) => {
+      this.typertGateway = g.typertGateway
+      ctx.effect(() => () => { this.typertGateway = undefined })
+    })
     // Relay broker 接入：解析配置（config 优先，env 兜底——DSH_RELAY_*）。
     const relay = config.relay ?? envRelayConfig()
     if (relay !== undefined) {
@@ -207,15 +220,36 @@ export class ChannelService extends TypertRemoteService {
         '',
       )
       const data = await res.json() as {
-        messages?: Array<{ id: string; from: string; type?: string; body?: { command?: ControlCommand } }>
+        messages?: Array<{ id: string; from: string; type?: string; body?: { command?: ControlCommand; rpc?: InvokeRemoteRequest & { id: string }; rpcReply?: RemoteResult<unknown> & { id: string } } }>
         cursor?: string | null
       }
       // 先处理全部消息，后推进游标落盘：崩溃在处理中途 → 游标未推进 → 重启重读
       // （重复投递由消费方幂等吸收）——保证 at-least-once，不丢指令。
       for (const msg of data.messages ?? []) {
-        if (!msg.body?.command) continue
-        for (const handler of this.controlHandlers) {
-          handler(msg.body.command, msg.from)
+        const body = msg.body
+        if (body === undefined) continue
+        if (body.rpc !== undefined) {
+          // 目标侧：执行跨实例 RPC（经本地 typert gateway），回执给调用方。
+          void this.handleRemoteRpc(msg.from, body.rpc)
+          continue
+        }
+        if (body.rpcReply !== undefined) {
+          // 调用方侧：收到回执 → resolve 关联的 callRemote Promise。
+          const pending = this.pendingRpc.get(body.rpcReply.id)
+          if (pending !== undefined) {
+            this.pendingRpc.delete(body.rpcReply.id)
+            if (body.rpcReply.ok) {
+              pending.resolve({ ok: true, value: body.rpcReply.value })
+            } else {
+              pending.resolve({ ok: false, error: body.rpcReply.error ?? { code: 'rpc-error', message: 'target failed', details: {} } })
+            }
+          }
+          continue
+        }
+        if (body.command !== undefined) {
+          for (const handler of this.controlHandlers) {
+            handler(body.command, msg.from)
+          }
         }
       }
       if (data.cursor) {
@@ -412,7 +446,129 @@ export class ChannelService extends TypertRemoteService {
     return () => this.controlHandlers.delete(handler)
   }
 
-  /** 心跳超时检查：超时实例标记离线；清除过期事件与确认记录。 */
+  /**
+   * 跨实例 RPC 调用（第三期）：把 typert 调用帧（InvokeRemoteRequest）经 broker
+   * 投递到目标实例，目标侧经本地 typert gateway 执行，回执（RemoteResult）关联
+   * Promise。channel 只做 carrier——协议全程 typert，不定义新 RPC。
+   * @param instanceId - 目标实例 id（agent 名）。
+   * @param request - typert 调用帧（namespace/method/args，同 InvokeRemoteRequest）。
+   * @param timeoutMs - 回执超时（默认 15s）。
+   * @returns 目标执行结果（RemoteResult 语义）。
+   */
+  callRemote<T = unknown>(
+    instanceId: string,
+    request: Omit<InvokeRemoteRequest, 'signal'>,
+    timeoutMs: number,
+  ): Promise<RemoteResult<T>> {
+    const id = randomUUID()
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingRpc.delete(id)
+        reject(new Error(`channel.callRemote(${instanceId}, ${request.namespace}.${request.method}) 回执超时`))
+      }, timeoutMs)
+      this.pendingRpc.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v as RemoteResult<T>) },
+        reject: (e) => { clearTimeout(timer); reject(e) },
+        timer,
+      })
+      // 传输双路径（broker 可选，直连优先）：目标 addr 可达 → 直连 HTTP RPC；
+      // 不可达（daemon 出站等）→ broker 消息通道帧。
+      const target = this.instances.get(instanceId)
+      const directAddr = target?.addr && target.status === 'online' ? target.addr : undefined
+      const send = directAddr !== undefined
+        ? this.directRpc(directAddr, { id, ...request })
+        : this.relaySendRpc(instanceId, { id, ...request })
+      send.catch((e) => {
+        clearTimeout(timer)
+        this.pendingRpc.delete(id)
+        reject(e)
+      })
+    })
+  }
+
+  /** 直连 RPC：POST {addr}/api/{ns}/{method}（官方 Connection client-request 信封）。 */
+  private async directRpc(addr: string, rpc: InvokeRemoteRequest & { id: string }): Promise<void> {
+    const url = `${addr.replace(/\/$/, '')}/api/${rpc.namespace}/${rpc.method}`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'client-request',
+        rpcId: rpc.id,
+        method: `${rpc.namespace}/${rpc.method}`,
+        payload: { args: rpc.args },
+      }),
+    })
+    if (!res.ok) throw new Error(`directRpc ${url}: http ${res.status}`)
+    const data = await res.json() as { result?: { ok: boolean; value?: unknown; error?: { code: string; message: string; details?: object } } }
+    const result = data.result
+    const pending = this.pendingRpc.get(rpc.id)
+    if (pending === undefined) return
+    this.pendingRpc.delete(rpc.id)
+    if (result === undefined) {
+      pending.resolve({ ok: false, error: { code: 'rpc-error', message: `directRpc ${url}: 无 result`, details: {} } })
+    } else if (result.ok) {
+      pending.resolve({ ok: true, value: result.value })
+    } else {
+      pending.resolve({ ok: false, error: result.error ?? { code: 'rpc-error', message: 'target failed', details: {} } })
+    }
+  }
+
+  /** 发送跨实例 RPC 帧（经 broker POST /messages，kind=request + body.rpc=InvokeRemoteRequest）。 */
+  private async relaySendRpc(instanceId: string, rpc: InvokeRemoteRequest & { id: string }): Promise<void> {
+    const relay = this.relay
+    if (relay === undefined) throw new Error('channel.callRemote: relay 未配置（跨实例 RPC 需 broker）')
+    const body = JSON.stringify({
+      id: randomUUID(),
+      to: instanceId,
+      body: { rpc },
+      type: 'message',
+      kind: 'request',
+      replyTo: null,
+      ack: false,
+    })
+    await relayFetch(relay, 'POST', '/messages', body)
+  }
+
+  /** 目标侧：执行跨实例 RPC 帧（经本地 typert gateway），回执给调用方。 */
+  private async handleRemoteRpc(from: string, rpc: InvokeRemoteRequest & { id: string }): Promise<void> {
+    if (this.typertGateway === undefined) {
+      await this.relaySendRpcReply(from, { id: rpc.id, ok: false, error: { code: 'gateway-unavailable', message: 'typert gateway 未就绪', details: {} } })
+      return
+    }
+    try {
+      const value = await this.typertGateway.invoke({ namespace: rpc.namespace, method: rpc.method, args: rpc.args })
+      await this.relaySendRpcReply(from, { id: rpc.id, ok: true, value })
+    } catch (error) {
+      await this.relaySendRpcReply(from, {
+        id: rpc.id,
+        ok: false,
+        error: { code: 'rpc-error', message: error instanceof Error ? error.message : String(error), details: {} },
+      })
+    }
+  }
+
+  /** 发送跨实例 RPC 回执（目标侧执行后回发）。 */
+  private async relaySendRpcReply(to: string, reply: RemoteResult<unknown> & { id: string }): Promise<void> {    const relay = this.relay
+    if (relay === undefined) return
+    const body = JSON.stringify({
+      id: randomUUID(),
+      to,
+      body: { rpcReply: reply },
+      type: 'message',
+      kind: 'request',
+      replyTo: null,
+      ack: false,
+    })
+    try {
+      await relayFetch(relay, 'POST', '/messages', body)
+    } catch {
+      // 回执投递失败：调用方侧超时兜底。
+    }
+  }
+
+  /**
+   * 心跳超时检查：超时实例标记离线；清除过期事件与确认记录。 */
   private sweep(): void {
     const now = Date.now()
     for (const entry of this.instances.values()) {

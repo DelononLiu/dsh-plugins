@@ -20,7 +20,6 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
-import 'dsh-channel'
 import { isHostAgent, signRequest, type ControlCommand, type InstanceIdentity } from 'dsh-channel'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { randomUUID } from 'node:crypto'
@@ -611,21 +610,48 @@ export class ConsoleService extends TypertRemoteService {
       case 'noop':
         return { ok: true }
       case 'daemon': {
-        // 守护从未注册（launch.host 拼错）→ 显式失败；守护离线（TTL 内）消息排队，恢复后生效。
+        // 守护从未注册（launch.host 拼错）→ 显式失败。
         if (this.ctx.channel.get(route.daemonAgent) === undefined) {
           return { ok: false, error: `目标守护 ${route.daemonAgent} 未注册（检查 launch 配置 host）` }
         }
-        this.ctx.channel.sendControl(route.daemonAgent, { type: route.command, payload: { instanceId } })
-        this.markOfflineOverride(instanceId, route.command)
-        return { ok: true }
+        // 跨实例 RPC：daemon 的 console.controlInstance 本地执行（拿到回执）。
+        return this.remoteControl(route.daemonAgent, { instanceId, command: route.command })
       }
       case 'instance':
-        this.ctx.channel.sendControl(instanceId, { type: route.command, payload })
-        this.markOfflineOverride(instanceId, route.command)
-        return { ok: true }
+        // 跨实例 RPC：instance 的 console.controlInstance 自退处理。
+        return this.remoteControl(instanceId, { instanceId, command: route.command })
       case 'error':
         return { ok: false, error: route.reason }
     }
+  }
+
+  /**
+   * 经 callRemote 调目标实例/守护的 console.controlInstance（typert 跨实例 RPC，
+   * 目标侧本地执行，返回回执）。直连优先、broker 兜底；不可达 → 降级 sendControl。
+   */
+  private remoteControl(targetId: string, args: { instanceId: string; command: 'stop' | 'start' | 'restart' }): ControlResult {
+    const result = this.ctx.channel.callRemote<ControlResult>(targetId, {
+      namespace: 'console',
+      method: 'controlInstance',
+      args,
+    }, 15_000)
+    // 同步返回（v1）：发起后即视为成功（回执异步——真结果经 UI 刷新/事件呈现）。
+    // 目标不可达（无 addr 且无 broker）→ 降级 sendControl（原行为）。
+    if (!this.ctx.channel.get(targetId)?.addr && this.ctx.channel.relay === undefined) {
+      // 吸收 callRemote 的异步拒绝（降级路径不再等待回执）。
+      result.catch(() => { /* 降级路径：sendControl 已发，忽略回执 */ })
+      this.ctx.channel.sendControl(targetId, { type: args.command, payload: { instanceId: args.instanceId } })
+      this.markOfflineOverride(args.instanceId, args.command)
+      return { ok: true }
+    }
+    // 发起跨实例 RPC（不阻塞；回执超时/失败由调用方 UI 呈现）。
+    void result.then((r) => {
+      if (!r.ok) console.warn(`[dsh-console] 跨实例控制 ${targetId} ${args.command} 失败: ${r.error.code}: ${r.error.message}`)
+    }).catch((e) => {
+      console.warn(`[dsh-console] 跨实例控制 ${targetId} 调用异常: ${e instanceof Error ? e.message : String(e)}`)
+    })
+    this.markOfflineOverride(args.instanceId, args.command)
+    return { ok: true }
   }
 
   /**
