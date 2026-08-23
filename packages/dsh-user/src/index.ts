@@ -11,7 +11,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
-import { GatewayCookieResolver, resolveCookieSecret, type IdentityResolver } from './gateway-resolver'
+import { GatewayCookieResolver, resolveCookieSecret, type IdentityResolver } from './gateway-resolver.js'
 
 /** 角色三档（v1）：admin 全权 / member 自有实例全权 + shared 按授权 / guest 被授权实例只读。 */
 export type UserRole = 'admin' | 'member' | 'guest'

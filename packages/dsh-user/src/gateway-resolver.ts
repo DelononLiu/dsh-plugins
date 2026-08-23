@@ -16,7 +16,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, isAbsolute } from 'node:path'
-import type { User, UserRole } from './index'
+import type { User, UserRole } from './index.js'
 
 /** 身份解析器接口（稳定边界）：从请求头解析当前用户；无法解析返回 undefined。 */
 export interface IdentityResolver {
