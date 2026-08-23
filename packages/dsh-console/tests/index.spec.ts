@@ -129,15 +129,21 @@ describe('instance 角色（实例自退兜底，原 agent 改名）', () => {
     exitSpy.mockRestore()
   })
 
-  it('instance 角色：启动窗口内收到迟到 stop/restart 忽略（不自杀）', async () => {
+  it('instance 角色：发送早于本进程启动的积压 stop/restart 忽略（不自杀）', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
     const ctx = new Context()
     await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
     await ctx.plugin(ConsoleService, { role: 'instance' })
-    // 刚启动（默认 startedAt=now）→ 窗口内迟到 restart 被忽略。
-    ctx.channel.sendControl('instX', { type: 'restart', payload: {} })
+    // 模拟 broker 积压补投：指令发送时间早于实例启动时刻（ts 判定积压）。
+    const cmd = { id: 'old-1', type: 'restart' as const, payload: {} }
+    ;(ctx.channel as unknown as { controlHandlers: Set<(c: typeof cmd & { ts: number }, i: string) => void> }).controlHandlers
+      .forEach((h) => h({ ...cmd, ts: Date.now() - 60_000 }, 'host1'))
     await new Promise((r) => setTimeout(r, 400))
     expect(exitSpy).not.toHaveBeenCalled()
+    // 当前指令（ts ≥ 启动时刻）照常执行。
+    ctx.channel.sendControl('instX', { type: 'restart', payload: {} })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(exitSpy).toHaveBeenCalledTimes(1)
     exitSpy.mockRestore()
   })
 
@@ -310,15 +316,17 @@ describe('daemon 角色（主机守护）', () => {
     expect((child as unknown as { kill: ReturnType<typeof vi.fn> }).kill).toHaveBeenCalledWith('SIGKILL')
   })
 
-  it('stop：非守护拉起的在线实例 → 经 channel 发 stop 自退', async () => {
-    const ctx = await bootDaemon({})
-    // 实例在线（channel 注册）但守护无子进程 → 走自退兜底
-    ctx.channel.register({ id: 'web3', name: 'web3', addr: '', status: 'online' }, '')
-    const received: Array<{ target: string; type: string }> = []
-    ctx.channel.onControl((cmd, instanceId) => received.push({ target: instanceId, type: cmd.type }))
+  it('stop：非守护拉起的在线实例，无 broker → 本机端口定位 kill（lsof）', async () => {
+    const execMock = vi.fn((_cmd: string, cb: (e: Error | null, s: string) => void) => cb(null, '12345\n'))
+    ConsoleService.execImpl = execMock as unknown as typeof childProcess.exec
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => undefined as never)
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } } })
     ctx.channel.sendControl('host-lab1', { type: 'stop', payload: { instanceId: 'web3' } })
-    await new Promise((r) => setTimeout(r, 20))
-    expect(received.some((r) => r.target === 'web3' && r.type === 'stop')).toBe(true)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(execMock).toHaveBeenCalledWith('lsof -ti tcp:3083', expect.anything())
+    expect(killSpy).toHaveBeenCalledWith(12345, 'SIGTERM')
+    ConsoleService.execImpl = childProcess.exec
+    killSpy.mockRestore()
   })
 
   it('restart 守护拉起的实例：kill，exit 前不 spawn，exit 后 spawn 一次', async () => {
@@ -336,27 +344,26 @@ describe('daemon 角色（主机守护）', () => {
     expect(spawnSpy).toHaveBeenCalledTimes(2)
   })
 
-  it('restart 离线实例：直接拉起', async () => {
-    const spawnSpy = mockSpawn(fakeChild())
-    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
-    ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
-    await new Promise((r) => setTimeout(r, 20))
-    expect(spawnSpy).toHaveBeenCalledTimes(1)
+  it('daemon 角色自动注册 instances 清单进 channel（本机实例，addr 用 127.0.0.1:port）', async () => {
+    const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } } })
+    const inst = ctx.channel.get('web3')
+    expect(inst?.status).toBe('online')
+    expect(inst?.addr).toBe('http://127.0.0.1:3083')
   })
 
-  it('restart 非守护拉起的在线实例：发 stop 自退，等固定窗口后拉起', async () => {
+  it('restart 非守护拉起的在线实例，无 broker：固定窗口后拉起（端口 kill 由 stop 测试覆盖）', async () => {
     vi.useFakeTimers()
     const spawnSpy = mockSpawn(fakeChild())
+    ConsoleService.execImpl = ((_cmd: string, cb: (e: Error | null, s: string) => void) => cb(null, '')) as unknown as typeof childProcess.exec
+    // 无 port（daemonStartAfterStop 走固定窗口，fake timers 可控；端口 kill 已由 stop 测试覆盖）
     const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
-    // 实例在线（channel 注册）但守护无子进程 → 分支 2
-    ctx.channel.register({ id: 'web3', name: 'web3', addr: '', status: 'online' }, '')
-    const received: string[] = []
-    ctx.channel.onControl((cmd, instanceId) => received.push(`${cmd.type}:${instanceId}`))
+    // 实例在线（channel 注册）但守护无子进程 → 分支 2（无 broker → 不发跨进程 stop）
     ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
-    expect(received).toContain('stop:web3')
+    expect(spawnSpy).not.toHaveBeenCalled()
     // 固定窗口（STOP_SELF_EXIT_WAIT_MS=35000）后拉起
     await vi.advanceTimersByTimeAsync(35000)
     expect(spawnSpy).toHaveBeenCalledTimes(1)
+    ConsoleService.execImpl = childProcess.exec
   })
 
   it('busy 锁：积压两条 restart → 只处理一次（不重复 spawn）', async () => {
@@ -396,10 +403,11 @@ describe('daemon 角色（主机守护）', () => {
     ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
     // 进程不退（不 emit exit）→ watchdog 超时解锁
     await vi.advanceTimersByTimeAsync(20000)
-    // 解锁后再次 restart（旧进程已退出）→ 走离线分支直接拉起
+    // 解锁后再次 restart（旧进程已退出）→ 清单实例注册 online → 走自退分支，
+    // 固定窗口（STOP_SELF_EXIT_WAIT_MS=35000）后拉起
     Object.defineProperty(child, 'exitCode', { value: 0 })
     ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(35000)
     expect(spawnSpy).toHaveBeenCalledTimes(2)
   })
 })

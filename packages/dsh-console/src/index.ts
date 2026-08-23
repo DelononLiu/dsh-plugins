@@ -24,7 +24,8 @@ import { isHostAgent, signRequest, type ControlCommand, type InstanceIdentity } 
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { createServer } from 'node:http'
+import { spawn, exec, type ChildProcess } from 'node:child_process'
 import { mkdirSync, openSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -93,6 +94,8 @@ export interface Config {
   hostId?: string
   /** daemon 端：本机实例清单（守护只管理清单内的实例）。 */
   instances?: Record<string, LaunchSpec>
+  /** daemon 端：本机控制 HTTP 端口（headless 也有 addr，管理端可直连；缺省不开）。 */
+  controlPort?: number
 }
 
 /** 运行时 schema。 */
@@ -101,6 +104,7 @@ export const Config = z.object({
   launch: z.any().default(undefined),
   hostId: z.string().default(''),
   instances: z.any().default(undefined),
+  controlPort: z.number().default(0),
 }) as z<Config>
 
 /** 解析控制指令的动作（可测纯函数）：exit=重启/停止；running=已在运行；pending=v1 占位。 */
@@ -221,11 +225,17 @@ export class ConsoleService extends TypertRemoteService {
   /** restart 离线覆盖窗口（ms）：重启中显示离线，窗口后回到 channel 状态。 */
   private static readonly RESTART_OVERRIDE_MS = 15000
   /** 实例启动控制宽限（ms）：启动窗口内忽略 stop/restart——broker 消息队列
-   * 持久补投，迟到的旧指令会在"起来就被杀"循环里杀死刚拉起的实例。 */
-  private static readonly STARTUP_CONTROL_GRACE_MS = 15000
+   * 持久补投，迟到的旧指令会在"起来就被杀"循环里杀死刚拉起的实例。
+   * 需覆盖 relay recv 周期（5s）与首轮积压消费的余量。 */
+  private static readonly STARTUP_CONTROL_GRACE_MS = 45_000
+  /** 管理端直连探测周期（ms）：需小于 channel heartbeatTimeoutMs（30s），
+   * 否则在线实例在探测间隙被 sweep 误标离线。 */
+  private static readonly PROBE_INTERVAL_MS = 15_000
 
   /** spawn 实现（测试可替换为伪子进程；生产 = node:child_process.spawn）。 */
   static spawnImpl: typeof spawn = spawn
+  /** lsof 执行实现（测试可替换；生产 = node:child_process.exec）。 */
+  static execImpl: typeof exec = exec
 
   /** 主机档案表。 */
   private readonly hosts = new Map<string, HostRecord>()
@@ -248,6 +258,35 @@ export class ConsoleService extends TypertRemoteService {
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'console')
+    // 管理端即实例发现权威源：launch 配置（实例矩阵）逐条注册进 channel；
+    // daemon 角色把 instances 清单（本机管理实例）同样注册——否则 daemon 的
+    // channel 实例表为空（去 broker 发现后无 peers），在线判定恒 false，
+    // restart 走"离线直接拉起"不杀旧进程 → 端口冲突。
+    // 有 addr → callRemote 直连优先；无 addr（守护/NAT 后）→ 注册留空 addr，
+    // callRemote 自动走 broker 兜底（若无 broker 则不可达，属预期）。
+    const specs = config.launch ?? config.instances
+    if (specs) {
+      for (const [id, spec] of Object.entries(specs)) {
+        // 管理端用配置 addr；daemon 本机实例用 127.0.0.1:port 构造 addr（同机直连）。
+        const addr = config.launch
+          ? (spec.addr ?? '')
+          : (typeof spec.port === 'number' ? `http://127.0.0.1:${spec.port}` : '')
+        try {
+          // 注册即 online（launch = 期望在线的实例；实际可达性后续直连探测/心跳更新）。
+          ctx.channel.register({ id, name: id, addr, status: 'online' }, '')
+        } catch (error) {
+          console.warn(`[dsh-console] ${config.launch ? 'launch' : 'instances'} 实例 ${id} 注册失败: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
+    // 直连状态探测（管理端 launch / daemon 本机 instances 通用）：注册即 online，
+    // 但无心跳续期会被 sweep 标离线（30s）→ callRemote 直连条件（status online）
+    // 失效、daemon restart 误判离线。周期探测可达性，可达 → heartbeat 续期。
+    if (config.launch || config.instances) {
+      const probeTimer = setInterval(() => this.probeLaunch(), ConsoleService.PROBE_INTERVAL_MS)
+      probeTimer.unref?.()
+      ctx.effect(() => () => clearInterval(probeTimer))
+    }
     // 系统事件消息：订阅 channel task 平面，落入各 owner 的 inbox。
     this.unsubscribe = ctx.channel.subscribe('task', (event) => {
       if (event.type.startsWith('system.')) {
@@ -260,6 +299,9 @@ export class ConsoleService extends TypertRemoteService {
         // 主机守护：处理 start/stop/restart，本地 spawn/kill 清单内实例。
         this.unsubscribeControl = ctx.channel.onControl((command, from) => this.handleDaemonControl(command, from))
         ctx.effect(() => this.unsubscribeControl!)
+        // 本机控制端口（headless 也有 addr）——管理端经 launch 配置的 daemon addr 直连
+        // （官方 client-request 信封，与 callRemote 直连路径一致；无 broker 也能管理本机实例）。
+        if (config.controlPort) this.startControlServer(config.controlPort)
         break
       case 'instance':
         // 实例自退兜底：收到 stop/restart 退出进程（重启由守护拉起）。
@@ -327,6 +369,24 @@ export class ConsoleService extends TypertRemoteService {
     return { instances: instanceList as unknown as InstanceRecord[], hosts: hosts as unknown as HostRecord[] }
   }
 
+  /** 直连状态探测：对管理端 launch / daemon 本机 instances 的 addr 发轻量请求，
+   * 可达 → 心跳续期（保持 online）；不可达 → 不续期（sweep 会标离线）。 */
+  private probeLaunch(): void {
+    const specs = this.config.launch ?? this.config.instances ?? {}
+    for (const [id, spec] of Object.entries(specs)) {
+      // 管理端用配置 addr；daemon 本机实例用 127.0.0.1:port（与注册一致）。
+      const addr = this.config.launch
+        ? spec.addr
+        : (typeof spec.port === 'number' ? `http://127.0.0.1:${spec.port}` : undefined)
+      if (!addr) continue
+      fetch(addr)
+        .then(() => {
+          try { this.ctx.channel.heartbeat(id, '') } catch { /* 未注册 */ }
+        })
+        .catch(() => { /* 不可达：不续期，sweep 会标离线 */ })
+    }
+  }
+
   /** GET /api/console/instances：实例列表 + 守护 peers（host-* 前缀，UI 分别呈现）。 */
   private handleInstancesRoute(_req: IncomingMessage, res: ServerResponse): void {
     const view = this.listInstances()
@@ -351,6 +411,86 @@ export class ConsoleService extends TypertRemoteService {
         res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }))
       }
     })
+  }
+
+  /**
+   * daemon 角色：本机控制 HTTP 端口（127.0.0.1:controlPort）。处理官方
+   * client-request 信封（与 channel.callRemote 直连路径一致）：POST
+   * /api/console/{method} → 本地执行 @Remote 方法 → server-response 回执。
+   * headless 守护由此获得可直连 addr，管理端无 broker 也能控制本机实例。
+   */
+  private startControlServer(port: number): void {
+    const server = createServer((req, res) => {
+      if (req.method !== 'POST' || !req.url?.startsWith('/api/')) {
+        res.writeHead(404, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false }))
+        return
+      }
+      let body = ''
+      req.on('data', (chunk) => { body += String(chunk) })
+      req.on('end', () => {
+        try {
+          const frame = JSON.parse(body || '{}') as {
+            type?: string; rpcId?: string; method?: string; payload?: { args?: Record<string, unknown> }
+          }
+          if (frame.type !== 'client-request' || !frame.rpcId || !frame.method) {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({
+              type: 'server-response',
+              rpcId: frame?.rpcId ?? 'invalid-request',
+              result: { ok: false, error: { code: 'bad-request', message: 'invalid client-request message', details: {} } },
+            }))
+            return
+          }
+          const [namespace, method] = frame.method.split('/')
+          if (namespace !== 'console' || method === undefined) {
+            res.writeHead(404, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({
+              type: 'server-response',
+              rpcId: frame.rpcId,
+              result: { ok: false, error: { code: 'not-found', message: `unknown method: ${frame.method}`, details: {} } },
+            }))
+            return
+          }
+          let result: unknown
+          if (method === 'controlInstance') {
+            const { instanceId, command, payload } = (frame.payload?.args ?? {}) as {
+              instanceId: string; command: 'stop' | 'start' | 'upgrade' | 'restart'; payload?: { version?: string }
+            }
+            result = this.controlInstance(instanceId, command, payload ?? {})
+          } else if (method === 'listInstances') {
+            result = this.listInstances()
+          } else {
+            res.writeHead(404, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({
+              type: 'server-response',
+              rpcId: frame.rpcId,
+              result: { ok: false, error: { code: 'not-found', message: `unsupported method: ${method}`, details: {} } },
+            }))
+            return
+          }
+          const ok = (result as { ok?: boolean }).ok !== false
+          res.writeHead(ok ? 200 : 400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({
+            type: 'server-response',
+            rpcId: frame.rpcId,
+            result: ok
+              ? { ok: true, value: result }
+              : { ok: false, error: { code: 'control-error', message: (result as { error?: string }).error ?? '控制失败', details: {} } },
+          }))
+        } catch (error) {
+          res.writeHead(500, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({
+            type: 'server-response',
+            result: { ok: false, error: { code: 'internal', message: error instanceof Error ? error.message : String(error), details: {} } },
+          }))
+        }
+      })
+    })
+    server.listen(port, '127.0.0.1')
+    server.unref?.()
+    this.ctx.effect(() => () => server.close())
+    console.log(`[dsh-console/daemon] 本机控制端口 http://127.0.0.1:${port}`)
   }
 
   /** daemon 角色：处理控制指令（只认本机清单内的实例；指令载荷携带 instanceId）。 */
@@ -462,8 +602,13 @@ export class ConsoleService extends TypertRemoteService {
     }
     if (this.ctx.channel.get(instanceId)?.status === 'online') {
       // 分支 2：非守护拉起的在线实例——发 stop 自退，等退出后拉起。
-      this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
-      console.log(`[dsh-console/daemon] ${instanceId} 非守护拉起，发 stop 自退，等待退出后拉起`)
+      // 无 broker：跨进程 stop 不可达（sendControl 本地回环会递归）→ 本机端口定位 kill。
+      if (this.ctx.channel.relay === undefined) {
+        this.killPortProcess(instanceId)
+      } else {
+        this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
+      }
+      console.log(`[dsh-console/daemon] ${instanceId} 非守护拉起，${this.ctx.channel.relay === undefined ? '本机端口 kill' : '发 stop 自退'}，等待退出后拉起`)
       void this.daemonStartAfterStop(instanceId, spec)
       return
     }
@@ -503,14 +648,17 @@ export class ConsoleService extends TypertRemoteService {
         return
       }
       // 每轮重试 stop（实例可能没收到第一条；已离线则不再发，避免 broker 积压
-      // 旧指令——新拉起实例会被迟到 stop 杀死）。
-      if (i > 0 && i % 10 === 0 && this.ctx.channel.get(instanceId)?.status === 'online') {
+      // 旧指令——新拉起实例会被迟到 stop 杀死）。无 broker 时不重发（跨进程不可达）。
+      if (i > 0 && i % 10 === 0 && this.ctx.channel.relay !== undefined
+        && this.ctx.channel.get(instanceId)?.status === 'online') {
         this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
       }
       await sleep(500)
     }
-    console.log(`[dsh-console/daemon] ${instanceId} 等待退出超时（端口仍占用），重发 stop，解锁`)
-    this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
+    console.log(`[dsh-console/daemon] ${instanceId} 等待退出超时（端口仍占用）${this.ctx.channel.relay !== undefined ? '，重发 stop' : ''}，解锁`)
+    if (this.ctx.channel.relay !== undefined) {
+      this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
+    }
     finish()
   }
 
@@ -523,7 +671,8 @@ export class ConsoleService extends TypertRemoteService {
     timer.unref?.()
   }
 
-  /** daemon 角色：停止实例——守护拉起的直接 kill；否则在线实例自退兜底。 */
+  /** daemon 角色：停止实例——守护拉起的直接 kill；否则在线实例自退兜底
+   * （有 broker 经指令投递；无 broker 时跨进程指令不可达 → 本机端口定位 kill）。 */
   private daemonStop(instanceId: string): void {
     const child = this.children.get(instanceId)
     if (child !== undefined && child.exitCode === null) {
@@ -532,6 +681,11 @@ export class ConsoleService extends TypertRemoteService {
       return
     }
     if (this.ctx.channel.get(instanceId)?.status === 'online') {
+      if (this.ctx.channel.relay === undefined) {
+        // 无 broker：sendControl 只本地回环（会递归），改本机端口定位 kill（同机守护能力）。
+        this.killPortProcess(instanceId)
+        return
+      }
       this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
       console.log(`[dsh-console/daemon] ${instanceId} 非守护拉起，经 channel 发 stop 自退`)
       return
@@ -539,15 +693,36 @@ export class ConsoleService extends TypertRemoteService {
     console.log(`[dsh-console/daemon] ${instanceId} 已离线，无进程可停`)
   }
 
+  /** 本机端口定位 kill（无 broker 时停非守护拉起实例）：lsof 找占用端口的进程发 SIGTERM。 */
+  private killPortProcess(instanceId: string): void {
+    const port = this.config.instances?.[instanceId]?.port
+    if (port === undefined) {
+      console.log(`[dsh-console/daemon] ${instanceId} 无端口信息，无法本机定位停止`)
+      return
+    }
+    ConsoleService.execImpl(`lsof -ti tcp:${port}`, (error, stdout) => {
+      const pids = stdout.trim().split('\n').filter(Boolean)
+      if (pids.length === 0) {
+        console.log(`[dsh-console/daemon] ${instanceId} 端口 ${port} 无占用进程（可能已离线）`)
+        return
+      }
+      for (const pid of pids) {
+        try { process.kill(Number(pid), 'SIGTERM') } catch { /* 已退出 */ }
+      }
+      console.log(`[dsh-console/daemon] ${instanceId} 无 broker：端口 ${port} 进程 ${pids.join(',')} 已发 SIGTERM`)
+    })
+  }
+
   /** instance 角色：实例自退执行器（收到 stop/restart 退出进程，重启由守护拉起）。 */
   private handleInstanceControl(command: ControlCommand, from: string): void {
     const action = resolveControlAction(command)
     switch (action) {
       case 'exit':
-        // 启动窗口内忽略迟到 stop/restart（broker 持久补投的旧指令；否则
-        // 守护重启链会"拉起→被杀→再拉起"死循环）。窗口后正常执行。
-        if (Date.now() - this.startedAt < ConsoleService.STARTUP_CONTROL_GRACE_MS) {
-          console.log(`[dsh-console/instance] 启动窗口内忽略 ${from} 的 ${command.type} 指令（迟到的旧指令）`)
+        // 积压旧指令判定：发送早于本进程启动 → 忽略（broker 持久队列补投的旧
+        // stop/restart 会在守护重启链里"起来就被杀"）；当前指令（ts ≥ 启动时刻）
+        // 照常执行——ts 精确区分，不误伤刚启动就要重启的合法指令。
+        if (command.ts < this.startedAt) {
+          console.log(`[dsh-console/instance] 忽略积压旧指令 ${from} 的 ${command.type}（ts=${command.ts} < 启动=${this.startedAt}）`)
           return
         }
         console.log(`[dsh-console/instance] 收到 ${from} 的 ${command.type} 指令，执行重启/停止（进程退出，守护拉起）`)
@@ -617,9 +792,10 @@ export class ConsoleService extends TypertRemoteService {
     // 目标侧短路（本机即目标实例）：跨实例 RPC 到达这里时直接执行自退，
     // 不再 remoteControl 递归（否则管理端→实例→再调自己→死循环）。
     if (instanceId === this.ctx.channel.relay?.agent) {
-      const action = resolveControlAction({ id: 'rpc', type: command, payload })
+      const action = resolveControlAction({ id: 'rpc', type: command, payload, ts: Date.now() })
       if (action === 'exit') {
-        // 与事件面一致：启动窗口内忽略迟到的旧指令（broker 补投）。
+        // RPC 帧无发送时间戳（官方协议不加字段）→ 用启动窗口兜底过滤积压帧
+        // （broker 兜底补投的旧 RPC）；当前调用（窗口外）照常执行。
         if (Date.now() - this.startedAt < ConsoleService.STARTUP_CONTROL_GRACE_MS) {
           console.log(`[dsh-console/instance] 启动窗口内忽略 RPC 面 ${command} 指令（迟到的旧指令）`)
           return { ok: true }
@@ -632,7 +808,7 @@ export class ConsoleService extends TypertRemoteService {
     // daemon 角色（RPC 面到达）：本机清单内的实例直接本机执行（进程管理在守护侧），
     // 不落入 console 决策路由（否则无 launch 配置 → route=instance → 转发回实例）。
     if (this.config.role === 'daemon' && this.config.instances?.[instanceId] !== undefined) {
-      this.handleDaemonControl({ id: 'rpc', type: command, payload: { instanceId } }, 'rpc')
+      this.handleDaemonControl({ id: 'rpc', type: command, payload: { instanceId }, ts: Date.now() }, 'rpc')
       return { ok: true }
     }
     if (command === 'upgrade') {
