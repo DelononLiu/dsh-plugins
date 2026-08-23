@@ -601,14 +601,10 @@ export class ConsoleService extends TypertRemoteService {
       return
     }
     if (this.ctx.channel.get(instanceId)?.status === 'online') {
-      // 分支 2：非守护拉起的在线实例——发 stop 自退，等退出后拉起。
-      // 无 broker：跨进程 stop 不可达（sendControl 本地回环会递归）→ 本机端口定位 kill。
-      if (this.ctx.channel.relay === undefined) {
-        this.killPortProcess(instanceId)
-      } else {
-        this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
-      }
-      console.log(`[dsh-console/daemon] ${instanceId} 非守护拉起，${this.ctx.channel.relay === undefined ? '本机端口 kill' : '发 stop 自退'}，等待退出后拉起`)
+      // 分支 2：非守护拉起的在线实例——本机端口定位 kill（同机守护能力，
+      // 不依赖 relay 投递：目标可能没连 broker），等退出后拉起。
+      this.killPortProcess(instanceId)
+      console.log(`[dsh-console/daemon] ${instanceId} 非守护拉起，本机端口 kill，等待退出后拉起`)
       void this.daemonStartAfterStop(instanceId, spec)
       return
     }
@@ -647,18 +643,11 @@ export class ConsoleService extends TypertRemoteService {
         }
         return
       }
-      // 每轮重试 stop（实例可能没收到第一条；已离线则不再发，避免 broker 积压
-      // 旧指令——新拉起实例会被迟到 stop 杀死）。无 broker 时不重发（跨进程不可达）。
-      if (i > 0 && i % 10 === 0 && this.ctx.channel.relay !== undefined
-        && this.ctx.channel.get(instanceId)?.status === 'online') {
-        this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
-      }
+      // 本机 kill 已发 SIGTERM（daemonStop/daemonRestart 分支 2），等端口释放即可；
+      // 不再重发 stop（跨进程投递依赖目标实例 relay，且会积压）。
       await sleep(500)
     }
-    console.log(`[dsh-console/daemon] ${instanceId} 等待退出超时（端口仍占用）${this.ctx.channel.relay !== undefined ? '，重发 stop' : ''}，解锁`)
-    if (this.ctx.channel.relay !== undefined) {
-      this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
-    }
+    console.log(`[dsh-console/daemon] ${instanceId} 等待退出超时（端口仍占用），解锁`)
     finish()
   }
 
@@ -681,13 +670,9 @@ export class ConsoleService extends TypertRemoteService {
       return
     }
     if (this.ctx.channel.get(instanceId)?.status === 'online') {
-      if (this.ctx.channel.relay === undefined) {
-        // 无 broker：sendControl 只本地回环（会递归），改本机端口定位 kill（同机守护能力）。
-        this.killPortProcess(instanceId)
-        return
-      }
-      this.ctx.channel.sendControl(instanceId, { type: 'stop', payload: {} })
-      console.log(`[dsh-console/daemon] ${instanceId} 非守护拉起，经 channel 发 stop 自退`)
+      // 本机端口定位 kill（同机守护能力）——不依赖 relay 投递：目标实例可能
+      // 没连 broker（混合部署），经 channel 发 stop 会静默丢失。
+      this.killPortProcess(instanceId)
       return
     }
     console.log(`[dsh-console/daemon] ${instanceId} 已离线，无进程可停`)
