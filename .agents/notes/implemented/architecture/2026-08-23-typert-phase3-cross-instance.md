@@ -76,5 +76,22 @@ ctx.remote.channel.callRemote('web3', 'console', 'listInstances', {})
 - **channel.callRemote**：InvokeRemoteRequest 帧 + RemoteResult 回执（复用官方协议类型，不定义新 RPC）；传输双路径（broker 可选）：目标 addr 可达 → 直连 HTTP RPC（POST {addr}/api/...，官方 client-request 信封）；不可达 → broker 消息通道帧。目标侧经本地 ctx.typertGateway.invoke 执行（daemon 的 dsh-base 含 gateway，headless 也可用——invoke 纯进程内）。
 - **console.controlInstance**：daemon/instance 路由改 callRemote 直达目标 console.controlInstance（目标侧本地执行 + 回执）；不可达降级 sendControl。
 - **目标侧部署要求**（用户确认）：目标实例/守护装 dsh-console（@Remote 管理方法）+ dsh-channel（callRemote 接收）+ 完整 typert 运行时（daemon 的 dsh-base 自带 gateway/loader）。
-- **验证**：115 测试全绿（含降级路径）、全仓 typecheck/build 全绿；直连信封 web2 实测可达。
+- **验证**：116 测试全绿（含降级路径）、全仓 typecheck/build 全绿；直连信封 web2 实测可达。
 - **剩余**：transport 选择策略细化（当前 addr 可达即直连）、typert forwardable events ↔ channel 三平面映射（事件面）。
+
+### 联调落地事实（2026-08-23 目标侧部署，三实例真实互联）
+
+- **relay 接入默认轮询 peers**：接入 broker 即默认 30s 轮询（`DEFAULT_RELAY_POLL_MS`），显式 0 才关闭——
+  实例表依赖 peers 轮询填充，原默认只保活不轮询导致 channel/list 永空；env 未显式设置返回 undefined
+  （否则 0 吞掉 constructor 默认）。
+- **listInstances boundary**：HostRecord.version 必填而 broker peers 无版本 → hosts 组装补空串。
+- **remoteControl wire args**：必填 payload 参数（target 侧校验）→ args 补 `payload: {}`。
+- **daemon 角色 RPC 面执行**：daemon 经 callRemote 收到 controlInstance → 本机清单内实例直接本机执行
+  （复用 handleDaemonControl），不落入 console 决策路由（否则无 launch → route=instance 转发回实例）。
+- **目标实例自退短路**：RPC 到达本机（instanceId === relay.agent）直接自退，杜绝 RPC 递归。
+- **实例启动窗口过滤**（`STARTUP_CONTROL_GRACE_MS=15s`）：broker 消息队列持久补投，迟到的旧 stop/restart
+  会在守护重启链里"起来就被杀"死循环 → 启动 15s 内忽略（事件面 + RPC 面一致）；daemon 重试 stop
+  仅实例仍在线时发（减少积压）。
+- **实测**：web2(管理端)/web3/web4(instance)/daemon(headless host1) 连同一 broker（19121，HMAC 鉴权）；
+  web2 channel/list 发现全部远端、console/listInstances 返回实例+守护；web2→web3 restart 经 daemon
+  本机执行完整链路（RPC 回执 + 事件面自退 + spawn 拉起），连续 3 次重启稳定。
