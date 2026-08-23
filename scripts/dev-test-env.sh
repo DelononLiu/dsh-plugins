@@ -12,13 +12,19 @@ set -euo pipefail
 DSH_BIN="${DSH_BIN:-/home/long2015/nodejs/node-v24.13.0-linux-x64/bin/dsh}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 环境矩阵：name|DSH_HOME|profile|port|DSH_RELAY_AGENT(可空)
+# 环境矩阵：name|DSH_HOME|profile|port|DSH_RELAY_AGENT
+# 通信插件部署（三实例联调）：web2/web3/web4 + daemon 连同一 broker（19121，
+# 共享 secret——broker 注册表 agent 名唯一）。relay 经 env 注入（channel 兜底）。
 ENVS=(
-  "web2|$HOME/.dsh-web2|web|3082|"
+  "web2|$HOME/.dsh-web2|web|3082|web2"
   "web3|$HOME/.dsh-web3|web|3083|web3"
   "web4|$HOME/.dsh-web4|web|3084|web4"
-  "daemon|$HOME/.dsh-daemon|daemon|0|"
+  "daemon|$HOME/.dsh-daemon|daemon|0|host1"
 )
+
+# broker 共享配置（与 daemon patch 的 test-secret-relay-2026 一致）。
+RELAY_BROKER_URL="http://127.0.0.1:19121"
+RELAY_SECRET="test-secret-relay-2026"
 
 find_env() {
   local name="$1"
@@ -35,7 +41,14 @@ find_env() {
 
 is_running() {
   local home="$1"
-  for pid in $(pgrep -f 'dsh --profile' 2>/dev/null || true); do
+  for pid in $(pgrep -f '/bin/dsh --profile' 2>/dev/null || true); do
+    local cmd; cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+    # 只认 node 主进程（命令行以 node …/bin/dsh --profile 开头）；排除 bash 包装
+    # /gateway 子进程（同样继承 DSH_HOME 且命令行含 --profile，误匹配会 kill 错对象）。
+    case "$cmd" in
+      node*/bin/dsh*--profile*) ;;
+      *) continue ;;
+    esac
     if [[ "$(cat /proc/$pid/environ 2>/dev/null | tr '\0' '\n' | grep '^DSH_HOME=' | cut -d= -f2)" == "$home" ]]; then
       echo "$pid"
       return 0
@@ -57,7 +70,13 @@ start_one() {
   echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
   local env_args=()
   if [[ -n "$relay" ]]; then
-    env_args+=("DSH_RELAY_AGENT=$relay")
+    # 通信插件部署：relay 三件套（agent/broker/secret）+ 显式 peers 轮询（10s，便于联调观察）。
+    env_args+=(
+      "DSH_RELAY_AGENT=$relay"
+      "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL"
+      "DSH_RELAY_SECRET=$RELAY_SECRET"
+      "DSH_RELAY_POLL_PEERS_MS=10000"
+    )
   fi
   env DSH_HOME="$home" "${env_args[@]}" nohup "$DSH_BIN" --profile "$profile" > "/tmp/dsh-$name.log" 2>&1 &
 }
@@ -70,6 +89,11 @@ stop_one() {
   if [[ -n "$pid" ]]; then
     echo "[$name] 停止 pid=$pid"
     kill "$pid"
+    # 等待优雅退出（gateway/webserver 端口释放），避免紧跟的 start 竞态 bind 失败。
+    for _ in $(seq 1 40); do
+      is_running "$home" >/dev/null 2>&1 || break
+      sleep 0.5
+    done
   else
     echo "[$name] 未在运行"
   fi
