@@ -80,3 +80,21 @@ Host BFF            api-remotes    —— 事件转发 allowlist（应用级唯�
 - settings 非 loopback 只读 memory 态——多实例布局持久化需自研通道（经 console 宿主）
 - client 返回值是 RemoteResult 信封（判别 ok/value/error）
 - 我们 typert-protocol 是 vendored rc.2——需整体同步 alpha.5（含 registry 等）
+
+## Web5 隔离验证进展（2026-08-24，goal round 2）
+
+- **自研 host 插件 alpha.5 兼容已验证**：web5（~/.dsh-web5，独立 alpha.5 CLI @ 0.1.2-alpha.5，端口 3085）启动成功；dsh-console/channel/user host 面工作——console API 返回真实实例表（web3/web4 online，跨实例发现正常）。
+- **隔离验证成功**：web2/3/4（rc.2 全局内核）全程未受影响（200）。
+- **发现的问题**：
+  1. **全家桶 vendored（@linxin666 0.2.9）不兼容 alpha.5**——其 host 面用 rc.2 dsh-settings API（installSettingsSection/settingsNamespace），alpha.5 崩。需全家桶新版本或评估。
+  2. **alpha.5 client bundle 服务机制与 rc.2 不同**——rc.2 /plugins/<id>/client.js 在 alpha.5 404（页面经 boot 图 + client-modules manifest 加载）。第三方 client 插件收录方式需查（构建期打包进 dist?）。
+  3. profile 需 dsh-tools alpha.5 + gateway 端口独立。
+- **待续**：alpha.5 client 插件加载机制研究 → 自研 client 面验证 → controller 化重构。
+
+## Web5 验证通过（2026-08-24 goal round 2 续）
+
+- **自研 client bundle 在 alpha.5 全部服务正常**：dsh-user/console/quick-nav/tabs/desk bundle 200（路径 `/plugins/??<id>/client.js&rev=...` + cookie——rc.2 的 `?rev=` 改 `&rev=` + `??` 前缀）。dsh-channel 404 属预期（纯 host 无 client）。
+- **bundle 内容正确**：dsh-desk 含组装器（ToolAssembler/slot-hider/data-dsh），dsh-console 含 ConsoleBadge。
+- **自研 host 面 alpha.5 兼容**：console API 返回真实实例表（跨实例发现 web3/web4 online）。
+- **全家桶 vendored 不兼容 alpha.5**（rc.2 API），web5 临时注释——待全家桶新版本或专项处理。
+- 隔离成功：web2/3/4 全程健康。
