@@ -2,7 +2,7 @@
   "name": "dsh-plugins",
   "private": true,
   "version": "0.0.0",
-  "description": "dsh 团队发行包 monorepo：内核之上分层（身份/通信/业务/UI），自研核心 + 社区聚合",
+  "description": "dsh \u56e2\u961f\u53d1\u884c\u5305 monorepo\uff1a\u5185\u6838\u4e4b\u4e0a\u5206\u5c42\uff08\u8eab\u4efd/\u901a\u4fe1/\u4e1a\u52a1/UI\uff09\uff0c\u81ea\u7814\u6838\u5fc3 + \u793e\u533a\u805a\u5408",
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
@@ -11,7 +11,7 @@
   "packageManager": "pnpm@9.15.0",
   "license": "MIT",
   "devDependencies": {
-    "@deepseek-ai/dsh-typert-generator": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-typert-generator": "0.1.2-alpha.5",
     "esbuild": "^0.28.0",
     "typescript": "6.0.3"
   }

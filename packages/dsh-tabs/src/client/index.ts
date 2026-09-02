@@ -13,8 +13,11 @@
  */
 
 import { createElement } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { SessionView, type SessionViewInjected } from './SessionView'
 
@@ -43,6 +46,21 @@ interface PinnedValue { pinned?: string[] }
  * Client 插件体：Alt+P/× 固定管理 + 动态注册固定会话 tab + 选中划线。
  * @param ctx - client 根上下文。
  */
+
+/** 会话标签消费的 ctx.sessions 最小契约（绕开官方 dsh-session 的 host
+ *  SessionStore 漂移——会话标签只需 list 快照 + open）。 */
+interface TabsSessionsList {
+  getSnapshot(): { current: string | undefined; ids: readonly string[]; byId: Record<string, { displayTitle?: string }> }
+  subscribe(fn: () => void): () => void
+}
+interface TabsSessions {
+  list: TabsSessionsList
+  open(id: string): void
+}
+function sessionsOf(ctx: { sessions: unknown }): TabsSessions {
+  return sessionsOf(ctx) as TabsSessions
+}
+
 export function apply(ctx: ClientContext): void {
   const settings = ctx.settingsScope.bind<{ pinned: string[] }>({ namespace: PINNED_NS })
   const pinnedOf = (): string[] => (settings.getSnapshot().value as PinnedValue | undefined)?.pinned ?? []
@@ -74,7 +92,7 @@ export function apply(ctx: ClientContext): void {
   // 划线：会话 tab 模式（非官方视图 且 当前会话固定）→ 会话 tab 划线 +
   // 抑制官方；否则官方划线。
   const applyActive = (): void => {
-    const list = ctx.sessions.list.getSnapshot()
+    const list = sessionsOf(ctx).list.getSnapshot()
     const current = list.current
     const tabMode = !officialView && current !== undefined && pinnedOf().includes(current)
     document.body.classList.toggle(PINNED_ACTIVE_CLASS, tabMode)
@@ -97,11 +115,10 @@ export function apply(ctx: ClientContext): void {
   // 需求：点击左侧会话默认在「对话」。列表增删时 current 未变则不误清。
   let lastCurrent: string | undefined
   const onCurrentChange = (): void => {
-    const current = ctx.sessions.list.getSnapshot().current
+    const current = sessionsOf(ctx).list.getSnapshot().current
     if (current === undefined) return
     if (current !== lastCurrent) {
       lastCurrent = String(current)
-      ctx.slots.pruneStoreScope(current)
     }
     if (pendingDialogView) {
       // 事件 10：点「对话」切回记忆会话后：保持对话视图（官方划线），
@@ -123,11 +140,11 @@ export function apply(ctx: ClientContext): void {
     }
     applyActive()
   }
-  const unsubCurrent = ctx.sessions.list.subscribe(onCurrentChange)
+  const unsubCurrent = sessionsOf(ctx).list.subscribe(onCurrentChange)
   ctx.effect(() => () => unsubCurrent(), 'dsh-tabs: current sync')
   {
     // 初始：按当前会话是否固定对齐状态；未固定 → 记录对话记忆。
-    const current = ctx.sessions.list.getSnapshot().current
+    const current = sessionsOf(ctx).list.getSnapshot().current
     if (current !== undefined) {
       lastCurrent = String(current)
       const isPinned = pinnedOf().includes(current)
@@ -158,11 +175,11 @@ export function apply(ctx: ClientContext): void {
       const officialTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('button[role="tab"]'))
         .filter((b) => !(b.textContent ?? '').includes(SESSION_MARK))
       if (officialTabs[0] === btn && dialogSession !== undefined) {
-        const listNow = ctx.sessions.list.getSnapshot()
+        const listNow = sessionsOf(ctx).list.getSnapshot()
         const current = listNow.current
         if (current !== undefined && String(current) !== dialogSession && listNow.ids.includes(dialogSession as never)) {
           pendingDialogView = true
-          ctx.sessions.open(dialogSession as never)
+          sessionsOf(ctx).open(dialogSession as never)
         }
       }
       return
@@ -172,7 +189,7 @@ export function apply(ctx: ClientContext): void {
       .filter((b) => (b.textContent ?? '').includes(SESSION_MARK))
     const idx = sessionTabs.indexOf(btn)
     if (idx < 0) return
-    const list = ctx.sessions.list.getSnapshot()
+    const list = sessionsOf(ctx).list.getSnapshot()
     const pinnedExisting = [...new Set(pinnedOf())].filter((id) => list.ids.includes(id as never))
     const sessionId = pinnedExisting[idx]
     const current = list.current !== undefined ? String(list.current) : undefined
@@ -197,7 +214,6 @@ export function apply(ctx: ClientContext): void {
     if (sessionId !== undefined && current === sessionId) {
       e.preventDefault()
       e.stopPropagation()
-      ctx.slots.pruneStoreScope(sessionId)
       officialView = false
       applyActive()
       const chatBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('button[role="tab"]'))
@@ -221,7 +237,7 @@ export function apply(ctx: ClientContext): void {
     // Alt+P：固定/取消固定当前会话（事件 5/6）。
     if (e.code === 'KeyP') {
       e.preventDefault()
-      const current = ctx.sessions.list.getSnapshot().current
+      const current = sessionsOf(ctx).list.getSnapshot().current
       if (current === undefined) return
       const pinned = pinnedOf()
       const isPinned = pinned.includes(current as never)
@@ -239,11 +255,11 @@ export function apply(ctx: ClientContext): void {
     if (digit === undefined) return
     e.preventDefault()
     const index = Number(digit) - 1
-    const list = ctx.sessions.list.getSnapshot()
+    const list = sessionsOf(ctx).list.getSnapshot()
     const pinnedExisting = [...new Set(pinnedOf())].filter((id) => list.ids.includes(id as never))
     const target = pinnedExisting[index]
     if (target === undefined) return
-    ctx.sessions.open(target as never)
+    sessionsOf(ctx).open(target as never)
     // 切到固定会话 → 会话 tab 划线（open 触发的 onCurrentChange 也会设，这里兜底）。
     officialView = false
     applyActive()
@@ -269,7 +285,7 @@ export function apply(ctx: ClientContext): void {
         clearAll()
         return
       }
-      const list = ctx.sessions.list.getSnapshot()
+      const list = sessionsOf(ctx).list.getSnapshot()
       // 只注册固定的会话（且仍存在）；去重保序。
       const toRegister = [...new Set(pinnedOf())].filter((id) => list.ids.includes(id as never))
       const seen = new Set<string>()
@@ -285,7 +301,7 @@ export function apply(ctx: ClientContext): void {
           // 固定且当前的 tab 带划线标记（DOM 层加官方划线样式）+ 不可见标记
           //（区分官方 tab）+ 尾部可见 ×；会话 id 不写入 label（避免可见）。
           label: () => {
-            const listNow = ctx.sessions.list.getSnapshot()
+            const listNow = sessionsOf(ctx).list.getSnapshot()
             const pinnedExisting = [...new Set(pinnedOf())].filter((pid) => listNow.ids.includes(pid as never))
             const idx = pinnedExisting.indexOf(id)
             const title = (listNow.byId as Record<string, { displayTitle: string }>)[id]?.displayTitle ?? id
@@ -295,10 +311,9 @@ export function apply(ctx: ClientContext): void {
           },
           inject: (): SessionViewInjected => ({
             targetId: id,
-            open: (sid: string) => { ctx.sessions.open(sid as never) },
+            open: (sid: string) => { sessionsOf(ctx).open(sid as never) },
             // 清来源会话的 slot store：官方 setView('session-<id>') 污染
             // 当前（来源）会话的 view，残留导致切回时死循环；挂载时清掉。
-            prune: (sid: string) => { ctx.slots.pruneStoreScope(sid) },
           }),
         }, (props) => createElement(SessionView, props))
         disposers.set(id, dispose)
@@ -312,7 +327,7 @@ export function apply(ctx: ClientContext): void {
     }
 
     sync()
-    const unsubList = ctx.sessions.list.subscribe(sync)
+    const unsubList = sessionsOf(ctx).list.subscribe(sync)
     const unsubSettings = settings.subscribe(() => {
       sync()
       applyActive()
