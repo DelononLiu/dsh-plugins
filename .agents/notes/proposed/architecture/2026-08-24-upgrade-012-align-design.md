@@ -105,3 +105,19 @@ Host BFF            api-remotes    —— 事件转发 allowlist（应用级唯�
 - **解**：全家桶已发 **0.3.12**（`dsh.engines.dsh: >=0.1.2-alpha.4`，明确适配 alpha.5，无 rc.2 API）；better-sidebar **0.18.0-alpha.0**（peer 依赖 0.1.2-alpha.2 官方）。
 - **验证**：web5 升级全家桶 0.3.12 + better-sidebar 0.18.0-alpha.0 后——全家桶 5 bundle 全 200 + 自研 + 官方共存、console API 正常、零错误日志。
 - **profile 升级**：dsh.lock.json 全家桶 0.2.9 → 0.3.12（better-sidebar 0.15.2 → 0.18.0-alpha.0 待定——alpha.0 是否上正式基线需评估）。
+
+## 2b 复核修正（2026-08-24 goal round 4）
+
+- **"删 console HTTP 端点"判断修正**：/api/console/instances **非冗余**——dsh-quick-nav host 经 DSH_CONSOLE_ADDR 跨实例拉取实例表（HTTP 跨实例通道，官方 @Remote 仅同 host）。client 同 host 已走 ctx.remote，但端点保留供跨实例。
+- **2b 结论**：自研 6 插件已按官方分层运行（TypertRemoteService + exports + typert 产物 + client ctx.remote/$mount + ui-renderer 装配）。进一步拆 React-free client model 层对薄数据面差异化插件收益递减。跨实例 HTTP/传输是官方无的差异化，保留。
+- **阶段 5 原子约束**：web2/3/4 link main（rc.2 代码）——worktree alpha.5 适配合入 main 必须与全局内核升 alpha.5 同窗口（否则 rc.2 内核 + alpha.5 代码崩）。需用户给停机窗口。
+
+## 阶段 5 铺开执行清单（待停机窗口，2026-08-24 整理）
+
+**原子切换**（web2/3/4 link main = rc.2 代码；合入 worktree 须与全局内核同窗口）：
+1. 全局内核：`npm i -g @deepseek-ai/dsh@0.1.2-alpha.5`（dsh-alpha5-cli 已验证可装可跑）
+2. 合入 worktree → main（3 提交：d2abe9c/b1946d6/1c4bd7a）
+3. 各 profile 官方依赖升 alpha.5：web2/3/4 `dsh-tools rc.8→alpha.5`；web2 全家桶 `0.2.9→0.3.12` + better-sidebar 升
+4. dev-test-env.sh 逐个重启 web2/3/4/daemon
+5. 验证：各端口 200 + bundle 路径（alpha.5 格式 `??id&rev`）+ console API + 全家桶 5 bundle
+6. 回滚预案：全局 `npm i -g @deepseek-ai/dsh@0.1.1-rc.2` + git revert worktree 合入
