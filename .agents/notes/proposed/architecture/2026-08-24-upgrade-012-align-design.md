@@ -98,3 +98,10 @@ Host BFF            api-remotes    —— 事件转发 allowlist（应用级唯�
 - **自研 host 面 alpha.5 兼容**：console API 返回真实实例表（跨实例发现 web3/web4 online）。
 - **全家桶 vendored 不兼容 alpha.5**（rc.2 API），web5 临时注释——待全家桶新版本或专项处理。
 - 隔离成功：web2/3/4 全程健康。
+
+## 全家桶 vendored 升级方案（2026-08-24 goal round 3）——4b 解决
+
+- **根因**：全家桶 0.2.9 用 rc.2 dsh-settings API（installSettingsSection），alpha.5 崩。
+- **解**：全家桶已发 **0.3.12**（`dsh.engines.dsh: >=0.1.2-alpha.4`，明确适配 alpha.5，无 rc.2 API）；better-sidebar **0.18.0-alpha.0**（peer 依赖 0.1.2-alpha.2 官方）。
+- **验证**：web5 升级全家桶 0.3.12 + better-sidebar 0.18.0-alpha.0 后——全家桶 5 bundle 全 200 + 自研 + 官方共存、console API 正常、零错误日志。
+- **profile 升级**：dsh.lock.json 全家桶 0.2.9 → 0.3.12（better-sidebar 0.15.2 → 0.18.0-alpha.0 待定——alpha.0 是否上正式基线需评估）。
