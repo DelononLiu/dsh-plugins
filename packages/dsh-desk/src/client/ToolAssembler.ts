@@ -119,10 +119,16 @@ export function startToolAssembler(
   let config = resolveAssembler(snapshot)
   const removeCss = injectEntryFootCss()
 
-  /** 工具是否被配置排除（tools.<id>.visible=false → 不摆位）。 */
+  /** 工具是否被配置排除（tools.<id>.visible=false → 隐藏 entry）。 */
   const excluded = (entry: HTMLElement): boolean => {
     const id = toolIdOf(entry)
     return id !== undefined && config.tools[id]?.visible === false
+  }
+
+  /** 应用 entry 显隐：visible=false → display:none（彻底隐藏）；true → 恢复。 */
+  const applyVisibility = (entry: HTMLElement): void => {
+    if (excluded(entry)) entry.style.display = 'none'
+    else if (entry.style.display === 'none') entry.style.display = ''
   }
 
   const tryPlace = (): void => {
@@ -131,13 +137,16 @@ export function startToolAssembler(
     const foot = footAreaOf(root)
     if (foot === null) return
     // 锚点 = footerActions（或 footArea 首个子元素兜底）；发现的 entry 依次插到
-    // 锚点前，保持发现顺序、都在控制台上方。配置排除的不摆位（留在插件原位置）。
+    // 锚点前，保持发现顺序、都在控制台上方。配置排除的隐藏（display:none）——
+    // 不留在插件原位置（否则 visible=false 只是不搬、仍显示，语义不符）。
     const anchor = footerActionsOf(foot) ?? foot.firstElementChild
     const entries = Array.from(root.querySelectorAll<HTMLElement>(ENTRY_SELECTOR))
     for (const entry of entries) {
-      if (entry.parentElement === foot || excluded(entry)) continue
-      if (anchor !== null) foot.insertBefore(entry, anchor)
-      else foot.appendChild(entry)
+      if (entry.parentElement !== foot && !excluded(entry)) {
+        if (anchor !== null) foot.insertBefore(entry, anchor)
+        else foot.appendChild(entry)
+      }
+      applyVisibility(entry)
     }
   }
 
@@ -155,15 +164,17 @@ export function startToolAssembler(
     const foot = footAreaOf(root)
     if (foot === null) return
     const anchor = footerActionsOf(foot) ?? foot.firstElementChild
-    const logoRow = root.querySelector('[class*="logoRow"]')
     const entries = Array.from(root.querySelectorAll<HTMLElement>(ENTRY_SELECTOR))
     for (const entry of entries) {
-      if (entry.parentElement !== foot) continue // 未摆位的交给 tryPlace 处理
       if (excluded(entry)) {
-        // 新排除：移回插件默认落点（logoRow 后）；找不到则留在 foot（静默回退）。
-        if (logoRow !== null && logoRow.nextSibling !== null) root.insertBefore(entry, logoRow.nextSibling)
-      } else if (anchor !== null) {
-        foot.insertBefore(entry, anchor) // 保持顺序（已在该处的 insertBefore 无副作用）
+        // 新隐藏：从 foot 移出 + display:none（彻底隐藏）。
+        if (entry.parentElement === foot && anchor !== null) foot.removeChild(entry)
+        applyVisibility(entry)
+      } else if (entry.parentElement !== foot) {
+        // 恢复：摆回 foot + 显示。
+        if (anchor !== null) foot.insertBefore(entry, anchor)
+        else foot.appendChild(entry)
+        applyVisibility(entry)
       }
     }
     tryPlace()
