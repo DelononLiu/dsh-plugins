@@ -240,6 +240,24 @@ export class ConsoleService extends TypertRemoteService {
   /** lsof 执行实现（测试可替换；生产 = node:child_process.exec）。 */
   static execImpl: typeof exec = exec
 
+  /**
+   * 解析本进程启动用的 dsh 命令（daemon 拉起实例时用它，保证同内核版本）。
+   * daemon 是 `node <dsh-bin> --profile <p>` 启动——process.argv[1] 即 dsh bin
+   * 路径（shebang 可执行，可直接 spawn）。判定：argv[1] 路径片段含 'dsh'
+   * （如 .../.bin/dsh 或 .../@deepseek-ai/dsh/lib/bin.js）；测试直调时 argv[1]
+   * 是测试文件（无 dsh）→ fallback 'dsh'（PATH，测试里 spawnImpl 已 mock）。
+   * 用自身 dsh 避免 PATH 全局旧版（rc.2）拉起实例版本错配。
+   */
+  static selfDshCommand(): string {
+    const argv1 = process.argv[1]
+    if (argv1 !== undefined) {
+      // basename 或路径含 dsh 标记 → 视为 dsh bin。
+      const base = argv1.split(/[\\/]/).pop() ?? ''
+      if (base.includes('dsh')) return argv1
+    }
+    return 'dsh'
+  }
+
   /** 主机档案表。 */
   private readonly hosts = new Map<string, HostRecord>()
   /** 实例档案表（含管理扩展）。 */
@@ -661,7 +679,12 @@ export class ConsoleService extends TypertRemoteService {
     const logDir = join(homedir(), '.dsh-daemon', 'logs')
     mkdirSync(logDir, { recursive: true })
     const fd = openSync(join(logDir, `${instanceId}.log`), 'a')
-    const child = ConsoleService.spawnImpl('dsh', ['--profile', spec.profile], {
+    // 拉起实例用**启动自己的 dsh**（process.argv[1]——daemon 是
+    // `node <dsh-bin> --profile daemon` 起的，argv[1] 即 dsh bin 路径），
+    // 保证与 daemon 同内核版本；PATH 里的全局 dsh 可能是旧版（rc.2 vs rc.1），
+    // 实例版本不一致会崩/错配。fallback：非 dsh 启动（测试/直调）→ 'dsh'。
+    const dshBin = ConsoleService.selfDshCommand()
+    const child = ConsoleService.spawnImpl(dshBin, ['--profile', spec.profile], {
       env: { ...process.env, DSH_HOME: spec.dshHome, ...spec.env },
       detached: true,
       stdio: ['ignore', fd, fd],
