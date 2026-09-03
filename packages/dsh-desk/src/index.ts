@@ -10,7 +10,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 
 /** 布局区（官方/自研真实结构：顶部导航、tab 区、侧边栏；无独立 actions 区）。 */
 export type LayoutRegion = 'topbar' | 'tabs' | 'sidebar'
@@ -84,7 +84,7 @@ export const Config = z.object({
 }) as z<Config>
 
 /** 布局设置命名空间（settings 持久化，client settingsScope 读写）。 */
-export const LAYOUT_NAMESPACE = settingsNamespace('my-ui-layout')
+export const LAYOUT_NAMESPACE = 'my-ui-layout'
 
 /** 布局设置 schema（settings 注册用）。 */
 export const LayoutSettingsSchema = z.object({

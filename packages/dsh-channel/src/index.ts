@@ -13,7 +13,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import { createHmac, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -503,11 +503,11 @@ export class ChannelService extends TypertRemoteService {
     if (pending === undefined) return
     this.pendingRpc.delete(rpc.id)
     if (result === undefined) {
-      pending.resolve({ ok: false, error: { code: 'rpc-error', message: `directRpc ${url}: 无 result`, details: {} } })
+      pending.resolve({ ok: false, error: new RemoteError('rpc-error', `directRpc ${url}: 无 result`, {}) })
     } else if (result.ok) {
       pending.resolve({ ok: true, value: result.value })
     } else {
-      pending.resolve({ ok: false, error: result.error ?? { code: 'rpc-error', message: 'target failed', details: {} } })
+      pending.resolve({ ok: false, error: result.error ?? new RemoteError('rpc-error', 'target failed', {}) })
     }
   }
 
@@ -530,7 +530,7 @@ export class ChannelService extends TypertRemoteService {
   /** 目标侧：执行跨实例 RPC 帧（经本地 typert gateway），回执给调用方。 */
   private async handleRemoteRpc(from: string, rpc: InvokeRemoteRequest & { id: string }): Promise<void> {
     if (this.typertGateway === undefined) {
-      await this.relaySendRpcReply(from, { id: rpc.id, ok: false, error: { code: 'gateway-unavailable', message: 'typert gateway 未就绪', details: {} } })
+      await this.relaySendRpcReply(from, { id: rpc.id, ok: false, error: new RemoteError('gateway-unavailable', 'typert gateway 未就绪', {}) })
       return
     }
     try {
@@ -540,7 +540,7 @@ export class ChannelService extends TypertRemoteService {
       await this.relaySendRpcReply(from, {
         id: rpc.id,
         ok: false,
-        error: { code: 'rpc-error', message: error instanceof Error ? error.message : String(error), details: {} },
+        error: new RemoteError('rpc-error', error instanceof Error ? error.message : String(error), {}),
       })
     }
   }

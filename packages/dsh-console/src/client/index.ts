@@ -13,14 +13,15 @@
  */
 
 import { createElement } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ConsoleInstanceView, ControlResult } from 'dsh-console/types'
 import type { BrokerStatusView } from 'dsh-channel/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
 import type {} from 'dsh-console/remote'
 import type {} from 'dsh-channel/remote'
-import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { ConsoleBadge, type ConsoleHost } from './ConsoleBadge'
 
 /**
@@ -37,12 +38,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** ctx.remote 类型注入（本编译面已合并 channel/console namespace——本地声明）。 */
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    remote: TypertClientRemote
-  }
-}
+
 
 /** 需要的 client 服务：插槽注册 + typert remote。 */
 export const inject = ['slots', 'remote']

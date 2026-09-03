@@ -8,10 +8,10 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 
 /** 固定会话命名空间（settings 持久化）。 */
-export const PINNED_NAMESPACE = settingsNamespace('dsh-tabs-pinned')
+export const PINNED_NAMESPACE = 'dsh-tabs-pinned'
 
 /** 固定会话 settings 结构。 */
 export interface PinnedSettings {

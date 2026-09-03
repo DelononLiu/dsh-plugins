@@ -28,3 +28,17 @@ export interface BrokerStatusView {
 }
 
 
+
+/**
+ * 跨实例 RPC 传输层错误码（channel 是 typert 的跨主机 carrier——carrier
+ * 自身故障不属于任何域方法，故由 channel 声明；参照官方 owner 扩展
+ * RemoteErrorDetailsMap 的 merge-extensible 模式）。
+ */
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    /** 目标侧 typert gateway 未就绪（RPC 帧无法本地执行）。 */
+    'gateway-unavailable': {}
+    /** 跨实例 RPC 传输/执行失败（非域方法错误）。 */
+    'rpc-error': { readonly cause?: string }
+  }
+}

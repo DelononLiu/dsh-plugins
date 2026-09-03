@@ -12,24 +12,15 @@
  */
 
 import { createElement } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import channelRemote from 'dsh-channel/remote'
 import type {} from 'dsh-channel/remote'
-import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
 import { QuickNav, type QuickNavHost } from './QuickNav'
 
-/**
- * ctx.remote 类型注入：官方 api-remotes/client 只聚合官方 7 包（不含自研
- * channel），且 pnpm 隔离导致其 protocol 实例与 channel remote 合并分离。
- * 此处本地声明（使用本编译面已合并的 TypertClientRemote——含 channel）——
- * 单实例合并生效；运行时 ctx.remote 由内核 gateway 注入，声明仅为编译面。
- */
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    remote: TypertClientRemote
-  }
-}
+
 
 /** 需要的 client 服务：插槽注册 + settingsScope + typert remote（跨实例调用）。 */
 export const inject = ['slots', 'settingsScope', 'remote']

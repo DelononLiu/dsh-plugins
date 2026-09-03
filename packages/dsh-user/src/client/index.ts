@@ -12,7 +12,7 @@
 
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { UserBadge } from './UserBadge'
 
 const USER_BADGE_CSS = [
