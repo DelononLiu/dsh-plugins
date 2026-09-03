@@ -1,46 +1,49 @@
-# Agent Note: 多 dsh 协同——从主端集群控制到自主协同干活
+# Agent Note: 多 dsh——方向修正（2026-09-04 复核）
 
-Status: proposed
+Status: proposed（2026-09-04 方向修正后）
 
-## Problem
+## 2026-09-04 复核结论（取代早期 v1/v2/v3 愿景）
 
-用户逐步澄清的最终目标：**多个 dsh（可跨主机）相互感知、协同干活**。分解为用户可描述的诉求：
+用户质疑"多 dsh 是否伪需求"+ 明确真实需求后，方向修正：
 
-1. 登录**一个主的**（管理端 console）；
-2. **便捷部署并启动其他主机上的 dsh**（不用 SSH 手工装）；
-3. 最好能在主端**打开其他主机的工作区**直接干活；不能则**便捷跳转**到该主机 dsh 再开工作区；
-4. 多 dsh 的**插件升级从主端统一操作**；
-5. 最终：多 dsh **自主协同干活**（不只是主从管理，而是对等协作）。
+1. **跨主机自主协同干活（早期 v3）= 搁置**：官方 dsh 严格单机单实例
+   （无多实例/多主机/守护派生概念，rc.1 tag 源码全量核对）；社区无项目
+   做协同决策（最接近的 dsh-helm 仅 MCP 路由转发）；依赖全是新发明 →
+   现阶段伪需求/过早，降级。
+2. **一台服务器为多用户开隔离实例 = 真实需求（转正）**：组内需要团队
+   多人共用服务器、每人隔离 DSH 实例。社区已有成熟参考
+   （AnkoCD/dsh-server-deployment ⭐25：登录门户 + 每用户独立 OS 账号 +
+   独立 DSH_HOME/端口 + 独立 API Key + 交付抽屉 + OS 级隔离 runuser
+   降权；x102201/deepseek-harness-helper：单机多开 launcher）。
+3. **路径 = 自研为主**（用户确认）：在官方底料（Cordis 插件 + profile
+   组合 + Typert 协议类型层）上自建"多实例管理层"——官方完全空白，
+   无可删除/借力的概念，AGENTS.md 分层（user 身份 → channel 通信 →
+   console 管理 → daemon host）正是这个空白上的正确落点。
 
-## Decision
+## 我们已有地基（多用户隔离实例雏形）
 
-**方向（用户已确认，2026-09）**：
-- **协作拓扑 = A 星型**：console 是协调者/调度员（它已知全部成员——channel 发现 + launch 配置）。
-- **干活形态 = C 两者都要**：干活型（派他机执行命令/查文件，≈远程工具调用，typert RPC 已承载）+ 动脑型（派他机起独立 agent 会话思考，结论回传，需跨实例子会话机制）。
-- **信任 = B 显式授权（邀请制）**：协作关系显式建立（owner 发邀请 → 对方接受 → 记录），不是同 owner 自动互信。
+- web2/3/4 = 独立 DSH_HOME + 独立端口（测试矩阵已验证多实例并存）。
+- dsh-user = 实例内多用户身份（admin/member，官方无此概念——差异化）。
+- gateway（clarknu）+ dsh-user cookie 验签 = 登录层（官方 BrowserAuth
+  fence 需官方会话桥，见 2026-09-03-alpha5-auth note）。
+- console = 实例档案/生命周期/launch 编排（管理多实例的地基）。
 
-**能力线（v1/v2/v3 切分）**：
+## 与社区参考的差距（自研要做）
 
-| 阶段 | 能力 | 内容 | 现有基础 |
+| 维度 | AnkoCD 参考 | 我们现状 | 差距 |
 | --- | --- | --- | --- |
-| v1 | **部署新主机 dsh** | console UI 填 SSH → 调 bootstrap → 显示进度（daemon 上线 → 注册 launch） | `scripts/bootstrap/agent.mjs`（生成令牌/profile/SSH 引导命令）已实现；console `deployInstance` 有骨架 |
-| v1 | **统一升级** | 主端选实例 → 推版本（复用 release lock + upgrade 指令）——捡起挂起的"升级回滚" | channel `upgrade` 指令 + dsh.lock.json 版本矩阵 |
-| v1 | **便捷跳转** | 点击跳转他机（已在 quick-nav 实现，三实例验证过） | ✅ 已实现 |
-| v2 | **远程工作区** | 主端打开他机工作区直接干活（跨实例会话平面共享——官方无此概念，需设计） | 无；§9 预留"远程工作区 = 跨实例继续会话" |
-| v3 | **自主协同** | console 当调度员：拆任务 → 挑成员（在线+能力+受邀）→ 分派（干活型 RPC / 动脑型子会话）→ 汇总；A+C+B 模型 | 跨实例 RPC 已实现；缺能力发现/可用性/任务委托协议 |
+| 每用户独立实例 | OS 账号隔离 + userctl 自动建户/拉实例 | 多实例已隔离但手动配 | userctl 式自动建户 |
+| 每用户独立 API Key | 各自 .credentials.yaml | 共享 key | 需做 |
+| 登录门户路由 | 网关反代到各实例端口 | dsh-user+gateway | 多站点路由 |
+| 实例内多用户 | 不做（一用户一实例） | **有**（dsh-user） | 保留（差异化） |
 
-## Alternatives
+## 遗留
 
-- 用社区散件拼（deploy/update/remote 各自单机插件）：无一体化方案，且各是单机视角 → 不满足主端统一管理。
-- 对等网拓扑（B）：无中心更"同事互帮"，但 console 已是唯一知道全部成员处、且是 natural 调度点 → 不选，v1 星型。
-- 同 owner 自动互信（信任 A）：省事但"B 凭什么帮我干"无边界 → 不选，邀请制。
+- 是否逐项落地（建户/实例/Key/门户路由）按功能拆 worktree 推进；
+  先补 community-reference.md 的社区方案调研（AnkoCD 等）与本文档对照。
 
-## Consequences
+## 早期内容（2026-09-03 原愿景，已部分取代）
 
-- dsh-console 从"管理"扩展为"**集群控制台**"（档案/生命周期/部署编排 + 统一升级）——符合其既定定位（管理组件自研主体）。
-- v1 全是"补 UI/补链路"（bootstrap 脚本已实现，deploy/upgrade 指令已有），**不需要发明新机制**——是现有地基的整合。
-- v2（远程工作区）是最难项（跨实例会话共享，官方无概念），v1 用跳转替代（用户接受）。
-- v3（自主协同）是最终愿景，v1/v2 的部署+感知+升级是它的前提（先让多 dsh 存在且可管，再谈协同）。
-- 后续推进时：v1 各能力按功能拆 worktree；本 note 从 proposed → implemented（逐项落地时更新）。
-
-相关：[daemon-host-supervisor](../../implemented/architecture/2026-08-22-daemon-host-supervisor.md) · [profile-matrix](../../implemented/process/2026-08-21-profile-matrix.md)
+原 v1（部署/升级/跳转）+ v2（远程工作区）+ v3（自主协同）愿景与 A/C/B
+决策记录如下，v1 的"便捷跳转"（quick-nav 实现）与"统一升级"仍有效且
+是"管理多实例"的组成部分；v3 自主协同按本修正搁置。
