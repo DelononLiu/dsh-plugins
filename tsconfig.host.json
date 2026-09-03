@@ -2,8 +2,9 @@
   // Host aggregate for Typert generation（官方 WorkspaceAnalyzer 需求）。
   // 经 references 指向各包 tsconfig.json——generator 的 loadRegistrations
   // 只读 projectReferences 发现包。typert-protocol 为 vendored 源码
-  // （构建期 @Remote 符号解析必需）。paths 仅此配置生效——包的 tsc
-  // 编译用 node_modules 解析 protocol（npm 已装），不受源码干扰。
+  // （构建期 @Remote 符号解析必需：generator 的 isTypeMetaSymbol 要求符号
+  // 声明位于 workspace 注册包内）。paths 仅此配置生效——包的 tsc 编译用
+  // node_modules 解析 protocol（npm 已装 rc.1），不受源码干扰。
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,

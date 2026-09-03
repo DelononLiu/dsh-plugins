@@ -3,10 +3,10 @@
   "id": "dsh-distro-web",
   "name": "dsh 团队发行包（web：开发+正式）",
   "version": "0.0.0",
-  "kernel": "@deepseek-ai/dsh@0.1.2-alpha.5",
+  "kernel": "@deepseek-ai/dsh@0.1.2-rc.1",
   "bundles": {
-    "@deepseek-ai/dsh-base": "0.1.2-alpha.5",
-    "@deepseek-ai/dsh-web-app": "0.1.2-alpha.5",
+    "@deepseek-ai/dsh-base": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
     "dsh-user": "0.0.0",
     "dsh-channel": "0.0.0",
     "dsh-console": "0.0.0",
