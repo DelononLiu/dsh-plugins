@@ -14,7 +14,7 @@
 
 import { createElement } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest } from 'dsh-console/types'
+import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, UpgradeBatchResult } from 'dsh-console/types'
 import type { BrokerStatusView } from 'dsh-channel/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
@@ -93,17 +93,29 @@ export function apply(ctx: ClientContext): void {
               const result = await ns!.brokerStatus()
               return result.ok ? result.value : { connected: false, reason: result.error.message, agents: [], queueCount: 0 }
             },
-            bootstrapHost: async (instanceId, hostAddr, version) => {
+            bootstrapHost: async (instanceId, hostAddr, version, alias) => {
               await consoleReady
-              let ns: { bootstrapHost(id: string, h: string, v: string): Promise<BootstrapResult> }
+              let ns: { bootstrapHost(id: string, h: string, v: string, a: string): Promise<{ ok: boolean; value: BootstrapResult; error: { code: string; message: string } }> }
               await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
-              return ns!.bootstrapHost(instanceId, hostAddr, version ?? '')
+              const result = await ns!.bootstrapHost(instanceId, hostAddr, version ?? '', alias ?? '')
+              if (!result.ok) throw new Error(`console.bootstrapHost failed: ${result.error.code}: ${result.error.message}`)
+              return result.value
             },
             deployInstance: async (request) => {
               await consoleReady
-              let ns: { deployInstance(req: DeployInstanceRequest): Promise<ControlResult> }
+              let ns: { deployInstance(req: DeployInstanceRequest): Promise<{ ok: boolean; value: ControlResult; error: { code: string; message: string } }> }
               await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
-              return ns!.deployInstance(request)
+              const result = await ns!.deployInstance(request)
+              if (!result.ok) throw new Error(`console.deployInstance failed: ${result.error.code}: ${result.error.message}`)
+              return result.value
+            },
+            upgradeInstances: async (instanceIds, version) => {
+              await consoleReady
+              let ns: { upgradeInstances(ids: string[], v: string): Promise<{ ok: boolean; value: UpgradeBatchResult; error: { code: string; message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.upgradeInstances(instanceIds, version)
+              if (!result.ok) throw new Error(`console.upgradeInstances failed: ${result.error.code}: ${result.error.message}`)
+              return result.value
             },
           }
           return ctx.slots.register({

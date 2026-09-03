@@ -88,10 +88,27 @@ export interface BootstrapResult {
   token?: string
   /** 实例 id（agent-<id> 部署物名）。 */
   instanceId?: string
+  /** 主机别名（可选；写入部署物 .dsh-alias，随引导命令传到目标机）。 */
+  alias?: string
   /** 生成的 agent profile 目录名。 */
   profileDir?: string
   /** SSH 引导命令序列（scp 推 profile → ssh 起 headless daemon → 注册）。 */
   sshCommands?: string[]
+}
+
+/** 升级批次条目结果（单实例；console 编排视角：下发/路由结果）。 */
+export interface UpgradeItemResult {
+  /** 实例 id。 */
+  instanceId: string
+  /** 下发/路由是否成功（ok=true 仅代表已交给守护执行；完成经实例状态/事件呈现）。 */
+  ok: boolean
+  /** 失败原因（未路由/守护不可达等）。 */
+  error?: string
+}
+
+/** 统一升级批次结果（一次选多个实例 → 各实例下发结果）。 */
+export interface UpgradeBatchResult {
+  results: UpgradeItemResult[]
 }
 
 /**

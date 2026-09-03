@@ -26,7 +26,7 @@ import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 import { spawn, exec, type ChildProcess } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, openSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { join } from 'node:path'
@@ -36,6 +36,7 @@ import { connect } from 'node:net'
 // index 本地引用经 import type，re-export 供外部消费。
 import type {
   BootstrapResult, ControlResult, ConsoleInstanceView, DeployInstanceRequest, HostRecord, InstanceRecord, InstanceType,
+  UpgradeBatchResult, UpgradeItemResult,
 } from './types.ts'
 export type * from './types.ts'
 export type { BootstrapResult, ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType } from './types.ts'
@@ -163,8 +164,8 @@ export function resolveControlRoute(
   }
 }
 
-/** per-instance 操作状态（busy 锁：防并发指令交错；start/restart 共用）。 */
-type InstanceOp = 'starting' | 'restarting'
+/** per-instance 操作状态（busy 锁：防并发指令交错；start/restart/upgrading 共用）。 */
+type InstanceOp = 'starting' | 'restarting' | 'upgrading'
 
 /** 等待毫秒。 */
 function sleep(ms: number): Promise<void> {
@@ -241,11 +242,21 @@ export class ConsoleService extends TypertRemoteService {
   private static readonly PROBE_INTERVAL_MS = 15_000
   /** 直连探测请求超时（ms）：目标 hang 时中止，避免挂起请求堆积。 */
   private static readonly PROBE_TIMEOUT_MS = 5_000
+  /** 升级：快照保留份数（滚动删旧；最新一份即回滚点）。 */
+  private static readonly UPGRADE_SNAPSHOT_KEEP = 3
+  /** 升级：kill 旧进程后等待退出的宽限（ms），超时补 SIGKILL。 */
+  private static readonly UPGRADE_EXIT_MS = 8_000
+  /** 升级：重启后健康探测轮询上限（500ms/轮，共 40s）。 */
+  private static readonly UPGRADE_PROBE_LIMIT = 80
+  /** 升级：无端口实例 spawn 后视为健康的等待宽限（ms）。 */
+  private static readonly UPGRADE_HEALTH_GRACE_MS = 15_000
 
   /** spawn 实现（测试可替换为伪子进程；生产 = node:child_process.spawn）。 */
   static spawnImpl: typeof spawn = spawn
   /** lsof 执行实现（测试可替换；生产 = node:child_process.exec）。 */
   static execImpl: typeof exec = exec
+  /** 测试钩子：快照后/应用前抛错，验证升级失败自动回滚（生产不设置）。 */
+  static upgradeApplyError?: Error
 
   /**
    * 解析本进程启动用的 dsh 命令（daemon 拉起实例时用它，保证同内核版本）。
@@ -322,6 +333,20 @@ export class ConsoleService extends TypertRemoteService {
     this.unsubscribe = ctx.channel.subscribe('task', (event) => {
       if (event.type.startsWith('system.')) {
         this.postSystemMessage(event.type, event.payload as Record<string, unknown>)
+        // 升级结果事件 → 同步档案版本（守护完成/回滚后的权威结果）。
+        if (event.type === 'system.upgrade.result') {
+          const payload = (event.payload ?? {}) as { instanceId?: string; ok?: boolean; version?: string }
+          if (typeof payload.instanceId === 'string' && typeof payload.version === 'string') {
+            const record = this.getInstanceRecord(payload.instanceId)
+            if (record) {
+              this.setInstanceRecord({
+                ...record,
+                version: payload.version,
+                health: payload.ok ? 'upgraded' : (record.health ?? 'rollback'),
+              })
+            }
+          }
+        }
       }
     })
     ctx.effect(() => this.unsubscribe)
@@ -562,6 +587,12 @@ export class ConsoleService extends TypertRemoteService {
         }
         this.daemonRestart(instanceId, spec)
         break
+      case 'upgrade': {
+        // 统一升级：daemon 事务执行（快照→对齐发行包源→滚动重启→健康探测→失败回滚）。
+        const version = typeof payload.version === 'string' ? payload.version : ''
+        void this.daemonUpgrade(instanceId, spec, version)
+        break
+      }
       default:
         console.log(`[dsh-console/daemon] 收到 ${from} 的 ${command.type} 指令（v1 占位）`)
     }
@@ -685,6 +716,192 @@ export class ConsoleService extends TypertRemoteService {
   /** 释放实例操作锁。 */
   private opEnd(instanceId: string): void {
     this.ops.delete(instanceId)
+  }
+
+  // --- daemon 角色：统一升级事务（快照 → 对齐发行包源 → 滚动重启 → 健康探测 → 失败自动回滚） ---
+
+  /**
+   * 升级实例发行包（daemon 执行面，handleDaemonControl 'upgrade' 入口）。事务语义：
+   * 1. 快照实例 profile 发行包（滚动保留 {@link UPGRADE_SNAPSHOT_KEEP} 份，最新一份即回滚点）；
+   * 2. reconcile：从守护发行包源（config.templateHome 对应 profile）重拷发行包
+   *    （package.json/cordis.yml/node_modules…），**保留实例 patch**
+   *    （cordis.patch.yml——端口/令牌/身份不动），写版本标记 .dsh-release.json；
+   * 3. 滚动重启实例 + 健康探测（有端口 → 探测监听；无端口 → 固定宽限）；
+   * 4. 任一步失败 → 自动回滚最近快照；应用已改动时回滚后重启。
+   * 结果经 channel task 平面 'system.upgrade.result' 事件回流（console 收 inbox + 档案版本同步）。
+   * busy 锁全程持有（upgrade/restart/start 对同实例互斥）。
+   */
+  private async daemonUpgrade(instanceId: string, spec: LaunchSpec, version: string): Promise<void> {
+    if (!this.opBegin(instanceId, 'upgrading')) {
+      console.log(`[dsh-console/daemon] ${instanceId} 有操作进行中，忽略 upgrade`)
+      return
+    }
+    const homeProfile = join(spec.dshHome, 'profiles', spec.profile)
+    try {
+      if (!existsSync(homeProfile)) {
+        console.log(`[dsh-console/daemon] 升级 ${instanceId} 失败：实例 home 不存在（${homeProfile}）`)
+        return
+      }
+      // 1. 快照（升级前状态 = 回滚点）。
+      const snapRoot = join(spec.dshHome, '.dsh-upgrade-snapshots', instanceId)
+      const snapshot = this.saveReleaseSnapshot(snapRoot, homeProfile)
+      let applied = false
+      try {
+        // 2. reconcile 到守护发行包源。
+        this.applyReleaseFromTemplate(homeProfile, instanceId, spec, version)
+        if (ConsoleService.upgradeApplyError) throw ConsoleService.upgradeApplyError
+        applied = true
+        console.log(`[dsh-console/daemon] 升级 ${instanceId}：发行包已对齐守护源（version=${version || '当前'}），滚动重启`)
+        // 3. 滚动重启 + 健康探测。
+        await this.restartAfterUpgrade(instanceId, spec)
+        this.emitUpgradeResult(instanceId, version, true)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.log(`[dsh-console/daemon] 升级 ${instanceId} 失败（${message}），自动回滚快照`)
+        // 4. 失败自动回滚：恢复最近快照；发行包已被替换过 → 回滚后重启（旧进程已停）。
+        try {
+          this.restoreReleaseSnapshot(snapshot, homeProfile)
+          if (applied) await this.restartAfterUpgrade(instanceId, spec)
+          this.emitUpgradeResult(instanceId, version, false, message, true)
+        } catch (rollbackError) {
+          console.log(`[dsh-console/daemon] 升级 ${instanceId} 回滚也失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+          this.emitUpgradeResult(instanceId, version, false, `升级失败且回滚失败: ${message}`, false)
+        }
+      }
+    } finally {
+      this.opEnd(instanceId)
+    }
+  }
+
+  /**
+   * 快照实例 profile 发行包到 snapRoot/<ts>/（滚动保留 {@link UPGRADE_SNAPSHOT_KEEP} 份，
+   * 按时间戳名排序删最旧）。返回本次快照目录。
+   */
+  private saveReleaseSnapshot(snapRoot: string, homeProfile: string): string {
+    mkdirSync(snapRoot, { recursive: true })
+    const target = join(snapRoot, String(Date.now()))
+    cpSync(homeProfile, target, { recursive: true })
+    const dirs = readdirSync(snapRoot).filter((d) => /^\d+$/.test(d)).sort((a, b) => Number(b) - Number(a))
+    for (const stale of dirs.slice(ConsoleService.UPGRADE_SNAPSHOT_KEEP)) {
+      rmSync(join(snapRoot, stale), { recursive: true, force: true })
+    }
+    return target
+  }
+
+  /** 回滚：以快照目录整体替换实例 profile（rm + cp）。 */
+  private restoreReleaseSnapshot(snapshot: string, homeProfile: string): void {
+    rmSync(homeProfile, { recursive: true, force: true })
+    mkdirSync(homeProfile, { recursive: true })
+    cpSync(snapshot, homeProfile, { recursive: true })
+  }
+
+  /**
+   * reconcile：从守护发行包源（config.templateHome 的对应 profile）重拷发行包条目到
+   * 实例 profile。**跳过实例 patch（cordis.patch.yml）与版本标记**——身份/端口/令牌
+   * 属于实例化值，不随发行包更新；无发行包源 → 抛错（触发回滚路径）。
+   */
+  private applyReleaseFromTemplate(homeProfile: string, instanceId: string, spec: LaunchSpec, version: string): void {
+    const template = this.config.templateHome
+    const source = template !== undefined && template !== '' ? join(template, 'profiles', spec.profile) : ''
+    if (source === '' || !existsSync(source)) {
+      throw new Error('守护未配置发行包源（config.templateHome 或其 profile 不存在）')
+    }
+    for (const name of readdirSync(source)) {
+      if (name === 'cordis.patch.yml' || name === '.dsh-release.json') continue
+      const src = join(source, name)
+      const dst = join(homeProfile, name)
+      rmSync(dst, { recursive: true, force: true })
+      cpSync(src, dst, { recursive: true })
+    }
+    writeFileSync(join(homeProfile, '.dsh-release.json'), JSON.stringify({ version, at: Date.now() }, null, 2) + '\n')
+    console.log(`[dsh-console/daemon] ${instanceId} 发行包对齐自 ${source}`)
+  }
+
+  /**
+   * 升级用滚动重启：停旧进程（守护子进程 kill 等退出；非守护拉起的在线实例走
+   * 本机端口定位 kill 等释放）→ 以已对齐的发行包 spawn → 健康确认。
+   */
+  private async restartAfterUpgrade(instanceId: string, spec: LaunchSpec): Promise<void> {
+    const child = this.children.get(instanceId)
+    if (child !== undefined && child.exitCode === null) {
+      await this.stopChildWait(instanceId, child)
+    } else if (this.isInstanceOnline(instanceId)) {
+      const port = spec.port
+      if (port === undefined) throw new Error(`实例在线但无端口信息，无法重启（${instanceId}）`)
+      this.killPortProcess(instanceId)
+      for (let i = 0; i < ConsoleService.STOP_POLL_LIMIT && !(await isPortFree(port)); i++) {
+        await sleep(500)
+      }
+    }
+    this.daemonStart(instanceId, spec)
+    await this.waitUpgradeHealthy(instanceId, spec)
+  }
+
+  /** kill 守护子进程并等退出（SIGTERM → 宽限 SIGKILL → watchdog 兜底解锁，防永久挂起）。 */
+  private stopChildWait(instanceId: string, child: ChildProcess): Promise<void> {
+    return new Promise((resolve) => {
+      if (child.exitCode !== null) {
+        resolve()
+        return
+      }
+      const grace = setTimeout(() => {
+        if (child.exitCode === null) child.kill('SIGKILL')
+      }, ConsoleService.UPGRADE_EXIT_MS)
+      grace.unref?.()
+      const watchdog = setTimeout(() => {
+        clearTimeout(grace)
+        console.log(`[dsh-console/daemon] ${instanceId} 升级停旧进程超时（进程未退出），继续回滚路径`)
+        resolve()
+      }, ConsoleService.RESTART_WATCHDOG_MS)
+      watchdog.unref?.()
+      child.once('exit', () => {
+        clearTimeout(grace)
+        clearTimeout(watchdog)
+        resolve()
+      })
+      child.kill('SIGTERM')
+    })
+  }
+
+  /** 升级后健康确认：有端口 → 轮询监听（最多 40s）；无端口 → 固定宽限。
+   * 探测超时但守护子进程仍存活 → 视为健康（监听可能慢于探测窗口）。 */
+  private async waitUpgradeHealthy(instanceId: string, spec: LaunchSpec): Promise<void> {
+    const port = spec.port
+    if (port === undefined) {
+      await sleep(ConsoleService.UPGRADE_HEALTH_GRACE_MS)
+      return
+    }
+    for (let i = 0; i < ConsoleService.UPGRADE_PROBE_LIMIT; i++) {
+      if (!(await isPortFree(port))) {
+        console.log(`[dsh-console/daemon] ${instanceId} 升级后健康：http://127.0.0.1:${port} 监听中`)
+        return
+      }
+      await sleep(500)
+    }
+    const child = this.children.get(instanceId)
+    if (child !== undefined && child.exitCode === null) {
+      console.log(`[dsh-console/daemon] ${instanceId} 升级后探测超时但进程存活，视为健康`)
+      return
+    }
+    throw new Error(`升级后健康探测超时（http://127.0.0.1:${port} 未监听，进程已退出）`)
+  }
+
+  /** 升级结果经 task 平面回流（console 订阅 → inbox + 档案版本同步）。 */
+  private emitUpgradeResult(instanceId: string, version: string, ok: boolean, error?: string, rolledBack?: boolean): void {
+    try {
+      this.ctx.channel.emit('task', 'system.upgrade.result', {
+        owner: 'admin',
+        sender: this.ctx.channel.relay?.agent ?? 'daemon',
+        instanceId,
+        version,
+        ok,
+        error,
+        rolledBack,
+        at: Date.now(),
+      })
+    } catch {
+      // 事件面不可用（无订阅/无 relay）：完成态以实例状态（在线/版本）呈现。
+    }
   }
 
   /**
@@ -985,6 +1202,43 @@ export class ConsoleService extends TypertRemoteService {
   }
 
   /**
+   * 统一升级批次（typert @Remote）：多选实例 → 逐实例路由到其守护宿主
+   * （launch.host / 档案 host），下发 'upgrade' 指令（payload 带 instanceId +
+   * 目标版本）。守护执行事务（快照→对齐发行包源→滚动重启→失败回滚，见
+   * {@link daemonUpgrade}）。ok=true 仅代表已下发——完成态经实例状态/
+   * 'system.upgrade.result' 事件呈现。
+   * @param instanceIds - 目标实例 id 列表（普通实例；守护本体/管理端自身排除）。
+   * @param version - 目标发行包版本（记录值；守护以本机发行包源为实）。
+   */
+  @Remote
+  upgradeInstances(instanceIds: string[], version: string): UpgradeBatchResult {
+    const selfId = this.ctx.channel.relay?.agent
+    const results: UpgradeItemResult[] = instanceIds.map((instanceId) => {
+      if (isHostAgent(instanceId)) {
+        return { instanceId, ok: false, error: '守护主机本体不支持升级（v1）：请升级其下实例' }
+      }
+      if (selfId !== undefined && instanceId === selfId) {
+        return { instanceId, ok: false, error: '管理端自身不可升级（v1）' }
+      }
+      if (version === '') return { instanceId, ok: false, error: '目标版本为空' }
+      const record = this.getInstanceRecord(instanceId)
+      const daemonAgent = this.config.launch?.[instanceId]?.host ?? record?.host
+      if (daemonAgent === undefined || daemonAgent === '') {
+        return { instanceId, ok: false, error: '无守护宿主（launch/档案未配 host）' }
+      }
+      if (daemonAgent === instanceId) {
+        return { instanceId, ok: false, error: '守护不能升级自身（launch 配置 host 指向自己）' }
+      }
+      if (this.ctx.channel.get(daemonAgent) === undefined) {
+        return { instanceId, ok: false, error: `目标守护 ${daemonAgent} 未注册` }
+      }
+      this.ctx.channel.sendControl(daemonAgent, { type: 'upgrade', payload: { instanceId, version } })
+      return { instanceId, ok: true }
+    })
+    return { results }
+  }
+
+  /**
    * 经 callRemote 调目标实例/守护的 console.controlInstance（typert 跨实例 RPC，
    * 目标侧本地执行，返回回执）。直连优先、broker 兜底；不可达 → 降级 sendControl。
    */
@@ -1034,14 +1288,16 @@ export class ConsoleService extends TypertRemoteService {
    * @param instanceId - 实例 id（如 web5）。
    * @param hostAddr - SSH 目标（user@host）。
    * @param version - 发行包版本（缺省 rc.1）。
+   * @param alias - 主机别名（可选，''=无；写入部署物 .dsh-alias 随引导传到目标机）。
    * @returns BootstrapResult（ok=false 时 error 说明原因）。
    */
   @Remote
-  bootstrapHost(instanceId: string, hostAddr: string, version: string): BootstrapResult {
+  bootstrapHost(instanceId: string, hostAddr: string, version: string, alias: string): BootstrapResult {
     if (!/^[a-zA-Z0-9-]+$/.test(instanceId)) return { ok: false, error: `非法实例 id: ${instanceId}` }
     if (!hostAddr.includes('@')) return { ok: false, error: `SSH 地址需为 user@host 格式: ${hostAddr}` }
-    // version 必填参数（typert @Remote 参数不能有默认值）；空串视为缺省。
+    // version/alias 必填参数（typert @Remote 参数不能有默认值）；空串视为缺省。
     const ver = version !== '' ? version : '0.1.2-rc.1'
+    const name = typeof alias === 'string' ? alias.trim() : ''
     // 1. 生成实例令牌（32 hex，注入 agent profile 做注册/心跳校验）。
     const token = randomBytes(16).toString('hex')
     // 2. 生成本机 agent profile 目录（发行包最小集 + 令牌配置）。
@@ -1059,6 +1315,7 @@ export class ConsoleService extends TypertRemoteService {
         '# agent 最小集补丁层：实例令牌注入（注册/心跳校验）。',
         `- { "id": "dsh-channel", "config": { "tokens": { "${instanceId}": "${token}" } } }`,
       ].join('\n') + '\n')
+      if (name !== '') writeFileSync(resolve(dir, '.dsh-alias'), name + '\n')
     } catch (error) {
       return { ok: false, error: `生成 agent profile 失败: ${error instanceof Error ? error.message : String(error)}` }
     }
@@ -1068,7 +1325,7 @@ export class ConsoleService extends TypertRemoteService {
       `ssh ${hostAddr} 'cd ~/.dsh-agent-${instanceId} && dsh bootstrap --profile agent-${instanceId} --version ${ver}'`,
       `ssh ${hostAddr} 'echo "agent ${instanceId} 引导完成；已启动 headless host 实例，将向 console 注册"'`,
     ]
-    return { ok: true, token, instanceId, profileDir: dir, sshCommands }
+    return { ok: true, token, instanceId, alias: name, profileDir: dir, sshCommands }
   }
 
   /**

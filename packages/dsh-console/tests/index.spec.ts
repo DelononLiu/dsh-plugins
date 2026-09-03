@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import * as childProcess from 'node:child_process'
-import { rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ChannelService from 'dsh-channel'
@@ -78,24 +79,27 @@ describe('生命周期/部署编排', () => {
     expect(payload.port).toBe(3086)
   })
 
-  it('bootstrapHost 生成令牌 + agent profile + SSH 引导命令', async () => {
+  it('bootstrapHost 生成令牌 + agent profile + SSH 引导命令（含主机别名）', async () => {
     const ctx = await boot()
-    const r = ctx.console.bootstrapHost('web5', 'user@10.0.0.15', '0.1.2-rc.1')
+    const r = ctx.console.bootstrapHost('web5', 'user@10.0.0.15', '0.1.2-rc.1', '工作机 C')
     expect(r.ok).toBe(true)
     expect(r.token).toMatch(/^[0-9a-f]{32}$/)
     expect(r.instanceId).toBe('web5')
+    expect(r.alias).toBe('工作机 C')
     expect(r.profileDir).toBe('agent-web5')
     expect(r.sshCommands?.length).toBe(3)
     expect(r.sshCommands?.[0]).toContain('scp -r agent-web5 user@10.0.0.15')
     expect(r.sshCommands?.[1]).toContain('dsh bootstrap --profile agent-web5 --version 0.1.2-rc.1')
+    // 别名写入部署物（随引导命令 scp 到目标机）。
+    expect(readFileSync(join(process.cwd(), 'agent-web5', '.dsh-alias'), 'utf8')).toContain('工作机 C')
     // 清理：bootstrapHost 写 cwd 的 agent-web5/（测试产物，勿残留）。
     rmSync(join(process.cwd(), 'agent-web5'), { recursive: true, force: true })
   })
 
   it('bootstrapHost 校验非法输入', async () => {
     const ctx = await boot()
-    expect(ctx.console.bootstrapHost('bad/name', 'user@host', '0.1.2-rc.1').ok).toBe(false)
-    expect(ctx.console.bootstrapHost('web5', '10.0.0.15', '0.1.2-rc.1').ok).toBe(false)
+    expect(ctx.console.bootstrapHost('bad/name', 'user@host', '0.1.2-rc.1', '').ok).toBe(false)
+    expect(ctx.console.bootstrapHost('web5', '10.0.0.15', '0.1.2-rc.1', '').ok).toBe(false)
   })
 })
 
@@ -290,6 +294,7 @@ async function bootDaemon(config: Record<string, unknown>): Promise<Context> {
 describe('daemon 角色（主机守护）', () => {
   afterEach(() => {
     ConsoleService.spawnImpl = childProcess.spawn
+    ConsoleService.upgradeApplyError = undefined
     vi.useRealTimers()
   })
 
@@ -470,6 +475,111 @@ describe('daemon 角色（主机守护）', () => {
     ctx.console.deployInstance(req)
     await new Promise((r) => setTimeout(r, 20))
     expect(spawnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('upgrade：快照 → 对齐发行包源 → spawn（离线实例，patch 保留 + 版本标记）', async () => {
+    vi.useFakeTimers()
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-upgrade-ok-'))
+    try {
+      // 发行包源（守护 templateHome）。
+      const src = join(tmp, 'src', 'profiles', 'web')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      writeFileSync(join(src, 'cordis.yml'), '[]\n')
+      // 实例 home（升级前 = OLD）。
+      const inst = join(tmp, 'inst', 'profiles', 'web')
+      mkdirSync(inst, { recursive: true })
+      writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
+      writeFileSync(join(inst, 'cordis.patch.yml'), '# 实例 patch（保留）\n')
+      const spawnSpy = mockSpawn(fakeChild())
+      const ctx = await bootDaemon({ templateHome: join(tmp, 'src') })
+      // 运行时加入未声明实例（channel 无该 id → 离线直启分支，无端口走健康宽限）。
+      ;(ctx.console as unknown as { runtimeInstances: Map<string, { dshHome: string; profile: string }> })
+        .runtimeInstances.set('web9', { dshHome: join(tmp, 'inst'), profile: 'web' })
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'web9', version: '0.1.2-rc.1' } })
+      await vi.advanceTimersByTimeAsync(16_000)
+      // 发行包对齐源；实例 patch 保留；版本标记写入。
+      expect(readFileSync(join(inst, 'package.json'), 'utf8')).toContain('SRC')
+      expect(readFileSync(join(inst, 'cordis.patch.yml'), 'utf8')).toContain('# 实例 patch')
+      expect(JSON.parse(readFileSync(join(inst, '.dsh-release.json'), 'utf8')).version).toBe('0.1.2-rc.1')
+      // 快照一份（含升级前 OLD，即回滚点）。
+      const snapDir = join(tmp, 'inst', '.dsh-upgrade-snapshots', 'web9')
+      const snaps = readdirSync(snapDir)
+      expect(snaps).toHaveLength(1)
+      expect(readFileSync(join(snapDir, snaps[0], 'package.json'), 'utf8')).toContain('OLD')
+      expect(spawnSpy).toHaveBeenCalledWith('dsh', ['--profile', 'web'], expect.objectContaining({
+        env: expect.objectContaining({ DSH_HOME: join(tmp, 'inst') }),
+        detached: true,
+      }))
+    } finally {
+      vi.useRealTimers()
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('upgrade：应用失败自动回滚（快照恢复、无重启、事件带 rolledBack）', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-upgrade-rb-'))
+    try {
+      const src = join(tmp, 'src', 'profiles', 'web')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      const inst = join(tmp, 'inst', 'profiles', 'web')
+      mkdirSync(inst, { recursive: true })
+      writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
+      writeFileSync(join(inst, 'cordis.patch.yml'), '# patch\n')
+      const spawnSpy = mockSpawn(fakeChild())
+      ConsoleService.upgradeApplyError = new Error('注入的应用失败')
+      const ctx = await bootDaemon({ templateHome: join(tmp, 'src') })
+      ;(ctx.console as unknown as { runtimeInstances: Map<string, { dshHome: string; profile: string }> })
+        .runtimeInstances.set('web9', { dshHome: join(tmp, 'inst'), profile: 'web' })
+      const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+      ctx.channel.subscribe('task', (e) => events.push({ type: e.type, payload: e.payload as Record<string, unknown> }))
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'web9', version: '0.1.1-rc.2' } })
+      await new Promise((r) => setTimeout(r, 30))
+      // 回滚恢复升级前状态（发行包与 patch 原样、无版本标记）；失败路径不重启。
+      expect(readFileSync(join(inst, 'package.json'), 'utf8')).toContain('OLD')
+      expect(existsSync(join(inst, '.dsh-release.json'))).toBe(false)
+      expect(spawnSpy).not.toHaveBeenCalled()
+      const result = events.find((e) => e.type === 'system.upgrade.result')
+      expect(result).toBeTruthy()
+      expect(result!.payload.ok).toBe(false)
+      expect(result!.payload.rolledBack).toBe(true)
+      expect(result!.payload.version).toBe('0.1.1-rc.2')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('统一升级（console 编排）', () => {
+  it('upgradeInstances：按 launch.host 路由到守护并下发 payload', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { launch: { host1: { host: 'host1' }, webA: { host: 'host1', addr: 'http://127.0.0.1:3083' } } })
+    const received: Array<{ type: string; payload?: unknown }> = []
+    ctx.channel.onControl((cmd) => received.push({ type: cmd.type, payload: cmd.payload }))
+    const r = ctx.console.upgradeInstances(['webA'], '0.1.2-rc.1')
+    expect(r.results).toHaveLength(1)
+    expect(r.results[0].ok).toBe(true)
+    expect(received[0]?.type).toBe('upgrade')
+    expect((received[0]?.payload as { instanceId: string; version: string }).instanceId).toBe('webA')
+    expect((received[0]?.payload as { instanceId: string; version: string }).version).toBe('0.1.2-rc.1')
+  })
+
+  it('upgradeInstances：守护未注册 / 无宿主 / 守护本体 → 逐条失败并说明', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { launch: { webA: { host: 'labX', addr: 'http://127.0.0.1:3083' } } })
+    const r = ctx.console.upgradeInstances(['webA', 'host1', 'orphan'], '0.1.2-rc.1')
+    expect(r.results).toEqual([
+      { instanceId: 'webA', ok: false, error: '目标守护 labX 未注册' },
+      { instanceId: 'host1', ok: false, error: '守护主机本体不支持升级（v1）：请升级其下实例' },
+      { instanceId: 'orphan', ok: false, error: '无守护宿主（launch/档案未配 host）' },
+    ])
+    // 空目标版本 → 拒绝。
+    const empty = ctx.console.upgradeInstances(['orphan2'], '')
+    expect(empty.results[0]?.ok).toBe(false)
+    expect(empty.results[0]?.error).toContain('目标版本为空')
   })
 })
 
