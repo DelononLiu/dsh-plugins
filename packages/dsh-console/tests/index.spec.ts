@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import * as childProcess from 'node:child_process'
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ChannelService from 'dsh-channel'
 import ConsoleService, {
@@ -68,6 +70,26 @@ describe('生命周期/部署编排', () => {
     expect(ctx.console.getInstanceRecord('instA')?.version).toBe('0.0.0')
     expect(received[0].type).toBe('deploy')
     expect((received[0].payload as { instanceId: string }).instanceId).toBe('instA')
+  })
+
+  it('bootstrapHost 生成令牌 + agent profile + SSH 引导命令', async () => {
+    const ctx = await boot()
+    const r = ctx.console.bootstrapHost('web5', 'user@10.0.0.15', '0.1.2-rc.1')
+    expect(r.ok).toBe(true)
+    expect(r.token).toMatch(/^[0-9a-f]{32}$/)
+    expect(r.instanceId).toBe('web5')
+    expect(r.profileDir).toBe('agent-web5')
+    expect(r.sshCommands?.length).toBe(3)
+    expect(r.sshCommands?.[0]).toContain('scp -r agent-web5 user@10.0.0.15')
+    expect(r.sshCommands?.[1]).toContain('dsh bootstrap --profile agent-web5 --version 0.1.2-rc.1')
+    // 清理：bootstrapHost 写 cwd 的 agent-web5/（测试产物，勿残留）。
+    rmSync(join(process.cwd(), 'agent-web5'), { recursive: true, force: true })
+  })
+
+  it('bootstrapHost 校验非法输入', async () => {
+    const ctx = await boot()
+    expect(ctx.console.bootstrapHost('bad/name', 'user@host', '0.1.2-rc.1').ok).toBe(false)
+    expect(ctx.console.bootstrapHost('web5', '10.0.0.15', '0.1.2-rc.1').ok).toBe(false)
   })
 })
 

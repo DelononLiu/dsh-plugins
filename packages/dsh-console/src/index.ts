@@ -22,22 +22,23 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import { isHostAgent, signRequest, type ControlCommand, type InstanceIdentity } from 'dsh-channel'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 import { spawn, exec, type ChildProcess } from 'node:child_process'
-import { mkdirSync, openSync } from 'node:fs'
+import { mkdirSync, openSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { resolve } from 'node:path'
 import { join } from 'node:path'
 import { connect } from 'node:net'
 
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则）——唯一来源，
 // index 本地引用经 import type，re-export 供外部消费。
 import type {
-  ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType,
+  BootstrapResult, ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType,
 } from './types.ts'
 export type * from './types.ts'
-export type { ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType } from './types.ts'
+export type { BootstrapResult, ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType } from './types.ts'
 
 /** 系统事件消息（inbox，聚焦系统级消息——升级/任务/健康/部署）。 */
 export interface InboxMessage {
@@ -874,6 +875,51 @@ export class ConsoleService extends TypertRemoteService {
       return
     }
     this.offlineOverride.set(instanceId, { op: command, ts: Date.now() })
+  }
+
+  /**
+   * 部署新主机（半自动引导，typert @Remote）：生成本机 agent 部署物
+   * （profile 目录 + 实例令牌）与 SSH 引导命令序列，返回给 UI 展示——
+   * 用户复制执行（scp 推 profile → ssh 起 headless daemon → 注册）。
+   * 与 scripts/bootstrap/agent.mjs 同逻辑（管理端本地生成，不执行 SSH）。
+   * @param instanceId - 实例 id（如 web5）。
+   * @param hostAddr - SSH 目标（user@host）。
+   * @param version - 发行包版本（缺省 rc.1）。
+   * @returns BootstrapResult（ok=false 时 error 说明原因）。
+   */
+  @Remote
+  bootstrapHost(instanceId: string, hostAddr: string, version: string): BootstrapResult {
+    if (!/^[a-zA-Z0-9-]+$/.test(instanceId)) return { ok: false, error: `非法实例 id: ${instanceId}` }
+    if (!hostAddr.includes('@')) return { ok: false, error: `SSH 地址需为 user@host 格式: ${hostAddr}` }
+    // version 必填参数（typert @Remote 参数不能有默认值）；空串视为缺省。
+    const ver = version !== '' ? version : '0.1.2-rc.1'
+    // 1. 生成实例令牌（32 hex，注入 agent profile 做注册/心跳校验）。
+    const token = randomBytes(16).toString('hex')
+    // 2. 生成本机 agent profile 目录（发行包最小集 + 令牌配置）。
+    const dir = `agent-${instanceId}`
+    try {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(resolve(dir, 'package.json'), JSON.stringify({
+        name: `dsh-agent-${instanceId}`,
+        private: true,
+        version: ver,
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+      }, null, 2) + '\n')
+      writeFileSync(resolve(dir, 'cordis.yml'), '[]\n')
+      writeFileSync(resolve(dir, 'cordis.patch.yml'), [
+        '# agent 最小集补丁层：实例令牌注入（注册/心跳校验）。',
+        `- { "id": "dsh-channel", "config": { "tokens": { "${instanceId}": "${token}" } } }`,
+      ].join('\n') + '\n')
+    } catch (error) {
+      return { ok: false, error: `生成 agent profile 失败: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    // 3. SSH 引导命令（scp 推 profile → ssh 起 headless daemon）。
+    const sshCommands = [
+      `scp -r ${dir} ${hostAddr}:~/.dsh-agent-${instanceId}`,
+      `ssh ${hostAddr} 'cd ~/.dsh-agent-${instanceId} && dsh bootstrap --profile agent-${instanceId} --version ${ver}'`,
+      `ssh ${hostAddr} 'echo "agent ${instanceId} 引导完成；已启动 headless host 实例，将向 console 注册"'`,
+    ]
+    return { ok: true, token, instanceId, profileDir: dir, sshCommands }
   }
 
   /**

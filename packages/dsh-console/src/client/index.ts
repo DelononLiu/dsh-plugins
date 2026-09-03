@@ -14,7 +14,7 @@
 
 import { createElement } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { ConsoleInstanceView, ControlResult } from 'dsh-console/types'
+import type { BootstrapResult, ConsoleInstanceView, ControlResult } from 'dsh-console/types'
 import type { BrokerStatusView } from 'dsh-channel/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
@@ -22,7 +22,9 @@ import type {} from 'dsh-console/remote'
 import type {} from 'dsh-channel/remote'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { ConsoleBadge, type ConsoleHost } from './ConsoleBadge'
+import { ConsoleBadge } from './ConsoleBadge'
+import type { ConsoleHost } from './types'
+import './ConsolePanel.css'
 
 /**
  * sidebar.footer.action 插槽类型扩展（官方 sidebar 包未在公开 types 暴露
@@ -62,8 +64,11 @@ export function apply(ctx: ClientContext): void {
           // fiber 里进行（否则 "cannot get property without inject"）——用
           // ctx.inject 进入注入 fiber 抓取 namespace 引用（服务注册在 ownerCtx，
           // 引用在 fiber 结束后仍有效，可缓存）。
+          // 注意：只 $mount consoleRemote——channel remote 已由 dsh-quick-nav 挂载
+          // （channel.list 等），重复 $mount(channelRemote) 会报
+          // "channel/brokerStatus already mounted"。brokerStatus 直接访问已挂载的
+          // ctx.remote.channel（同实例已挂 channel remote 时可用；缺席时降级）。
           const consoleReady = ctx.remote.$mount(consoleRemote)
-          const channelReady = ctx.remote.$mount(channelRemote)
           const host: ConsoleHost = {
             listInstances: async () => {
               await consoleReady
@@ -81,12 +86,18 @@ export function apply(ctx: ClientContext): void {
               return result.ok ? { ok: true } : { ok: false, error: result.error.message }
             },
             brokerStatus: async () => {
-              // broker 是 channel 的传输后端——状态由 channel 暴露。
-              await channelReady
+              // broker 是 channel 的传输后端——状态由 channel 暴露。channel remote
+              // 已由 quick-nav 挂载（不重复 $mount）；此处直接注入取 namespace。
               let ns: { brokerStatus(): Promise<{ ok: boolean; value: BrokerStatusView; error: { message: string } }> }
               await ctx.inject(['remote.channel'], (injected) => { ns = (injected as unknown as { remote: { channel: typeof ns } }).remote.channel })
               const result = await ns!.brokerStatus()
               return result.ok ? result.value : { connected: false, reason: result.error.message, agents: [], queueCount: 0 }
+            },
+            bootstrapHost: async (instanceId, hostAddr, version) => {
+              await consoleReady
+              let ns: { bootstrapHost(id: string, h: string, v: string): Promise<BootstrapResult> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              return ns!.bootstrapHost(instanceId, hostAddr, version ?? '')
             },
           }
           return ctx.slots.register({

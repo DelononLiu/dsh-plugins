@@ -4,18 +4,11 @@
  * host.brokerStatus——broker 状态由 channel 暴露，替换手写 HTTP 端点）。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { BrokerStatusView } from 'dsh-channel/types'
-import type { ConsoleInstanceView, ControlResult } from 'dsh-console/types'
-
-/** ConsoleBadge 数据源（apply 注入：typert remote 面）。 */
-export interface ConsoleHost {
-  listInstances(): Promise<ConsoleInstanceView>
-  controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart'): Promise<ControlResult>
-  brokerStatus(): Promise<BrokerStatusView>
-}
+import { ConsolePanel } from './ConsolePanel'
+import type { ConsoleHost } from './types'
 
 /**
  * 按钮样式：照抄官方设置按钮（dsh-client-ui-settings-general .trigger）——
@@ -68,71 +61,15 @@ interface HostView {
 }
 
 /**
- * 渲染「Console」徽标 + 实例控制面板浮层。
+ * 渲染「Console」徽标触发器——点击打开全屏控制台面板（ConsolePanel）。
  * @param props - 插槽注入的运行时 props。
  */
 export function ConsoleBadge(props: ConsoleBadgeProps & { host: ConsoleHost }): React.JSX.Element {
   const { host } = props
   const [open, setOpen] = useState(false)
-  const [instances, setInstances] = useState<InstanceView[] | null>(null)
-  const [hosts, setHosts] = useState<HostView[] | null>(null)
-  const [broker, setBroker] = useState<BrokerStatusView | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [panelPos, setPanelPos] = useState<{ left: number; bottom: number } | null>(null)
-  const rootRef = useRef<HTMLSpanElement>(null)
-
-  const toggle = (): void => {
-    const next = !open
-    setOpen(next)
-    setNotice(null)
-    if (next) {
-      // fixed 定位：按按钮实际视口坐标，面板在按钮上方弹出（右缘对齐按钮，clamp 视口内）。
-      // 不用 absolute 相对按钮容器——侧栏渲染上下文可能干扰定位。
-      const rect = rootRef.current?.getBoundingClientRect()
-      if (rect) {
-        setPanelPos({
-          left: Math.max(8, Math.min(rect.right - 260, window.innerWidth - 268)),
-          bottom: window.innerHeight - rect.top + 4,
-        })
-      }
-      host.listInstances()
-        .then((d) => {
-          setInstances(d.instances as unknown as InstanceView[])
-          setHosts(d.hosts as unknown as HostView[])
-        })
-        // 区分加载失败与空数据：失败显示原因（认证/网络错误常被误读为"暂无实例"）。
-        .catch((e) => { setInstances([]); setHosts([]); setNotice(`加载失败：${e instanceof Error ? e.message : String(e)}`) })
-      host.brokerStatus()
-        .then((d) => setBroker(d))
-        .catch(() => setBroker(null))
-    }
-  }
-
-  const CONTROL_LABEL: Record<string, string> = { start: '启动', stop: '停止', restart: '重启' }
-  const control = (id: string, name: string, command: 'start' | 'stop' | 'restart'): void => {
-    host.controlInstance(id, command)
-      .then((d) => {
-        setNotice(d.ok ? `已向 ${name} 下发${CONTROL_LABEL[command]}指令` : `失败：${d.error ?? 'unknown'}`)
-      })
-      .catch(() => setNotice(`${CONTROL_LABEL[command]} ${name} 失败（无法连接控制端点）`))
-  }
-
-  // 浮层打开时：点击外部（非本面板）关闭。
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (e: MouseEvent): void => {
-      const target = e.target as HTMLElement
-      if (!target.closest('[data-console-panel]')) setOpen(false)
-    }
-    document.addEventListener('click', onDocClick)
-    return () => document.removeEventListener('click', onDocClick)
-  }, [open])
 
   return (
-    // 包裹层：展开态占满整行（等效 settingsArea 全宽，让按钮 width:calc(100%+4px) 解析成全宽）；
-    // 折叠态内容宽（按钮 36px 圆居中）。
     <span
-      ref={rootRef}
       data-console-panel
       style={{
         position: 'relative',
@@ -145,107 +82,12 @@ export function ConsoleBadge(props: ConsoleBadgeProps & { host: ConsoleHost }): 
         // 纯 CSS 类（与官方设置按钮同机制），零 inline 视觉样式。
         className={props.wide ? 'dsh-console-trigger' : 'dsh-console-trigger dsh-console-trigger--rail'}
         title="dsh-console：实例管理"
-        onClick={toggle}
+        onClick={() => setOpen((v) => !v)}
       >
         <MonitorIcon size={props.wide ? 16 : 18} />
         {props.wide ? '控制台' : null}
       </button>
-      {open && panelPos && (
-        <div
-          style={{
-            position: 'fixed',
-            left: panelPos.left,
-            bottom: panelPos.bottom,
-            zIndex: 2000,
-            width: 260,
-            maxHeight: 'calc(100dvh - 80px)',
-            overflowY: 'auto',
-            padding: '8px 10px',
-            // 风格对齐官方面板（设置面板/浮层同设计语言）：层级背景 + 官方阴影 + 官方圆角/边框层级。
-            borderRadius: 8,
-            border: '1px solid var(--dsw-alias-border-l2)',
-            background: 'var(--dsw-alias-bg-layer-2)',
-            color: 'var(--dsw-alias-label-primary)',
-            fontSize: 12,
-            boxShadow: 'var(--dsw-shadow-lv2)',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>实例管理</div>
-          {instances === null && <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>加载中…</div>}
-          {instances !== null && instances.length === 0 && (
-            <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>暂无实例（channel 未发现）</div>
-          )}
-          {instances !== null && instances.map((inst) => (
-            <div key={inst.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
-              <span style={{ color: inst.status === 'online' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{inst.status === 'online' ? '●' : '○'}</span>
-              {/* 行文本 = 实例名 + 所属主机名（在线状态由圆点表示）；在线且非当前实例、有地址 → 可点击跳转 */}
-              {inst.status === 'online' && !inst.self && inst.addr ? (
-                <a
-                  href={inst.addr}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={`打开 ${inst.name} 的服务`}
-                  style={{
-                    flex: 1,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    color: 'inherit',
-                    textDecoration: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {inst.name}{inst.host ? `（${inst.host}）` : ''}
-                </a>
-              ) : (
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {inst.name}{inst.host ? `（${inst.host}）` : ''}
-                </span>
-              )}
-              {(inst.status === 'online' ? (['stop', 'restart'] as const) : (['start'] as const)).map((cmd) => (
-                <button
-                  key={cmd}
-                  type="button"
-                  onClick={() => control(inst.id, inst.name, cmd)}
-                  style={{
-                    padding: '1px 6px',
-                    borderRadius: 4,
-                    border: '1px solid currentColor',
-                    background: 'transparent',
-                    color: 'inherit',
-                    fontSize: 11,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {CONTROL_LABEL[cmd]}
-                </button>
-              ))}
-            </div>
-          ))}
-          {hosts !== null && hosts.length > 0 && (
-            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--dsw-alias-border-l2)' }}>
-              <div style={{ color: 'var(--dsw-alias-label-secondary)', fontSize: 11, fontWeight: 600, marginBottom: 2 }}>主机守护</div>
-              {hosts.map((host) => (
-                <div key={host.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-                  <span style={{ color: host.status === 'online' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{host.status === 'online' ? '●' : '○'}</span>
-                  <span style={{ flex: 1 }}>{host.name}（{host.status}）</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {broker !== null && (
-            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--dsw-alias-border-l2)' }}>
-              <div style={{ color: 'var(--dsw-alias-label-secondary)', fontSize: 11, fontWeight: 600, marginBottom: 2 }}>Broker 状态</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-                <span style={{ color: broker.connected ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{broker.connected ? '●' : '○'}</span>
-                <span style={{ flex: 1 }}>{broker.connected ? `已连接（在线 ${broker.agents.filter((a) => a.online).length} / ${broker.agents.length}）` : `不可达${broker.reason ? `：${broker.reason}` : ''}`}</span>
-              </div>
-              <div style={{ padding: '2px 0', color: 'var(--dsw-alias-label-secondary)' }}>消息队列：{broker.queueCount < 0 ? '查询失败' : `${broker.queueCount} 条`}</div>
-            </div>
-          )}
-          {notice && <div style={{ marginTop: 6, color: 'var(--dsw-alias-label-secondary)' }}>{notice}</div>}
-        </div>
-      )}
+      {open && <ConsolePanel host={host} onClose={() => setOpen(false)} />}
     </span>
   )
 }

@@ -79,3 +79,17 @@ export interface ConsoleInstanceView {
   /** 主机守护（host<id>，UI 分别呈现）。 */
   hosts: HostRecord[]
 }
+
+/** 新主机引导结果（半自动部署：生成部署物 + SSH 引导命令，用户执行）。 */
+export interface BootstrapResult {
+  ok: boolean
+  error?: string
+  /** 实例令牌（32 hex；仅引导前可见一次）。 */
+  token?: string
+  /** 实例 id（agent-<id> 部署物名）。 */
+  instanceId?: string
+  /** 生成的 agent profile 目录名。 */
+  profileDir?: string
+  /** SSH 引导命令序列（scp 推 profile → ssh 起 headless daemon → 注册）。 */
+  sshCommands?: string[]
+}
