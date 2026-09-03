@@ -392,3 +392,4 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | **dsh-memento / dst-agent-teams** | 待接入 | 选定未接入（v1 无消费方 / 未来成员） |
 | **dsh-prometheus** | 挂起 | 指标总览非 v1 必需——console 总览先用手工数据，指标面后续评估 |
 | **升级回滚** | **统一升级引擎 v1 落地**（2026-09-04，见 [unified-upgrade-engine](../.agents/notes/implemented/architecture/2026-09-04-unified-upgrade-engine.md)） | 升级页 UI 接通：console 批次编排（upgradeInstances）→ daemon 事务（快照保留 3 份 → 对齐发行包源 → 滚动重启 → 健康探测 → 失败自动回滚）→ 'system.upgrade.result' 事件回流；v1 以守护本机发行包源为实（多版本 releases/ 与 patch 适配校验二期） |
+| **多用户隔离实例**（2026-09-04 转正需求，团队共用服务器每人隔离实例） | 方案已出，实现未开始（见 [multi-user-isolated-instances-v1](../.agents/notes/proposed/architecture/2026-09-04-multi-user-isolated-instances-v1.md)） | 会话桥评估结论：v1 走「实例直达链接」捷径（launch token 受控派发，无需门户登录）；待实现 provisionUserInstance（复用 deployInstance）/ 每实例独立 token=个人 Key / 直达链接目录页 |
