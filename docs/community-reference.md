@@ -70,6 +70,39 @@
 | [chenkai2/dsh-daemon](https://github.com/chenkai2/dsh-daemon)（npm @chenkai114） | dsh web 注册为自启自愈后台服务：LaunchAgent/systemd/cron、watchdog 每 30s 健康检查 /health、连续 3 次失败重启（watchdog 为独立生成脚本） | **headless host 常驻/守护**：守护用独立 watchdog+ /health 端点（不依赖插件进程内存存活——"常驻"做成可验证契约）；dsh_daemon_install 等 7 工具让 agent 自助完成守护安装（契合"引导装最小 agent"后自举）。备选 [gitsang/dsh-daemon](https://github.com/gitsang/dsh-daemon)：systemd --user+独立管理 profile、拒绝 --host 0.0.0.0 | MIT |
 | [bruc3van/dsh-desktop](https://github.com/bruc3van/dsh-desktop) | 独立桌面客户端：官方 Web UI 原封不动、长任务常驻托盘、精选插件先审查再安装 | "官方 UI 原封不动+宿主壳层"；**插件先审查再安装的供应链控制**（对应 vendored 审查与发行包 patch 层）；托盘常驻长任务=桌面侧"常驻 agent"最小形态 | MIT |
 
+## 多 dsh 管理与多用户（2026-09-04 调研，对应 dsh-console 扩展 / 多用户需求）
+
+> 背景：用户确认真实需求 = **多用户隔离实例**（团队多人共服务器、每人独立 DSH 实例）；
+> 跨主机"自主协同"（agent 互相派活）判定为**现阶段伪需求/过早，搁置**（官方无概念、
+> 社区无人做决策层协同）。以下为社区"多 dsh"全部相关项目与本层对照。
+
+| 参考 | 定位 | 与本层对照 | License |
+| --- | --- | --- | --- |
+| [AnkoCD/dsh-server-deployment](https://github.com/AnkoCD/dsh-server-deployment)（25★） | 服务器多用户门户：登录 + 每用户**独立 OS 账号**（runuser 降权）+ 独立 DSH 实例(端口/DSH_HOME) + 独立 API Key + 交付文件抽屉 | **多用户隔离实例的最成熟参考**：OS 级隔离（0700 目录 + root 助手仅校验参数降权执行，修复 TOCTOU）；userctl 一条命令建号/改密/删号/预置 Key；网关对用户目录零权限；每用户实例自 3101 递增 | 未标注（自查） |
+| [x102201/deepseek-harness-helper](https://github.com/x102201/deepseek-harness-helper) | 单机无限多开：每实例=独立一套 dsh、可拖拽分屏、.dshpack 环境打包 | 单机多开 launcher（桌面工具，非服务器场景）；.dshpack 打包分发思路可参考 | 未标注 |
+| [dsh-plugins/dsh-launcher](https://github.com/dsh-plugins/dsh-launcher)（30★） | Tauri 桌面 launcher：多版本多实例并存，DSH_HOME 三模式（共享/默认/专属）、插件市场接入（stable/beta/alpha 三通道） | 多实例"DSH_HOME 专属"模式 + 三通道版本管理；桌面壳层（非服务器管理面） | 未标注 |
+| [xswt442-cmd/dsh-instance-manager](https://github.com/xswt442-cmd/dsh-instance-manager) | DSH 常驻插件：侧边栏面板查看并管理**本机** dsh web 实例 | 本机实例管理 UI（不跨主机、不做档案/编排）；"实例列表+启停"交互参考 | 未标注 |
+| [Chinesezjc/dsh-interconnect](https://github.com/Chinesezjc/dsh-interconnect)（35★） | 跨实例消息/事件通道：host 挂 HTTP/WS，暴露 `interconnect_send`/`interconnect_ping` 工具，多实例互通消息+探活（共享密钥 DSH_INTERCONNECT_TOKEN） | ≈ **dsh-channel 通信层**的社区版：只做"agent 间传消息"，**不做实例档案/生命周期/管理面**；密钥/投递语义可对照 | 未标注 |
+| [Lanxi26/dsh-cluster](https://github.com/Lanxi26/dsh-cluster)（@lanxi266/dsh-cluster-plugin） | cluster mode：画布定义 agent 节点+有向边，`cluster_send`/`cluster_spawn` 编排多 agent 消息流（single/multi/any 寻址） | ≈ 我们**已搁置的协同层**（多 agent 编排）；印证协同是独立大课题，社区也在单点试探 | MIT |
+| [lixiaoshuang79/dsh-helm](https://github.com/lixiaoshuang79/dsh-helm) | 多节点控制平面（hub+node-agent）：多机 dsh 出站 WS 注册 hub、HMAC 握手、五级路由、presence、fail-closed——**面向 ChatGPT↔DSH 连接器 MCP 转发** | 有"多机注册/心跳/路由"的控制面骨架，但目标是 MCP 工具路由（ChatGPT 入口），**不是管理 dsh 实例本身**；路由策略/心跳/审计可参考 | 未标注 |
+
+### 关键判断：我们的插件是"分层体系"，不是社区插件的聚合
+
+社区 124+ 插件是**无契约的散件**（每插件干一件事、单机/单面视角、彼此无共享模型）；我们的 6 插件是**有依赖纪律的分层**（user→channel→console 系统/管理组件，desk/tabs/quick-nav UI 层），共享一套概念模型（身份/主机/实例）。对照：
+
+| 我们的能力 | 社区对应物 | 结论 |
+| --- | --- | --- |
+| dsh-user：**用户身份**（人登录+角色+跨实例授权） | AgentConnect/dsh-awiki、muretai（**agent 对 agent** 身份 ANP/邀请/加密） | 语义不同（人 vs agent）；官方无、社区无人做"人的多用户身份" |
+| dsh-channel：跨实例**控制 RPC** | dsh-interconnect、dsh-bridge（agent **闲聊**消息） | 半覆盖（有消息通道，无控制面语义） |
+| dsh-console：多实例**管理面**（档案/生命周期/部署/升级） | xswt442（本机）、AnkoCD（多用户）、dsh-remote-tunnel（端口编排） | **无人做一体化管理面**——差异化空白 |
+| dsh-desk/tabs/quick-nav：UI 组装 | 社区大量 UI 插件（skin/标题/热键/侧栏…） | "像聚合"最明显的层——但我们是**平台/扩展点**而非功能堆叠 |
+
+**一句话**：表象像聚合（社区单点各自存在），本质是带分层纪律的体系；系统/管理组件层
+（user/channel/console）社区无人做完整，是应守的自研边界；UI 层若嫌维护重才考虑
+"聚合社区更优"。
+
+
+
 ## 对未定项的回应
 
 | 未定项 | 社区答案 |
