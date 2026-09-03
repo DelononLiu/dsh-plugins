@@ -9,7 +9,8 @@
 
 set -euo pipefail
 
-DSH_BIN="${DSH_BIN:-/home/long2015/nodejs/node-v24.13.0-linux-x64/bin/dsh}"
+# 内核 0.1.2-alpha.5 独立 CLI（测试环境不与正式 ~/.dsh 共用内核；覆盖用 DSH_BIN）。
+DSH_BIN="${DSH_BIN:-/home/long2015/dsh-alpha5-cli/node_modules/.bin/dsh}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 环境矩阵：name|DSH_HOME|profile|port|DSH_RELAY_AGENT
@@ -41,12 +42,12 @@ find_env() {
 
 is_running() {
   local home="$1"
-  for pid in $(pgrep -f '/bin/dsh --profile' 2>/dev/null || true); do
+  for pid in $(pgrep -f 'dsh --profile' 2>/dev/null || true); do
     local cmd; cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-    # 只认 node 主进程（命令行以 node …/bin/dsh --profile 开头）；排除 bash 包装
-    # /gateway 子进程（同样继承 DSH_HOME 且命令行含 --profile，误匹配会 kill 错对象）。
+    # 只认 node 主进程（命令行以 node …/dsh --profile 开头，兼容 .bin/dsh 与 alpha5 CLI）；
+    # 排除 bash 包装/gateway 子进程（同样继承 DSH_HOME 且命令行含 --profile，误匹配会 kill 错对象）。
     case "$cmd" in
-      node*/bin/dsh*--profile*) ;;
+      node*/dsh*--profile*) ;;
       *) continue ;;
     esac
     if [[ "$(cat /proc/$pid/environ 2>/dev/null | tr '\0' '\n' | grep '^DSH_HOME=' | cut -d= -f2)" == "$home" ]]; then

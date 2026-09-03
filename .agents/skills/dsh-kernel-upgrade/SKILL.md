@@ -70,12 +70,16 @@ overrides:
    - [ ] vendored 全家桶兼容（不兼容 → 查新版：全家桶常随内核发新版，如 0.2.9→0.3.12 适配 alpha.5）
 5. **隔离确认**：验证期间 web2/3/4 全程健康（`curl` 各端口 200）。
 
-## 4. 通过后铺开
+## 4. 通过后铺开（逐环境，不停机）
 
-1. worktree 自检通过（dsh-pre-push-checks）→ 合入 main。
-2. 全局内核升级（选停机窗口）→ dev-test-env.sh 逐个重启 web2/3/4/daemon。
-3. lock/依赖已在步骤 1 bump——确认 profile 模板一致。
-4. **回滚预案**：全局 `npm i -g @deepseek-ai/dsh@<旧版>` 秒回。
+1. worktree 自检通过（dsh-pre-push-checks）→ 合入 main（原子 merge，typecheck 全绿）。
+2. **逐环境切 alpha CLI**（各环境独立 DSH_HOME，与正式内核解耦，可不停机逐个切）：
+   - 更新 `~/.dsh-<env>/profiles/<p>/package.json`：自研 `link:` → **worktree 路径**先验证 → merge 后**切回 main 路径**；删已合并/已删包的残留依赖（如 dsh-console-ui/dsh-nav）；`@deepseek-ai/dsh-tools` → 目标版（`<alpha-cli>` 的 node_modules 无法直接 serve——必须 profile 自己装）。
+   - 在 profile 目录 `pnpm install`（⚠️ 别在仓库根跑——装错位置，daemon 曾因此炸 dsh-tools/dsh-llm 版本错配）。
+   - 重启该环境：`env DSH_HOME=~/.dsh-<env> <alpha-cli>/dsh --profile <p> [--no-open]`，验证 0 错误 + 管理端视角该实例 online。
+3. **全部切完后收尾**：`scripts/dev-test-env.sh` 的 `DSH_BIN` 指向 alpha CLI；删 worktree（`git worktree remove` + `git branch -d`）；`AGENTS.md` 同步内核版本/矩阵/登录入口事实。
+4. lock/依赖已在步骤 1 bump——确认 profile 模板一致。
+5. **回滚预案**：单环境秒回 = 换回旧 CLI + 还原 package.json 备份（`pnpm install` 前先 `cp package.json package.json.<旧版>.bak`）。
 
 ## 常见坑（2026-08 实测）
 
@@ -84,3 +88,4 @@ overrides:
 - 全家桶 vendored 锁旧版会在新内核崩（rc.2 API）——查全家桶是否有适配新版（engines.dsh 字段）。
 - bundle 路径格式随内核变——从页面 boot 图取真实 URL，别猜。
 - client 插件类型污染（host 类型泄漏）——官方靠 tsconfig 分面隔离，单 tsconfig 用局部契约绕过。
+- **alpha.5 起官方 client-connection 给 web 加 BrowserAuth fence**（`?token=` 换 cookie，无用户/角色）——自研 HTTPS gateway 反代会 401（登录成功也进不去），需官方会话桥（见 `.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md`）。
