@@ -26,8 +26,6 @@ export const inject = ['slots', 'sessions', 'settingsScope']
 
 /** 会话 tab 标识标记（区分官方「对话/轨迹」tab）。 */
 const SESSION_MARK = '\u200b'
-/** 固定且当前会话的划线标记。 */
-const ACTIVE_MARK = '\u2060'
 /** 会话 tab 关闭按钮（尾部可见字符）。 */
 const CLOSE_CHAR = ' ×'
 /** 会话 tab 划线类名。 */
@@ -90,15 +88,22 @@ export function apply(ctx: ClientContext): void {
   let pendingDialogView = false
 
   // 划线：会话 tab 模式（非官方视图 且 当前会话固定）→ 会话 tab 划线 +
-  // 抑制官方；否则官方划线。
+  // 抑制官方；否则官方划线。划线目标 = 固定列表里当前会话对应的 tab——
+  // 按 DOM 顺序（第 N 个会话 tab = pinned 第 N 个）定位，不依赖 label 动态
+  // 标记（官方只在 roster/locale 变化时重算 label，current 变化不刷新）。
   const applyActive = (): void => {
     const list = sessionsOf(ctx).list.getSnapshot()
-    const current = list.current
-    const tabMode = !officialView && current !== undefined && pinnedOf().includes(current)
+    const current = list.current !== undefined ? String(list.current) : undefined
+    const pinnedExisting = [...new Set(pinnedOf())].filter((id) => list.ids.includes(id as never))
+    const currentIdx = current === undefined ? -1 : pinnedExisting.indexOf(current)
+    const tabMode = !officialView && currentIdx >= 0
     document.body.classList.toggle(PINNED_ACTIVE_CLASS, tabMode)
+    let sessionTabIdx = 0
     for (const btn of document.querySelectorAll<HTMLButtonElement>('button[role="tab"]')) {
       const text = btn.textContent ?? ''
-      btn.classList.toggle(ACTIVE_CLASS, tabMode && text.includes(ACTIVE_MARK))
+      if (!text.includes(SESSION_MARK)) continue
+      btn.classList.toggle(ACTIVE_CLASS, tabMode && sessionTabIdx === currentIdx)
+      sessionTabIdx++
     }
   }
   // React 重渲染会替换 button DOM，childList/characterData 都能触发重扫。
@@ -224,9 +229,17 @@ export function apply(ctx: ClientContext): void {
       }
       return
     }
-    // 事件 2：其他会话 tab → 会话 tab 划线；切会话由官方 setView + SessionView 执行。
+    // 事件 2：其他会话 tab → 拦截官方 selectView（否则官方把 'session-<目标>'
+    // 写进来源会话的持久化 view 偏好——之后切回来源会话时官方 restoreView
+    // 自动激活它 → SessionView open 又切走 → 死循环）；直接 open 切会话，
+    // 让 'session-*' 永不进官方 view 偏好（官方偏好 = 同会话多视图语义）。
+    e.preventDefault()
+    e.stopPropagation()
     officialView = false
     applyActive()
+    if (sessionId !== undefined) {
+      sessionsOf(ctx).open(sessionId as never)
+    }
   }
   document.addEventListener('click', onClickCapture, true)
   ctx.effect(() => () => document.removeEventListener('click', onClickCapture, true), 'dsh-tabs: tab click delegation')
@@ -297,23 +310,24 @@ export function apply(ctx: ClientContext): void {
           id: `session-${id}`,
           // 官方视图 tab（0/10/…）之后留足空间：会话 tabs 永远排同一行末尾。
           order: 100 + index,
-          // label：会话 tab 显示「编号. 标题」（按固定列表顺序，从 1 起），
-          // 固定且当前的 tab 带划线标记（DOM 层加官方划线样式）+ 不可见标记
-          //（区分官方 tab）+ 尾部可见 ×；会话 id 不写入 label（避免可见）。
+          // label：会话 tab 显示「编号. 标题」+ 不可见会话标记（区分官方
+          // tab）+ 尾部可见 ×；会话 id 不写入 label（避免可见）。划线由
+          // applyActive 按 DOM 顺序定位（不依赖 label 动态标记——官方只在
+          // roster/locale 变化时重算 label，current 变化不刷新）。
           label: () => {
             const listNow = sessionsOf(ctx).list.getSnapshot()
             const pinnedExisting = [...new Set(pinnedOf())].filter((pid) => listNow.ids.includes(pid as never))
             const idx = pinnedExisting.indexOf(id)
             const title = (listNow.byId as Record<string, { displayTitle: string }>)[id]?.displayTitle ?? id
-            const isActive = listNow.current === id && pinnedOf().includes(id)
             const num = idx >= 0 ? `${idx + 1}. ` : ''
-            return `${num}${title}${isActive ? ACTIVE_MARK : ''}${SESSION_MARK}${CLOSE_CHAR}`
+            return `${num}${title}${SESSION_MARK}${CLOSE_CHAR}`
           },
           inject: (): SessionViewInjected => ({
             targetId: id,
             open: (sid: string) => { sessionsOf(ctx).open(sid as never) },
-            // 清来源会话的 slot store：官方 setView('session-<id>') 污染
-            // 当前（来源）会话的 view，残留导致切回时死循环；挂载时清掉。
+            // 会话切换由事件委托直接 open（事件 2 拦截官方 selectView，
+            // 'session-*' 不进官方 view 偏好）；SessionView 仅作残留兜底
+            //（清历史残留偏好，见 SessionView.tsx pruneSessionViewPreference）。
           }),
         }, (props) => createElement(SessionView, props))
         disposers.set(id, dispose)
