@@ -88,9 +88,34 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [deployAlias, setDeployAlias] = useState('')
   const [deployResult, setDeployResult] = useState<{ commands: string[]; error?: string; ok: boolean } | null>(null)
   const [deployBusy, setDeployBusy] = useState(false)
+  // 新建实例（deploy 到已上线 daemon）表单
+  const [showNewInst, setShowNewInst] = useState(false)
+  const [newInstId, setNewInstId] = useState('')
+  const [newInstPort, setNewInstPort] = useState('')
+  const [newInstHost, setNewInstHost] = useState('host1')
+  const [newInstResult, setNewInstResult] = useState<string | null>(null)
+  const [newInstBusy, setNewInstBusy] = useState(false)
+
+  const deployNewInstance = async (): Promise<void> => {
+    const id = newInstId.trim()
+    if (!id || !newInstPort) { setNewInstResult('请填写实例名称与端口'); return }
+    setNewInstBusy(true)
+    try {
+      const r = await host.deployInstance({
+        host: newInstHost, instanceId: id, name: id, version: '0.1.2-rc.1', profile: 'web',
+        dshHome: `/home/long2015/.dsh-${id}`, port: Number(newInstPort), token: Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2),
+        addr: `http://127.0.0.1:${newInstPort}`, env: { DSH_RELAY_AGENT: id, DSH_CONSOLE_ADDR: 'http://127.0.0.1:3082' },
+      })
+      setNewInstResult(r.ok ? `已下发部署 ${id}（daemon 将拉起）` : `部署失败：${r.error ?? 'unknown'}`)
+    } catch (e) {
+      setNewInstResult(`部署调用失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setNewInstBusy(false)
+    }
+  }
 
   const genBootstrap = async (): Promise<void> => {
-    if (!deployHost || !deployName) { setDeployResult({ ok: false, commands: [], error: '请填写主机 SSH 地址与实例名称' }); return }
+    if (!deployHost || !deployName) { setDeployResult({ ok: false, commands: [], error: '请填写目标机器 SSH 地址与守护主机标识' }); return }
     setDeployBusy(true)
     try {
       const r = await host.bootstrapHost(deployName, deployHost, deployVersion || undefined)
@@ -158,9 +183,22 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             <div className="dsh-console-toolbar">
               <span className="hint">{instances.length} 个实例</span>
               <div className="grow" />
-              <button type="button" className="dsh-console-btn">新建实例</button>
+              <button type="button" className="dsh-console-btn" onClick={() => setShowNewInst((v) => !v)}>{showNewInst ? '收起' : '新建实例'}</button>
               <button type="button" className="dsh-console-btn primary" onClick={() => setTab('upgrade')}>批量升级</button>
             </div>
+            {showNewInst && (
+              <div className="dsh-console-toolbar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                <div className="dsh-console-formrow">
+                  <div className="dsh-console-field" style={{ marginBottom: 0 }}><label>实例名称</label><input className="dsh-console-input" placeholder="web6" value={newInstId} onChange={(e) => setNewInstId(e.target.value)} /></div>
+                  <div className="dsh-console-field" style={{ marginBottom: 0 }}><label>端口</label><input className="dsh-console-input" placeholder="3086" value={newInstPort} onChange={(e) => setNewInstPort(e.target.value)} /></div>
+                  <div className="dsh-console-field" style={{ marginBottom: 0 }}><label>目标守护</label><select className="dsh-console-select" value={newInstHost} onChange={(e) => setNewInstHost(e.target.value)}><option value="host1">host1</option></select></div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button type="button" className="dsh-console-btn primary" onClick={() => { void deployNewInstance() }} disabled={newInstBusy}>{newInstBusy ? '部署中…' : '部署实例'}</button>
+                  {newInstResult && <span style={{ fontSize: 12, color: newInstResult.startsWith('已') || newInstResult.startsWith('下发') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{newInstResult}</span>}
+                </div>
+              </div>
+            )}
             {loaded && instances.map((i) => <InstanceRow key={i.id} item={i} host={host} />)}
           </>
         )
@@ -191,10 +229,17 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
       case 'deploy':
         return (
           <>
-            <div className="dsh-console-sect"><h3>部署新主机</h3></div>
+            <div className="dsh-console-sect"><h3>部署新主机 = 引导接入守护（半自动）</h3></div>
+            <div style={{ background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12, padding: '12px 14px', fontSize: 12, lineHeight: 1.9, color: 'var(--dsw-alias-label-secondary)', marginBottom: 18, whiteSpace: 'pre-line' }}>
+              {'本页与「实例 → 新建实例」不重复，是两级流程：\n' +
+                '① 本页：把一台还没接入的新机器引导成「守护主机」（headless daemon，负责在这台机器上托管实例）。' +
+                '填好 SSH 信息点「生成引导命令」，把命令复制到目标机器执行一次即接入（本端不代跑 SSH）。\n' +
+                '② 「实例 → 新建实例」：在已接入的守护主机上，一键自动部署界面实例（无需 SSH，daemon 复用本地发行包拉起）。\n' +
+                '接入后的守护主机出现在「主机 / 守护」页。'}
+            </div>
             <div className="dsh-console-formrow">
-              <div className="dsh-console-field"><label>主机 SSH 地址</label><input className="dsh-console-input" placeholder="user@10.0.0.15" value={deployHost} onChange={(e) => setDeployHost(e.target.value)} /></div>
-              <div className="dsh-console-field"><label>实例名称</label><input className="dsh-console-input" placeholder="web5" value={deployName} onChange={(e) => setDeployName(e.target.value)} /></div>
+              <div className="dsh-console-field"><label>目标机器 SSH 地址</label><input className="dsh-console-input" placeholder="user@10.0.0.15" value={deployHost} onChange={(e) => setDeployHost(e.target.value)} /></div>
+              <div className="dsh-console-field"><label>守护主机标识（agent 名）</label><input className="dsh-console-input" placeholder="host2" value={deployName} onChange={(e) => setDeployName(e.target.value)} /></div>
             </div>
             <div className="dsh-console-formrow">
               <div className="dsh-console-field"><label>发行包版本</label><input className="dsh-console-input" placeholder="0.1.2-rc.1" value={deployVersion} onChange={(e) => setDeployVersion(e.target.value)} /></div>

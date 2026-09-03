@@ -26,7 +26,7 @@ import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 import { spawn, exec, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, openSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, openSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { join } from 'node:path'
@@ -97,6 +97,12 @@ export interface Config {
   instances?: Record<string, LaunchSpec>
   /** daemon 端：本机控制 HTTP 端口（headless 也有 addr，管理端可直连；缺省不开）。 */
   controlPort?: number
+  /**
+   * daemon 端：实例模板 dshHome（deploy 新实例的复制源——含已装发行包
+   * node_modules + profile 骨架）。测试/开发机 = 同机一个完整 dshHome
+   * （如 ~/.dsh-web3）；生产 = 发行包预置的模板 home。
+   */
+  templateHome?: string
 }
 
 /** 运行时 schema。 */
@@ -106,6 +112,7 @@ export const Config = z.object({
   hostId: z.string().default(''),
   instances: z.any().default(undefined),
   controlPort: z.number().default(0),
+  templateHome: z.string().default(''),
 }) as z<Config>
 
 /** 解析控制指令的动作（可测纯函数）：exit=重启/停止；running=已在运行；pending=v1 占位。 */
@@ -625,30 +632,47 @@ export class ConsoleService extends TypertRemoteService {
    * @param token - 实例令牌（channel patch 注入，注册/心跳校验）。
    * @param port - webserver 端口（可选）。
    */
+  /**
+   * 确保实例 dshHome 就绪：**优先复制模板 dshHome**（config.templateHome，
+   * 含已装发行包 node_modules + profile 骨架——Docker 镜像模型），再实例化
+   * patch（端口/身份/令牌）。无模板 → 退化写最小骨架（仅当 dshHome 已由
+   * 其他方式备好发行包时可用，否则实例起不来）。
+   * @param dshHome - 实例数据根（如 ~/.dsh-web6）。
+   * @param profile - profile 名（如 web）。
+   * @param instanceId - 实例 id（身份 env 用）。
+   * @param token - 实例令牌（channel patch 注入，注册/心跳校验）。
+   * @param port - webserver 端口（可选）。
+   */
   private ensureInstanceHome(dshHome: string, profile: string, instanceId: string, token: string, port?: number): void {
-    const profileDir = join(dshHome, 'profiles', profile)
-    mkdirSync(profileDir, { recursive: true })
-    // package.json：引用已装发行包（复用本地 node_modules——不重新安装）。
-    const pkgPath = join(profileDir, 'package.json')
-    if (!existsSync(pkgPath)) {
-      writeFileSync(pkgPath, JSON.stringify({
-        name: `dsh-distro-${instanceId}`,
-        private: true,
-        version: '0.0.0',
-        dependencies: {},
-        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desk', 'dsh-quick-nav', 'dsh-tabs'] } },
-      }, null, 2) + '\n')
+    const homeProfile = join(dshHome, 'profiles', profile)
+    const template = this.config.templateHome
+    const templateProfile = template !== undefined && template !== '' ? join(template, 'profiles', profile) : ''
+    if (templateProfile !== '' && existsSync(templateProfile) && !existsSync(homeProfile)) {
+      // 复制模板 profile（含 node_modules/package.json/cordis.yml/patch 骨架）。
+      mkdirSync(dshHome, { recursive: true })
+      cpSync(templateProfile, homeProfile, { recursive: true })
+      console.log(`[dsh-console/daemon] ${instanceId} 从模板复制发行包: ${templateProfile}`)
+    } else {
+      // 无模板或已存在 → 确保目录 + 最小骨架。
+      mkdirSync(homeProfile, { recursive: true })
+      const pkgPath = join(homeProfile, 'package.json')
+      if (!existsSync(pkgPath)) {
+        writeFileSync(pkgPath, JSON.stringify({
+          name: `dsh-distro-${instanceId}`,
+          private: true,
+          version: '0.0.0',
+          dependencies: {},
+          dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desk', 'dsh-quick-nav', 'dsh-tabs'] } },
+        }, null, 2) + '\n')
+      }
+      const cordisPath = join(homeProfile, 'cordis.yml')
+      if (!existsSync(cordisPath)) writeFileSync(cordisPath, '[]\n')
     }
-    const cordisPath = join(profileDir, 'cordis.yml')
-    if (!existsSync(cordisPath)) writeFileSync(cordisPath, '[]\n')
-    // patch：端口/身份/令牌实例化。
-    const patchLines = [
-      '# 实例 patch（deploy 生成）：身份/端口/令牌。',
-    ]
+    // patch 实例化：端口/身份/令牌（覆盖模板 patch 的实例化值）。
+    const patchLines = ['# 实例 patch（deploy 生成）：身份/端口/令牌。']
     if (port !== undefined) patchLines.push(`- id: webserver\n  config: { host: '127.0.0.1', port: ${port} }`)
     if (token !== '') patchLines.push(`- { "id": "dsh-channel", "config": { "tokens": { "${instanceId}": "${token}" } } }`)
-    const patchPath = join(profileDir, 'cordis.patch.yml')
-    writeFileSync(patchPath, patchLines.join('\n') + '\n')
+    writeFileSync(join(homeProfile, 'cordis.patch.yml'), patchLines.join('\n') + '\n')
   }
 
   /** 尝试占用实例操作锁；已被占用返回 false（调用方忽略新指令）。 */

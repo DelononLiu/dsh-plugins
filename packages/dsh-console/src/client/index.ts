@@ -14,7 +14,7 @@
 
 import { createElement } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { BootstrapResult, ConsoleInstanceView, ControlResult } from 'dsh-console/types'
+import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest } from 'dsh-console/types'
 import type { BrokerStatusView } from 'dsh-channel/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
@@ -98,6 +98,12 @@ export function apply(ctx: ClientContext): void {
               let ns: { bootstrapHost(id: string, h: string, v: string): Promise<BootstrapResult> }
               await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
               return ns!.bootstrapHost(instanceId, hostAddr, version ?? '')
+            },
+            deployInstance: async (request) => {
+              await consoleReady
+              let ns: { deployInstance(req: DeployInstanceRequest): Promise<ControlResult> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              return ns!.deployInstance(request)
             },
           }
           return ctx.slots.register({
