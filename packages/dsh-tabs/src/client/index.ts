@@ -58,7 +58,7 @@ interface TabsSessions {
   open(id: string): void
 }
 function sessionsOf(ctx: { sessions: unknown }): TabsSessions {
-  return sessionsOf(ctx) as TabsSessions
+  return ctx.sessions as TabsSessions
 }
 
 export function apply(ctx: ClientContext): void {
