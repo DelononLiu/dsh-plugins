@@ -38,7 +38,7 @@ pnpm test         # pnpm -r test
 UI                         dsh-desk（布局平台 + 工具入口组装器）· dsh-quick-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
 管理组件                    dsh-console（档案/生命周期/部署编排/inbox，升级回滚为遗留项）+ 社区 dsh-prometheus
 系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· LLM 记忆（社区 dsh-memento）
-内核                        官方 deepseek-harness（0.1.2-alpha.5，2026-09 对齐）
+内核                        官方 deepseek-harness（0.1.2-rc.1，2026-09 对齐）
 ```
 
 - **依赖严格向下**：业务 app→UI→管理组件→系统→内核，禁止反向或跨层依赖；UI 层内部允许聚合依赖（meta 包）。
@@ -61,7 +61,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
 - **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
 - 本项目当前为**已实现 + 部分接入**：6 插件实现（124 测试全绿）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
-- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-alpha.5）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 alpha.5 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态用 `scripts/dev-test-env.sh`。
+- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-rc.1）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 rc.1 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态用 `scripts/dev-test-env.sh`。
 
   | 环境 | DSH_HOME | 启动 | 端口 | 角色 |
   | --- | --- | --- | --- | --- |
@@ -71,7 +71,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
   | daemon | `~/.dsh-daemon` | `DSH_HOME=~/.dsh-daemon dsh --profile daemon` | 无 web（headless） | 守护 host1（broker `http://127.0.0.1:19121`，出站连） |
 
   实例矩阵权威源 = 管理端 web2 的 `dsh-console.launch` 配置（cordis.patch.yml）；quick-nav/console 从 `DSH_CONSOLE_ADDR`（管理端 3082）拉实例表。启动脚本见 `scripts/dev-test-env.sh`。
-  登录入口（alpha.5）：官方 `dsh web` 每次启动打印 `?token=`——浏览器访问换 30 天 cookie 会话（官方 client-connection BrowserAuth，无用户/角色）。**dsh-user 多用户登录走 gateway HTTPS（社区 clarknu/dsh-gateway）**，但 alpha.5 后 gateway 反代被官方 BrowserAuth fence 挡（登录成功也 401）——官方会话桥为 backlog（见 `.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md`）。8080 HTTP 反代已移除（与 3082 重复）。
+  登录入口（rc.1）：官方 `dsh web` 每次启动打印 `?token=`——浏览器访问换 30 天 cookie 会话（官方 client-connection BrowserAuth，无用户/角色）。**dsh-user 多用户登录走 gateway HTTPS（社区 clarknu/dsh-gateway）**，但官方 BrowserAuth fence 挡 gateway 反代（登录成功也 401）——官方会话桥为 backlog（见 `.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md`）。8080 HTTP 反代已移除（与 3082 重复）。
 - **🔴 硬性禁令：禁止启动/触碰正式 web（3080）**（2026-08 用户强调）：3080 是当前 DSH GUI 常驻端口，**绝不**用 `dsh web` 或 `dsh --profile web` 启动（默认 3080），**绝不**修改 `~/.dsh/profiles/web` 的配置（bundles/cordis.patch.yml/package.json）。测试一律走独立 DSH_HOME + 独立端口（3082/3083/3084）。误操作会占用 3080 导致 GUI 冲突或污染正式环境。
 - **client 构建**：声明 dsh.client 的插件必须产出 `lib/client.js`（官方 ModuleLoader closure 格式）——`scripts/build-client.mjs`（esbuild）生成，4 个 UI 插件 build 已接入。
 
@@ -79,7 +79,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 
 - `"type": "module"`，ESM 全栈。
 - `dsh` 字段：client 插件声明 `client.inject`（官方 client 包）+ `client.platform: "web"`；需补丁的声明 `bundle.patch`。
-- **peerDependencies 必列** `@deepseek-ai/cordis`（`^4.0.2`，alpha.5 内核）与所有 inject 目标（对齐官方 alpha.5，如 `0.1.2-alpha.5`）；type-only 引用的内部服务包也放 peerDependencies（发布后 .d.ts 解析需要）。
+- **peerDependencies 必列** `@deepseek-ai/cordis`（`^4.0.2`，rc.1 内核）与所有 inject 目标（对齐官方 rc.1，如 `0.1.2-rc.1`）；type-only 引用的内部服务包也放 peerDependencies（发布后 .d.ts 解析需要）。
 - 内部依赖用 `workspace:*`；exports 含 `"./package.json"` 子路径。
 - 服务端插件：`export const name` + `export function apply(ctx)`；client 入口在 `src/client.ts`。
 

@@ -1,6 +1,6 @@
 ---
 name: dsh-kernel-upgrade
-description: Use when upgrading the dsh kernel / official dependency baseline (e.g. 0.1.1-rc.2 → 0.1.2-alpha.5) in dsh-plugins — run the isolated migration + web5 verification flow that does not disturb the running web2/3/4 test environments
+description: Use when upgrading the dsh kernel / official dependency baseline (e.g. 0.1.2-alpha.5 → 0.1.2-rc.1) in dsh-plugins — run the isolated migration + web5 verification flow that does not disturb the running web2/3/4 test environments
 ---
 
 # dsh 内核升级流程（dsh-plugins）
@@ -89,3 +89,5 @@ overrides:
 - bundle 路径格式随内核变——从页面 boot 图取真实 URL，别猜。
 - client 插件类型污染（host 类型泄漏）——官方靠 tsconfig 分面隔离，单 tsconfig 用局部契约绕过。
 - **alpha.5 起官方 client-connection 给 web 加 BrowserAuth fence**（`?token=` 换 cookie，无用户/角色）——自研 HTTPS gateway 反代会 401（登录成功也进不去），需官方会话桥（见 `.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md`）。
+- **typert-protocol vendored 不可移除**：typert generator 的 `isTypeMetaSymbol` 要求 `@Remote` 符号声明位于 **workspace 注册包内**（registrationForFile 命中）——npm 版声明在 node_modules 里不命中 → 报 "publishes Remote artifacts but has no Remote methods"。vendor 保留 + `tsconfig.host.json` paths/references 指向它。官方若内置了同内容（rc.1 已含 remote-error），vendor 只是构建期镜像，仍不能删。
+- **vendoed 同步官方源码**：升级后对比官方 tag（`packages/typert/protocol/src`）与本地 vendored src，diff 一致即无需动；不一致则用 `git archive dsh-v<ver> packages/typert/protocol/` 同步。
