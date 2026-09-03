@@ -26,7 +26,7 @@ import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 import { spawn, exec, type ChildProcess } from 'node:child_process'
-import { mkdirSync, openSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { join } from 'node:path'
@@ -35,7 +35,7 @@ import { connect } from 'node:net'
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则）——唯一来源，
 // index 本地引用经 import type，re-export 供外部消费。
 import type {
-  BootstrapResult, ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType,
+  BootstrapResult, ControlResult, ConsoleInstanceView, DeployInstanceRequest, HostRecord, InstanceRecord, InstanceType,
 } from './types.ts'
 export type * from './types.ts'
 export type { BootstrapResult, ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType } from './types.ts'
@@ -252,6 +252,12 @@ export class ConsoleService extends TypertRemoteService {
   private unsubscribeControl: (() => void) | undefined
   /** daemon 角色：追踪的子进程（instanceId → 守护拉起的进程）。 */
   private readonly children = new Map<string, ChildProcess>()
+  /**
+   * daemon 角色：运行时实例清单（deploy 动态加入；初始 = config.instances 静态）。
+   * 只读处经 {@link instanceSpec} 查询（静态 + 动态合并）；v1 不持久化——
+   * daemon 重启后由 console 重新下发（期望状态声明，reconcile 语义）。
+   */
+  private readonly runtimeInstances = new Map<string, LaunchSpec>()
   /** per-instance 操作锁（start/restart 进行中；防积压指令交错 spawn）。 */
   private readonly ops = new Map<string, InstanceOp>()
   /** UI 离线覆盖（stop/restart 发出后即时显示 offline，绕开 broker TTL 滞后）。 */
@@ -497,8 +503,13 @@ export class ConsoleService extends TypertRemoteService {
   /** daemon 角色：处理控制指令（只认本机清单内的实例；指令载荷携带 instanceId）。 */
   private handleDaemonControl(command: ControlCommand, from: string): void {
     const payload = (command.payload ?? {}) as Record<string, unknown>
+    // deploy：新实例部署（payload 是完整 DeployInstanceRequest，不走本机清单检查）。
+    if (command.type === 'deploy') {
+      this.daemonDeploy(payload as unknown as DeployInstanceRequest)
+      return
+    }
     const instanceId = typeof payload.instanceId === 'string' ? payload.instanceId : ''
-    const spec = this.config.instances?.[instanceId]
+    const spec = this.instanceSpec(instanceId)
     if (spec === undefined) {
       console.log(`[dsh-console/daemon] 收到 ${from} 的 ${command.type} 指令，但 ${instanceId || '(空)'} 不在本机清单（拒绝）`)
       return
@@ -529,6 +540,97 @@ export class ConsoleService extends TypertRemoteService {
       default:
         console.log(`[dsh-console/daemon] 收到 ${from} 的 ${command.type} 指令（v1 占位）`)
     }
+  }
+
+  /** 查询实例启动规格：静态 config.instances 优先，其次运行时清单（deploy 动态加的）。 */
+  private instanceSpec(instanceId: string): LaunchSpec | undefined {
+    return this.config.instances?.[instanceId] ?? this.runtimeInstances.get(instanceId)
+  }
+
+  /**
+   * daemon 角色：部署新实例（deploy 指令落地）。复用本地已装发行包：
+   * 1. 动态加入运行时清单（静态 config 之外新实例）；
+   * 2. 确保 dshHome 就绪（建 profile 骨架目录）；
+   * 3. daemonStart 拉起（DSH_HOME=<dshHome> dsh --profile <profile>）。
+   * node_modules 复用 daemon 本地发行包（pnpm workspace 同 tree/link）——
+   * 与测试环境 web2/3/4（同一发行包不同 DSH_HOME）同模式。
+   */
+  private daemonDeploy(req: DeployInstanceRequest): void {
+    const { instanceId, profile, dshHome, port, token, env, version } = req
+    if (this.config.role !== 'daemon') {
+      console.log(`[dsh-console] deploy ${instanceId} 目标非 daemon（role=${this.config.role}），忽略`)
+      return
+    }
+    // 已存在（静态清单或已在跑）→ 幂等忽略。
+    if (this.instanceSpec(instanceId) !== undefined) {
+      console.log(`[dsh-console/daemon] ${instanceId} 已在清单，忽略重复 deploy`)
+      return
+    }
+    const spec: LaunchSpec = {
+      dshHome,
+      profile,
+      addr: req.addr,
+      port,
+      env: { ...env, DSH_RELAY_AGENT: env?.DSH_RELAY_AGENT ?? instanceId },
+    }
+    // 动态加入运行时清单（instanceSpec 后续命中）。
+    this.runtimeInstances.set(instanceId, spec)
+    // 令牌注入：patch 实例化由 daemon 落地时写（见 ensureInstanceHome）。
+    try {
+      this.ensureInstanceHome(dshHome, profile, instanceId, token ?? '', port)
+    } catch (error) {
+      this.runtimeInstances.delete(instanceId)
+      console.log(`[dsh-console/daemon] ${instanceId} 建 dshHome 失败: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    console.log(`[dsh-console/daemon] 部署 ${instanceId}（DSH_HOME=${dshHome}，port=${String(port)}）`)
+    // 拉起（busy 锁；拉起后 channel 注册 → console 列表 online）。
+    if (!this.opBegin(instanceId, 'starting')) {
+      console.log(`[dsh-console/daemon] ${instanceId} 有操作进行中，部署后稍后拉起`)
+      return
+    }
+    try {
+      this.daemonStart(instanceId, spec)
+    } finally {
+      this.opEnd(instanceId)
+    }
+  }
+
+  /**
+   * 确保实例 dshHome 就绪：建 profile 骨架目录 + patch 实例化。
+   * 复用**本地已装发行包**（node_modules 不动——web3/web4 同模式：同一
+   * node_modules 不同 DSH_HOME）。profile 骨架 = package.json 引用已装
+   * 发行包 + cordis.yml + patch（端口/身份/令牌）。
+   * @param dshHome - 实例数据根（如 ~/.dsh-web6）。
+   * @param profile - profile 名（如 web）。
+   * @param instanceId - 实例 id（身份 env 用）。
+   * @param token - 实例令牌（channel patch 注入，注册/心跳校验）。
+   * @param port - webserver 端口（可选）。
+   */
+  private ensureInstanceHome(dshHome: string, profile: string, instanceId: string, token: string, port?: number): void {
+    const profileDir = join(dshHome, 'profiles', profile)
+    mkdirSync(profileDir, { recursive: true })
+    // package.json：引用已装发行包（复用本地 node_modules——不重新安装）。
+    const pkgPath = join(profileDir, 'package.json')
+    if (!existsSync(pkgPath)) {
+      writeFileSync(pkgPath, JSON.stringify({
+        name: `dsh-distro-${instanceId}`,
+        private: true,
+        version: '0.0.0',
+        dependencies: {},
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desk', 'dsh-quick-nav', 'dsh-tabs'] } },
+      }, null, 2) + '\n')
+    }
+    const cordisPath = join(profileDir, 'cordis.yml')
+    if (!existsSync(cordisPath)) writeFileSync(cordisPath, '[]\n')
+    // patch：端口/身份/令牌实例化。
+    const patchLines = [
+      '# 实例 patch（deploy 生成）：身份/端口/令牌。',
+    ]
+    if (port !== undefined) patchLines.push(`- id: webserver\n  config: { host: '127.0.0.1', port: ${port} }`)
+    if (token !== '') patchLines.push(`- { "id": "dsh-channel", "config": { "tokens": { "${instanceId}": "${token}" } } }`)
+    const patchPath = join(profileDir, 'cordis.patch.yml')
+    writeFileSync(patchPath, patchLines.join('\n') + '\n')
   }
 
   /** 尝试占用实例操作锁；已被占用返回 false（调用方忽略新指令）。 */
@@ -923,13 +1025,30 @@ export class ConsoleService extends TypertRemoteService {
   }
 
   /**
-   * 部署新实例（模板实例化）：登记档案并下发 deploy 指令。v1 为编排意图
-   * 记录 + 指令回环；实际部署（clone 模板→新 profile→起进程）由 daemon 执行，
-   * 且须把新实例写入守护 instances 清单（见 daemon-host-supervisor note）。
+   * 部署新实例（typert @Remote）：console 声明期望状态 → daemon 复用本地
+   * 已装发行包落地（建 dshHome + patch 实例化 + daemonStart）。
+   * 登记档案（从请求造 InstanceRecord）并下发完整 deploy 请求给 daemon。
+   * @param request - 部署请求（host/instanceId/version/profile/dshHome/port/token/env）。
+   * @returns ok（仅代表已登记下发；实际拉起由 daemon 执行，UI 经实例状态刷新呈现）。
    */
-  deployInstance(record: InstanceRecord): void {
-    this.setInstanceRecord(record)
-    this.ctx.channel.sendControl(record.host, { type: 'deploy', payload: { instanceId: record.id, version: record.version } })
+  @Remote
+  deployInstance(request: DeployInstanceRequest): ControlResult {
+    const { host, instanceId, name, version, addr } = request
+    if (!host || !instanceId || !version) return { ok: false, error: '部署请求缺 host/instanceId/version' }
+    // 登记档案（管理端视角可查；status=offline 等 daemon 拉起后 channel 置 online）。
+    this.setInstanceRecord({
+      id: instanceId,
+      name: name ?? instanceId,
+      addr: addr ?? '',
+      status: 'offline',
+      owner: 'admin',
+      type: 'normal',
+      host,
+      version,
+    })
+    // 下发完整 deploy 请求（daemon 动态加入清单并落地）。
+    this.ctx.channel.sendControl(host, { type: 'deploy', payload: request })
+    return { ok: true }
   }
 
   // --- inbox（系统事件消息，实例级，按 owner 隔离） ---

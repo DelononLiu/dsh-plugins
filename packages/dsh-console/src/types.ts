@@ -93,3 +93,30 @@ export interface BootstrapResult {
   /** SSH 引导命令序列（scp 推 profile → ssh 起 headless daemon → 注册）。 */
   sshCommands?: string[]
 }
+
+/**
+ * 部署新实例请求（console → daemon，期望状态声明）。
+ * daemon 复用本地已装发行包：建 dshHome + patch 实例化 + daemonStart。
+ */
+export interface DeployInstanceRequest {
+  /** 目标 daemon 的 relay agent 名（如 host1）。 */
+  host: string
+  /** 新实例 id（如 web6）。 */
+  instanceId: string
+  /** 实例展示名（缺省 = instanceId）。 */
+  name?: string
+  /** 发行包版本（实例 profile 版本引用）。 */
+  version: string
+  /** 实例 profile 名（如 web）。 */
+  profile: string
+  /** 实例 DSH_HOME 目录（如 ~/.dsh-web6）。 */
+  dshHome: string
+  /** 实例访问地址（跳转用，如 http://127.0.0.1:3086）。 */
+  addr?: string
+  /** 实例访问端口（webserver；如 3086）。 */
+  port?: number
+  /** 实例令牌（32 hex，注册/心跳校验；daemon 写入实例 patch）。 */
+  token: string
+  /** 额外环境变量（如 DSH_RELAY_AGENT/DSH_CONSOLE_ADDR）。 */
+  env?: Record<string, string>
+}

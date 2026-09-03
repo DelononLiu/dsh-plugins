@@ -62,14 +62,20 @@ describe('生命周期/部署编排', () => {
     expect(received).toEqual(['upgrade'])
   })
 
-  it('deployInstance 登记档案并下发 deploy 指令', async () => {
+  it('deployInstance 登记档案并下发 deploy 指令（完整请求）', async () => {
     const ctx = await boot()
     const received: Array<{ type: string; payload: unknown }> = []
     ctx.channel.onControl((cmd) => received.push({ type: cmd.type, payload: cmd.payload }))
-    ctx.console.deployInstance(RECORD)
-    expect(ctx.console.getInstanceRecord('instA')?.version).toBe('0.0.0')
+    ctx.console.deployInstance({
+      host: 'host1', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
+      dshHome: '/tmp/.dsh-web6-test', port: 3086, token: 'tok-web6', env: { DSH_RELAY_AGENT: 'web6' },
+    })
+    expect(ctx.console.getInstanceRecord('web6')?.version).toBe('0.1.2-rc.1')
     expect(received[0].type).toBe('deploy')
-    expect((received[0].payload as { instanceId: string }).instanceId).toBe('instA')
+    const payload = received[0].payload as { instanceId: string; dshHome: string; port: number }
+    expect(payload.instanceId).toBe('web6')
+    expect(payload.dshHome).toBe('/tmp/.dsh-web6-test')
+    expect(payload.port).toBe(3086)
   })
 
   it('bootstrapHost 生成令牌 + agent profile + SSH 引导命令', async () => {
@@ -431,6 +437,39 @@ describe('daemon 角色（主机守护）', () => {
     ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
     await vi.advanceTimersByTimeAsync(35000)
     expect(spawnSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('deploy：动态加入运行时清单并 spawn 新实例（复用本地发行包）', async () => {
+    const child = fakeChild()
+    const spawnSpy = mockSpawn(child)
+    const ctx = await bootDaemon({})
+    // console 端组装完整 deploy 请求 → daemon 收（channel 回环到 onControl）。
+    ctx.console.deployInstance({
+      host: 'host1', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
+      dshHome: '/tmp/.dsh-web6-deploy', port: 3086, token: 'tok-web6', env: { DSH_RELAY_AGENT: 'web6' },
+    })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(spawnSpy).toHaveBeenCalledWith('dsh', ['--profile', 'web'], expect.objectContaining({
+      env: expect.objectContaining({ DSH_HOME: '/tmp/.dsh-web6-deploy', DSH_RELAY_AGENT: 'web6' }),
+      detached: true,
+    }))
+    // 动态实例后续可被 stop/restart（instanceSpec 命中运行时清单）。
+    ctx.channel.sendControl('host-lab1', { type: 'stop', payload: { instanceId: 'web6' } })
+  })
+
+  it('deploy：重复部署同一 id 幂等忽略（不清单已有）', async () => {
+    const child = fakeChild()
+    const spawnSpy = mockSpawn(child)
+    const ctx = await bootDaemon({})
+    const req = {
+      host: 'host1', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
+      dshHome: '/tmp/.dsh-web6-idem', port: 3086, token: 'tok-web6',
+    }
+    ctx.console.deployInstance(req)
+    await new Promise((r) => setTimeout(r, 20))
+    ctx.console.deployInstance(req)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
   })
 })
 
