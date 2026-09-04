@@ -255,6 +255,8 @@ export class ConsoleService extends TypertRemoteService {
   static spawnImpl: typeof spawn = spawn
   /** lsof 执行实现（测试可替换；生产 = node:child_process.exec）。 */
   static execImpl: typeof exec = exec
+  /** 端口空闲探测实现（测试可替换为确定性实现；生产 = isPortFree）。 */
+  static portFreeImpl: (port: number) => Promise<boolean> = isPortFree
   /** 测试钩子：快照后/应用前抛错，验证升级失败自动回滚（生产不设置）。 */
   static upgradeApplyError?: Error
 
@@ -334,8 +336,11 @@ export class ConsoleService extends TypertRemoteService {
       if (event.type.startsWith('system.')) {
         this.postSystemMessage(event.type, event.payload as Record<string, unknown>)
         // 升级结果事件 → 同步档案版本（守护完成/回滚后的权威结果）。
+        // 注意：事件仅进程内可达（channel 事件不跨 relay）——跨进程结果以实例
+        // 在线状态 + 实例 profile .dsh-upgrade-result.json 为准（见 emitUpgradeResult）。
         if (event.type === 'system.upgrade.result') {
-          const payload = (event.payload ?? {}) as { instanceId?: string; ok?: boolean; version?: string }
+          const payload = (event.payload ?? {}) as { instanceId?: string; ok?: boolean; version?: string; error?: string; rolledBack?: boolean }
+          console.log(`[dsh-console] 收到升级结果事件（进程内）: ${payload.instanceId ?? '?'} ok=${String(payload.ok)} version=${payload.version ?? ''}${payload.rolledBack ? '（已回滚）' : ''}${payload.error ? ` error=${payload.error}` : ''}`)
           if (typeof payload.instanceId === 'string' && typeof payload.version === 'string') {
             const record = this.getInstanceRecord(payload.instanceId)
             if (record) {
@@ -728,7 +733,9 @@ export class ConsoleService extends TypertRemoteService {
    *    （cordis.patch.yml——端口/令牌/身份不动），写版本标记 .dsh-release.json；
    * 3. 滚动重启实例 + 健康探测（有端口 → 探测监听；无端口 → 固定宽限）；
    * 4. 任一步失败 → 自动回滚最近快照；应用已改动时回滚后重启。
-   * 结果经 channel task 平面 'system.upgrade.result' 事件回流（console 收 inbox + 档案版本同步）。
+   * 结果落盘实例 profile `.dsh-upgrade-result.json` + 事件（仅进程内可达——
+   * channel 事件不跨 relay，跨进程 UI 完成态以实例在线状态为准，见
+   * {@link emitUpgradeResult}）。
    * busy 锁全程持有（upgrade/restart/start 对同实例互斥）。
    */
   private async daemonUpgrade(instanceId: string, spec: LaunchSpec, version: string): Promise<void> {
@@ -754,6 +761,7 @@ export class ConsoleService extends TypertRemoteService {
         console.log(`[dsh-console/daemon] 升级 ${instanceId}：发行包已对齐守护源（version=${version || '当前'}），滚动重启`)
         // 3. 滚动重启 + 健康探测。
         await this.restartAfterUpgrade(instanceId, spec)
+        this.recordUpgradeResult(homeProfile, instanceId, true, version)
         this.emitUpgradeResult(instanceId, version, true)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -762,9 +770,11 @@ export class ConsoleService extends TypertRemoteService {
         try {
           this.restoreReleaseSnapshot(snapshot, homeProfile)
           if (applied) await this.restartAfterUpgrade(instanceId, spec)
+          this.recordUpgradeResult(homeProfile, instanceId, false, version, message, true)
           this.emitUpgradeResult(instanceId, version, false, message, true)
         } catch (rollbackError) {
           console.log(`[dsh-console/daemon] 升级 ${instanceId} 回滚也失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+          this.recordUpgradeResult(homeProfile, instanceId, false, version, `升级失败且回滚失败: ${message}`, false)
           this.emitUpgradeResult(instanceId, version, false, `升级失败且回滚失败: ${message}`, false)
         }
       }
@@ -829,7 +839,7 @@ export class ConsoleService extends TypertRemoteService {
       const port = spec.port
       if (port === undefined) throw new Error(`实例在线但无端口信息，无法重启（${instanceId}）`)
       this.killPortProcess(instanceId)
-      for (let i = 0; i < ConsoleService.STOP_POLL_LIMIT && !(await isPortFree(port)); i++) {
+      for (let i = 0; i < ConsoleService.STOP_POLL_LIMIT && !(await ConsoleService.portFreeImpl(port)); i++) {
         await sleep(500)
       }
     }
@@ -872,7 +882,7 @@ export class ConsoleService extends TypertRemoteService {
       return
     }
     for (let i = 0; i < ConsoleService.UPGRADE_PROBE_LIMIT; i++) {
-      if (!(await isPortFree(port))) {
+      if (!(await ConsoleService.portFreeImpl(port))) {
         console.log(`[dsh-console/daemon] ${instanceId} 升级后健康：http://127.0.0.1:${port} 监听中`)
         return
       }
@@ -886,7 +896,29 @@ export class ConsoleService extends TypertRemoteService {
     throw new Error(`升级后健康探测超时（http://127.0.0.1:${port} 未监听，进程已退出）`)
   }
 
-  /** 升级结果经 task 平面回流（console 订阅 → inbox + 档案版本同步）。 */
+  /**
+   * 记录升级结果到实例 profile `.dsh-upgrade-result.json`（权威落盘：ok/回滚/错误
+   * 可审计、可被实例目录使用者读取）。跨进程 UI 呈现以实例在线状态为准（见
+   * {@link emitUpgradeResult} 的进程内限制说明）。
+   */
+  private recordUpgradeResult(homeProfile: string, instanceId: string, ok: boolean, version: string, error?: string, rolledBack?: boolean): void {
+    try {
+      writeFileSync(join(homeProfile, '.dsh-upgrade-result.json'), JSON.stringify({
+        instanceId, ok, version, error, rolledBack, at: Date.now(),
+      }, null, 2) + '\n')
+      console.log(`[dsh-console/daemon] ${instanceId} 升级结果: ok=${String(ok)} version=${version}${rolledBack ? '（已回滚）' : ''}${error !== undefined ? ` error=${error}` : ''}`)
+    } catch {
+      // 落盘失败不影响主流程（daemon 日志已有完整事务）。
+    }
+  }
+
+  /**
+   * 升级结果经 task 平面事件回流。**注意：channel.emit/subscribe 为进程内实现
+   * （事件不投 relay/broker）——跨进程（daemon→管理端 console）不会送达**，仅
+   * 本进程订阅者（daemon 自身）可见；跨进程结果呈现依赖：实例在线状态（channel
+   * 直连探测）+ 实例 profile 的 `.dsh-upgrade-result.json`（recordUpgradeResult）。
+   * 跨进程 task 平面投递 = backlog（需扩展 channel 事件 relay）。
+   */
   private emitUpgradeResult(instanceId: string, version: string, ok: boolean, error?: string, rolledBack?: boolean): void {
     try {
       this.ctx.channel.emit('task', 'system.upgrade.result', {
@@ -1172,7 +1204,8 @@ export class ConsoleService extends TypertRemoteService {
     // daemon 角色（RPC 面到达）：本机清单内的实例直接本机执行（进程管理在守护侧），
     // 不落入 console 决策路由（否则无 launch 配置 → route=instance → 转发回实例）。
     if (this.config.role === 'daemon' && this.config.instances?.[instanceId] !== undefined) {
-      this.handleDaemonControl({ id: 'rpc', type: command, payload: { instanceId }, ts: Date.now() }, 'rpc')
+      // 转发完整 payload（RPC/HTTP 面到达时保留 version 等载荷——勿只留 instanceId）。
+      this.handleDaemonControl({ id: 'rpc', type: command, payload: { instanceId, ...payload }, ts: Date.now() }, 'rpc')
       return { ok: true }
     }
     if (command === 'upgrade') {
@@ -1205,8 +1238,8 @@ export class ConsoleService extends TypertRemoteService {
    * 统一升级批次（typert @Remote）：多选实例 → 逐实例路由到其守护宿主
    * （launch.host / 档案 host），下发 'upgrade' 指令（payload 带 instanceId +
    * 目标版本）。守护执行事务（快照→对齐发行包源→滚动重启→失败回滚，见
-   * {@link daemonUpgrade}）。ok=true 仅代表已下发——完成态经实例状态/
-   * 'system.upgrade.result' 事件呈现。
+   * {@link daemonUpgrade}）。ok=true 仅代表已下发——完成态经实例状态呈现
+   * （事件仅进程内可达，跨进程以在线状态 + 实例 .dsh-upgrade-result.json 为准）。
    * @param instanceIds - 目标实例 id 列表（普通实例；守护本体/管理端自身排除）。
    * @param version - 目标发行包版本（记录值；守护以本机发行包源为实）。
    */

@@ -549,6 +549,122 @@ describe('daemon 角色（主机守护）', () => {
       rmSync(tmp, { recursive: true, force: true })
     }
   })
+
+  it('upgrade：守护子进程 kill→exit→拉起（滚动重启分支 1）', async () => {
+    vi.useFakeTimers()
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-upgrade-b1-'))
+    try {
+      const src = join(tmp, 'src', 'profiles', 'web')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      const inst = join(tmp, 'inst', 'profiles', 'web')
+      mkdirSync(inst, { recursive: true })
+      writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
+      const child = fakeChild()
+      const killSpy = child as unknown as { kill: ReturnType<typeof vi.fn> }
+      const spawnSpy = mockSpawn(child)
+      const ctx = await bootDaemon({ templateHome: join(tmp, 'src'), instances: { web9: { dshHome: join(tmp, 'inst'), profile: 'web' } } })
+      // 先由守护拉起（children 有子进程）→ upgrade 走 kill→exit→再拉起。
+      ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web9' } })
+      expect(spawnSpy).toHaveBeenCalledTimes(1)
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'web9', version: '0.1.2-rc.1' } })
+      expect(killSpy.kill).toHaveBeenCalledWith('SIGTERM')
+      child.emit('exit', 0, null)
+      // 健康宽限（无端口）15s
+      await vi.advanceTimersByTimeAsync(16_000)
+      expect(spawnSpy).toHaveBeenCalledTimes(2)
+      expect(readFileSync(join(inst, 'package.json'), 'utf8')).toContain('SRC')
+      expect(JSON.parse(readFileSync(join(inst, '.dsh-release.json'), 'utf8')).version).toBe('0.1.2-rc.1')
+    } finally {
+      vi.useRealTimers()
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('upgrade：在线非守护实例 → 端口定位 kill 后拉起（分支 2）', async () => {
+    vi.useFakeTimers()
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-upgrade-b2-'))
+    const origPortFree = ConsoleService.portFreeImpl
+    try {
+      const src = join(tmp, 'src', 'profiles', 'web')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      const inst = join(tmp, 'inst', 'profiles', 'web')
+      mkdirSync(inst, { recursive: true })
+      writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
+      const port = 52000 + Math.floor(Math.random() * 500)
+      const execMock = vi.fn((_cmd: string, cb: (e: Error | null, s: string) => void) => cb(null, '')) // 无占用进程 → 端口视为已空闲
+      ConsoleService.execImpl = execMock as unknown as typeof childProcess.exec
+      ConsoleService.portFreeImpl = async () => true // 确定性：端口恒空闲（绕开真实网络探测）
+      const spawnSpy = mockSpawn(fakeChild())
+      const ctx = await bootDaemon({ templateHome: join(tmp, 'src'), instances: { web9: { dshHome: join(tmp, 'inst'), profile: 'web', port } } })
+      // 实例在线（constructor declare）但守护无子进程 → 分支 2：lsof 无 pid → 端口即空闲 → 拉起。
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'web9', version: '0.1.2-rc.1' } })
+      expect(execMock).toHaveBeenCalledWith(`lsof -ti tcp:${port} -sTCP:LISTEN`, expect.anything())
+      // 健康探测：端口恒空闲（无监听者）→ 80×500ms 后走"子进程存活视为健康"兜底。
+      await vi.advanceTimersByTimeAsync(42_000)
+      expect(spawnSpy).toHaveBeenCalledTimes(1)
+      expect(readFileSync(join(inst, 'package.json'), 'utf8')).toContain('SRC')
+    } finally {
+      ConsoleService.execImpl = childProcess.exec
+      ConsoleService.portFreeImpl = origPortFree
+      vi.useRealTimers()
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('upgrade：kill 后进程不退 → watchdog 解锁继续（不永久挂起）', async () => {
+    vi.useFakeTimers()
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-upgrade-wd-'))
+    try {
+      const src = join(tmp, 'src', 'profiles', 'web')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      const inst = join(tmp, 'inst', 'profiles', 'web')
+      mkdirSync(inst, { recursive: true })
+      writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
+      const child = fakeChild()
+      const killSpy = child as unknown as { kill: ReturnType<typeof vi.fn> }
+      const spawnSpy = mockSpawn(child)
+      const ctx = await bootDaemon({ templateHome: join(tmp, 'src'), instances: { web9: { dshHome: join(tmp, 'inst'), profile: 'web' } } })
+      ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web9' } })
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'web9', version: '0.1.2-rc.1' } })
+      expect(killSpy.kill).toHaveBeenCalledWith('SIGTERM')
+      // 子进程始终不退：宽限(8s)补 SIGKILL；watchdog(20s)解锁 → 继续 spawn + 健康宽限(15s)。
+      await vi.advanceTimersByTimeAsync(9_000)
+      expect(killSpy.kill).toHaveBeenCalledWith('SIGKILL')
+      // SIGKILL 后进程退出（模拟）→ watchdog 解锁后 daemonStart 重新拉起。
+      Object.defineProperty(child, 'exitCode', { value: 0 })
+      await vi.advanceTimersByTimeAsync(27_000)
+      expect(spawnSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('saveReleaseSnapshot：滚动保留 3 份（删最旧）', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-upgrade-snap-'))
+    try {
+      const ctx = await bootDaemon({})
+      const svc = ctx.console as unknown as { saveReleaseSnapshot(root: string, home: string): string }
+      const root = join(tmp, 'snaps')
+      const home = join(tmp, 'home')
+      mkdirSync(home, { recursive: true })
+      writeFileSync(join(home, 'p'), 'x')
+      for (let i = 0; i < 5; i++) {
+        svc.saveReleaseSnapshot(root, home)
+        await new Promise((r) => setTimeout(r, 3)) // Date.now() 毫秒去重
+      }
+      const kept = readdirSync(root).filter((d) => /^\d+$/.test(d))
+      expect(kept).toHaveLength(3)
+      // 保留的是最新三份（排序后即断言删掉了最旧两份）。
+      const sorted = [...kept].sort((a, b) => Number(b) - Number(a))
+      expect(sorted).toHaveLength(3)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('统一升级（console 编排）', () => {

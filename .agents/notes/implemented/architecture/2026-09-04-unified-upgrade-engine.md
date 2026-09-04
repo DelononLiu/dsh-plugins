@@ -38,8 +38,14 @@ Status: implemented
 5. **失败自动回滚**：恢复最近快照；发行包已被替换过（applied）→ 回滚后重启；
    回滚也失败 → 事件带错误留档。
 
-结果经 channel task 平面 `system.upgrade.result` 回流：console 订阅落 inbox
-（upgrade.done/失败）+ 同步实例档案 version/health。
+**结果呈现（2026-09-04 实测修正）**：升级结果**落盘实例 profile
+`.dsh-upgrade-result.json`**（ok/version/error/rolledBack/at——权威可审计）；同时
+emit `system.upgrade.result` 事件——但 **channel.emit/subscribe 是进程内实现
+（事件不投 relay/broker），跨进程 daemon→管理端实测不送达**。跨进程 UI 完成态以
+**实例在线状态**（channel 直连探测：重启期间离线、恢复在线）为准。跨进程 task
+平面投递（channel 事件 relay）= backlog。
+顺带修复：controlInstance RPC/HTTP 面到达 daemon 时转发完整 payload（此前丢
+version，只留 instanceId——直接 sendControl 路径不受影响）。
 
 ## v1 边界（诚实声明）
 
@@ -62,18 +68,21 @@ Status: implemented
 - 升级页从骨架变可用：多选实例 → 统一升级 → 逐条下发结果；守护执行快照/回滚，
   实例重启后由守护接管（原独立进程被守护替换——矩阵 E2E 见下）。
 - 快照保留 3 份 = 手工回滚点（引擎只自动回滚最近一次）。
-- 升级期间实例短暂离线；健康探测通过才视为完成。
+- 升级期间实例短暂离线；健康探测通过才视为完成；结果落盘 `.dsh-upgrade-result.json`。
 - backlog：多版本发行包源、patch 适配校验（target id 在新 rc 存在性）、升级
-  进度事件 UI、跨进程 task 事件可靠投递确认。
+  进度/回滚态 UI（C 类缺口）、**跨进程 task 平面投递（channel 事件 relay——
+  B1 实测确认当前事件不跨进程）**。
 
 ## 测试
 
-- 单测 +4（共 45）：引擎 happy 路径（快照→对齐→spawn，patch 保留+版本标记）、
-  应用失败注入回滚（快照恢复+事件 rolledBack+不重启）、编排路由（launch.host
-  下发 payload / 守护未注册·无宿主·守护本体逐条失败）。
-- E2E（web2 管理端 → daemon host1 对 web4 升级×2）：daemon 日志完整事务
-  （对齐自 ~/.dsh-web3 → 停旧 pid → 拉起 → 3084 健康监听）；`.dsh-release.json`
-  version=0.1.2-rc.1；快照 2 份轮转（≤3）。
+- 单测 49（新增 9 项升级相关）：happy 路径、应用失败注入回滚、编排路由×2、
+  **滚动重启分支 1（子进程 kill→exit→拉起）/ 分支 2（在线端口 kill→拉起）/
+  watchdog 解锁 / 快照>3 轮转**。
+- E2E：daemon 对 web4 多次升级（对齐自 ~/.dsh-web3 → 停旧 pid → 拉起 → 3084
+  健康监听）；`.dsh-release.json`/`.dsh-upgrade-result.json` version=0.1.2-rc.1；
+  快照轮转 ≤3。
+- **B1 跨进程实测（阴性）**：daemon emit `system.upgrade.result` 后，管理端 web2
+  **未收到**（channel 事件不跨 relay）→ 结果呈现改走落盘文件 + 实例在线状态（见上）。
 
 相关：[deploy-instance-closed-loop](../../proposed/architecture/2026-09-04-deploy-instance-closed-loop.md)
 · [daemon-host-supervisor](2026-08-22-daemon-host-supervisor.md) ·
