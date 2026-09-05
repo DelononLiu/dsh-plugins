@@ -559,6 +559,17 @@ export class ConsoleService extends TypertRemoteService {
             // 守护日志面：{ target, opts }（LogTarget 判别联合 + 读取选项）。
             const { target, opts } = (frame.payload?.args ?? {}) as { target: LogTarget; opts: LogReadOptions }
             result = this.readLog(target, opts)
+          } else if (method === 'getUpgradeStatus') {
+            // 升级状态查询：async @Remote——Promise 结果异步回执。
+            const { instanceId } = (frame.payload?.args ?? {}) as { instanceId: string }
+            void this.getUpgradeStatus(instanceId).then((st) => {
+              res.writeHead(200, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: { ok: true, value: st } }))
+            }).catch((err) => {
+              res.writeHead(400, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: { ok: false, error: { code: 'internal', message: err instanceof Error ? err.message : String(err), details: {} } } }))
+            })
+            return
           } else {
             res.writeHead(404, { 'content-type': 'application/json' })
             res.end(JSON.stringify({
