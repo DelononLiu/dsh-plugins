@@ -32,44 +32,54 @@ export interface ConsolePanelProps {
 function InstanceRow(props: {
   item: ConsoleInstanceViewItem
   host: ConsoleHost
-  checked?: boolean
-  onSelect?: () => void
   machineName?: string
   /** 该实例操作 pending 的具体文案（如"启动中…"；undefined = 无 pending）。 */
   opLabel?: string
   /** 点击启停/重启（ConsolePanel 注入 runControl）。 */
   onControl?: (id: string, op: 'start' | 'stop' | 'restart') => void
+  /** 点击行尾「⋯」菜单项（onMore 存在才显示菜单；本端不显示）。 */
+  onMore?: (action: string, id: string) => void
 }): React.JSX.Element {
-  const { item, host, checked, onSelect, machineName, opLabel, onControl } = props
+  const { item, host, machineName, opLabel, onControl, onMore } = props
   const online = item.status === 'online'
   const canJump = online && item.addr !== '' && item.id !== 'self'
+  // 行尾「⋯」菜单展开状态（单开：记录展开的实例 id 由 ConsolePanel 管理更简——
+  // 这里用本地 state，点击其它行自然收起？多行各自独立——用 id 匹配外部更干净，见 onMore 语义）。
+  const [menuOpen, setMenuOpen] = useState(false)
   return (
-    <div
-      className={`dsh-console-row${checked ? ' sel' : ''}`}
-      onClick={onSelect}
-      style={onSelect ? { cursor: 'pointer' } : undefined}
-    >
-      {checked !== undefined && <span className="dsh-console-chk">✓</span>}
+    <div className="dsh-console-row">
       <span className={`dot ${opLabel ? 'pend' : (online ? 'on' : 'off')}`} />
       <div className="grow">
         <div className="name">{item.name}</div>
         <div className="meta">{opLabel ?? (online ? '在线' : '离线')} · {machineName ?? item.host ?? item.id}{item.self ? ' · 当前实例' : ''}</div>
       </div>
       <span className="dsh-console-ver">{item.version ?? '—'}</span>
-      {checked === undefined && (
-        <>
-          {canJump && (
-            <button type="button" className="dsh-console-btn" title="打开此实例" onClick={() => { window.open(item.addr, '_blank', 'noopener') }}>
-              跳转⧉
-            </button>
+      {canJump && (
+        <button type="button" className="dsh-console-btn" title="打开此实例" onClick={() => { window.open(item.addr, '_blank', 'noopener') }}>
+          跳转⧉
+        </button>
+      )}
+      <button type="button" className="dsh-console-btn" disabled={!!opLabel} title={online ? '停止' : '启动'} onClick={() => { onControl?.(item.id, online ? 'stop' : 'start') }}>
+        {opLabel ?? (online ? '停止' : '启动')}
+      </button>
+      <button type="button" className="dsh-console-btn danger" disabled={!!opLabel} title="重启" onClick={() => { onControl?.(item.id, 'restart') }}>
+        {opLabel === '重启中…' ? '重启中…' : '重启'}
+      </button>
+      {onMore && (
+        <div style={{ position: 'relative' }}>
+          <button type="button" className="dsh-console-btn" title="更多操作" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
+          {menuOpen && (
+            <>
+              {/* 点击外部关闭 */}
+              <div style={{ position: 'fixed', inset: 0, zIndex: 1999 }} onClick={() => setMenuOpen(false)} />
+              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 2000, minWidth: 160, background: 'var(--dsw-alias-bg-layer-2)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, boxShadow: 'var(--dsw-shadow-lv2)', padding: 4 }}>
+                <button type="button" className="dsh-console-menu-item" onClick={() => { setMenuOpen(false); onMore('upgrade', item.id) }}>
+                  升级到 0.1.2-rc.1
+                </button>
+              </div>
+            </>
           )}
-          <button type="button" className="dsh-console-btn" disabled={!!opLabel} title={online ? '停止' : '启动'} onClick={() => { onControl?.(item.id, online ? 'stop' : 'start') }}>
-            {opLabel ?? (online ? '停止' : '启动')}
-          </button>
-          <button type="button" className="dsh-console-btn danger" disabled={!!opLabel} title="重启" onClick={() => { onControl?.(item.id, 'restart') }}>
-            {opLabel === '重启中…' ? '重启中…' : '重启'}
-          </button>
-        </>
+        </div>
       )}
     </div>
   )
@@ -106,7 +116,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   // 新建实例（deploy 到已上线 daemon）表单
   const [showNewInst, setShowNewInst] = useState(false)
   /** 实例页内联升级面板（升级不再独立页签——它是实例列表的批量操作）。 */
-  const [showUpgrade, setShowUpgrade] = useState(false)
   // 展开升级面板：清空上次勾选，重新选择。
   // 实例启停/重启：设 pending（行内反馈）→ 下发 → toast 成败。
   // pending 保留到轮询确认目标状态（start→online / stop→offline）；超时兜底清除。
@@ -124,6 +133,21 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     } catch (e) {
       setToast({ kind: 'error', msg: `${op} ${id} 调用异常：${e instanceof Error ? e.message : String(e)}` })
       updateOpPending(null)
+    }
+  }
+
+  // 单实例升级（行「⋯」菜单入口）：下发守护执行，结果 toast + 状态轮询收敛。
+  const upgradeInstance = async (id: string): Promise<void> => {
+    try {
+      const r = await host.upgradeInstances([id], '0.1.2-rc.1')
+      const res = r.results[0]
+      if (res?.ok) {
+        setToast({ kind: 'ok', msg: `已下发升级 ${id}（守护将快照→对齐→滚动重启，完成以重新在线为准）` })
+      } else {
+        setToast({ kind: 'error', msg: `升级 ${id} 失败：${res?.error ?? '未知原因'}` })
+      }
+    } catch (e) {
+      setToast({ kind: 'error', msg: `升级 ${id} 调用异常：${e instanceof Error ? e.message : String(e)}` })
     }
   }
 
@@ -159,9 +183,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     if (Date.now() - pend.ts > 90_000) updateOpPending(null)
   }
 
-  const toggleUpgradePanel = (): void => {
-    setShowUpgrade((v) => { if (!v) setUpgradeSel(new Set()); return !v })
-  }
   /** 主机页内联部署新主机面板（引导接入守护——不占独立页签）。 */
   const [showDeploy, setShowDeploy] = useState(false)
   /** 实例操作 pending：{id, op, ts}——点击后行内 pending 直到状态收敛或超时。 */
@@ -179,11 +200,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [newInstHost, setNewInstHost] = useState('host1')
   const [newInstResult, setNewInstResult] = useState<string | null>(null)
   const [newInstBusy, setNewInstBusy] = useState(false)
-  // 统一升级：多选实例 → 目标版本 → 下发守护执行
-  const [upgradeSel, setUpgradeSel] = useState<Set<string>>(new Set())
-  const [upgradeTarget, setUpgradeTarget] = useState('0.1.2-rc.1')
-  const [upgradeBusy, setUpgradeBusy] = useState(false)
-  const [upgradeLog, setUpgradeLog] = useState<string[]>([])
   // 日志页签状态：实例下拉 + tail 配置 + 自动 tail 开关 + 内容缓存
   const [logTarget, setLogTarget] = useState<LogTarget>({ kind: 'daemon' })
   const [logTail, setLogTail] = useState(200)
@@ -195,30 +211,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [logAutoTail, setLogAutoTail] = useState(false)
   const logBoxRef = useRef<HTMLDivElement>(null)
 
-  const toggleUpgradeSel = (id: string): void => {
-    setUpgradeSel((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const runUpgrade = async (): Promise<void> => {
-    const ids = [...upgradeSel]
-    if (ids.length === 0) return
-    setUpgradeBusy(true)
-    setUpgradeLog([])
-    try {
-      const r = await host.upgradeInstances(ids, upgradeTarget)
-      const lines = r.results.map((res) => res.ok ? `✓ ${res.instanceId}：已下发升级（守护将快照→对齐发行包→滚动重启）` : `✗ ${res.instanceId}：${res.error ?? 'unknown'}`)
-      setUpgradeLog(lines)
-    } catch (e) {
-      setUpgradeLog([`✗ 升级调用失败：${e instanceof Error ? e.message : String(e)}`])
-    } finally {
-      setUpgradeBusy(false)
-    }
-  }
 
   const deployNewInstance = async (): Promise<void> => {
     const id = newInstId.trim()
@@ -387,7 +379,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               <div className="grow" />
               <button type="button" className="dsh-console-btn" onClick={() => { void refreshInstances() }} title="立即刷新（每 10s 自动）">⟳ 刷新</button>
               <button type="button" className="dsh-console-btn" onClick={() => setShowNewInst((v) => !v)}>{showNewInst ? '收起' : '新建实例'}</button>
-              <button type="button" className="dsh-console-btn primary" onClick={toggleUpgradePanel}>{showUpgrade ? '收起升级' : '批量升级'}</button>
             </div>
             {showNewInst && (
               <div className="dsh-console-toolbar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
@@ -405,41 +396,15 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                   {newInstResult && <span style={{ fontSize: 12, color: newInstResult.startsWith('已') || newInstResult.startsWith('下发') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{newInstResult}</span>}
                 </div>
               </div>
-            )}
-            {showUpgrade && (
-              <>
-                <div className="dsh-console-toolbar">
-                  <span className="hint">勾选下方实例 → 统一升级到守护发行包（当前实例不可选）</span>
-                  <div className="grow" />
-                  <select className="dsh-console-select" value={upgradeTarget} onChange={(e) => setUpgradeTarget(e.target.value)} title="目标发行包版本（守护以本机发行包源为实，此值写入实例记录）">
-                    <option value="0.1.2-rc.1">目标：0.1.2-rc.1</option>
-                  </select>
-                  <button type="button" className="dsh-console-btn primary" onClick={() => { void runUpgrade() }} disabled={upgradeSel.size === 0 || upgradeBusy}>
-                    {upgradeBusy ? '升级中…' : `升级所选（${upgradeSel.size}）`}
-                  </button>
-                  <button type="button" className="dsh-console-btn" onClick={() => setShowUpgrade(false)}>收起</button>
-                </div>
-                <div style={{ background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12, padding: '12px 14px', fontSize: 12, lineHeight: 1.8, color: 'var(--dsw-alias-label-secondary)', marginBottom: 14 }}>
-                  升级动作由实例所在<b>守护主机</b>执行：先快照实例发行包（保留 3 份回滚点）→ 对齐守护发行包源 → 滚动重启 →
-                  健康探测；<b>任一步失败自动回滚</b>并重启。完成态以实例重新在线为准（管理端自身与守护本体不可选）。
-                </div>
-                {upgradeLog.length > 0 && (
-                  <div className="dsh-console-code" style={{ marginTop: 0, marginBottom: 14, color: upgradeLog.every((l) => l.startsWith('✓')) ? undefined : 'var(--dsw-alias-label-secondary)' }}>
-                    {upgradeLog.join('\n')}
-                  </div>
-                )}
-              </>
-            )}
-            {loaded && sortedInstances.map((i) => (
+            )}            {loaded && sortedInstances.map((i) => (
               <InstanceRow
                 key={i.id}
                 item={i}
                 host={host}
                 machineName={machineNameOf(i.host)}
-                checked={showUpgrade && upgradeSel.has(i.id) ? true : undefined}
-                onSelect={showUpgrade && !i.self ? () => toggleUpgradeSel(i.id) : undefined}
                 opLabel={opPending?.id === i.id ? (opPending.op === 'start' ? '启动中…' : opPending.op === 'stop' ? '停止中…' : '重启中…') : undefined}
                 onControl={(id, op) => { void runControl(id, op) }}
+                onMore={i.self ? undefined : (id) => { void upgradeInstance(id) }}
               />
             ))}
           </>
