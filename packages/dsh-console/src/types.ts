@@ -184,3 +184,34 @@ export interface LogFileList {
   /** 实例日志列表（按 launch 配置顺序；缺日志文件 = 跳过）。 */
   instances: LogFileMeta[]
 }
+
+/** 升级事务步骤（进度展示顺序）。 */
+export type UpgradeStep =
+  | 'snapshot'   // 快照（升级前状态 = 回滚点）
+  | 'align'      // 对齐守护发行包源
+  | 'restart'    // 滚动重启
+  | 'health'     // 健康探测
+  | 'rollback'   // 失败回滚
+  | 'done'       // 完成（成功或失败终态）
+
+/** 升级状态（daemon 落盘 + console @Remote 查询）。 */
+export interface UpgradeStatus {
+  /** 实例 id。 */
+  instanceId: string
+  /** 当前步骤（进度条用）。 */
+  step: UpgradeStep
+  /** 步骤是否完成。 */
+  done: boolean
+  /** 目标版本。 */
+  version: string
+  /** 是否成功（终态）。 */
+  ok?: boolean
+  /** 错误/回滚信息（失败时）。 */
+  error?: string
+  /** 是否已回滚。 */
+  rolledBack?: boolean
+  /** 本步骤开始时间（epoch ms）。 */
+  ts: number
+  /** 最近事件消息（过程日志用，如"快照完成"）。 */
+  message: string
+}

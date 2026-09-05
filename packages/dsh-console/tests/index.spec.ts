@@ -1088,3 +1088,57 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
     }
   })
 })
+
+describe('升级状态（daemon 落盘 + @Remote getUpgradeStatus）', () => {
+  const isolatedHome = (): string => mkdtempSync(join(tmpdir(), 'dsh-upstat-'))
+
+  it('daemon：getUpgradeStatus 读实例 home 状态文件；无记录返回无状态', async () => {
+    const tmp = isolatedHome()
+    try {
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+      await ctx.plugin(ConsoleService, {
+        role: 'daemon', hostId: 'host1',
+        instances: { web3: { dshHome: join(tmp, 'web3'), profile: 'web3' } },
+      })
+      const svc = ctx.console as unknown as { getUpgradeStatus(id: string): Promise<{ step: string; done: boolean; message: string; ok?: boolean }> }
+      // 无状态文件 → done + 无记录
+      const none = await svc.getUpgradeStatus('web3')
+      expect(none.done).toBe(true)
+      expect(none.message).toContain('无')
+      // 清单外实例
+      const evil = await svc.getUpgradeStatus('evil')
+      expect(evil.done).toBe(true)
+      expect(evil.ok).toBe(false)
+      ctx[Symbol.dispose]?.()
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('daemon：状态文件可读（模拟升级写入后查询）', async () => {
+    const tmp = isolatedHome()
+    const web3 = join(tmp, 'web3')
+    mkdirSync(join(web3, 'profiles', 'web3'), { recursive: true })
+    try {
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+      await ctx.plugin(ConsoleService, {
+        role: 'daemon', hostId: 'host1',
+        instances: { web3: { dshHome: web3, profile: 'web3' } },
+      })
+      // 模拟 daemon 升级中落盘状态
+      writeFileSync(join(web3, '.dsh-upgrade-status.json'), JSON.stringify({
+        instanceId: 'web3', step: 'align', done: false, version: '0.1.2-rc.1', ts: Date.now(), message: '对齐守护发行包源…',
+      }))
+      const svc = ctx.console as unknown as { getUpgradeStatus(id: string): Promise<{ step: string; done: boolean; message: string; version?: string }> }
+      const s = await svc.getUpgradeStatus('web3')
+      expect(s.step).toBe('align')
+      expect(s.done).toBe(false)
+      expect(s.message).toContain('对齐')
+      ctx[Symbol.dispose]?.()
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
