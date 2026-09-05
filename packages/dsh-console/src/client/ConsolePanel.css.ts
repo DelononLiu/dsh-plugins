@@ -48,6 +48,8 @@ const css = `
 .dsh-console-row .meta{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-console-ver{font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:2px 9px;white-space:nowrap}
 .dsh-console-btn{border:none;border-radius:8px;font-size:12px;padding:6px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-family:inherit;background:transparent;color:var(--dsw-alias-label-secondary)}
+.dsh-console-menu-item{display:block;width:100%;border:none;background:transparent;text-align:left;font-family:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);padding:7px 12px;border-radius:7px;cursor:pointer}
+.dsh-console-menu-item:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-console-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .dsh-console-btn.primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-inverted);font-weight:600}
 .dsh-console-btn.primary:hover{background:var(--dsw-alias-button-primary-hover)}
