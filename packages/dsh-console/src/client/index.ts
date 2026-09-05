@@ -14,7 +14,7 @@
 
 import { createElement } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, UpgradeBatchResult } from 'dsh-console/types'
+import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, LogFileList, LogReadOptions, LogReadResult, UpgradeBatchResult } from 'dsh-console/types'
 import type { BrokerStatusView } from 'dsh-channel/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
@@ -115,6 +115,22 @@ export function apply(ctx: ClientContext): void {
               await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
               const result = await ns!.upgradeInstances(instanceIds, version)
               if (!result.ok) throw new Error(`console.upgradeInstances failed: ${result.error.code}: ${result.error.message}`)
+              return result.value
+            },
+            listLogFiles: async () => {
+              await consoleReady
+              let ns: { listLogFiles(): Promise<{ ok: boolean; value: LogFileList; error: { code: string; message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.listLogFiles()
+              if (!result.ok) throw new Error(`console.listLogFiles failed: ${result.error.code}: ${result.error.message}`)
+              return result.value
+            },
+            readLog: async (target, opts) => {
+              await consoleReady
+              let ns: { readLog(t: { kind: 'daemon' } | { kind: 'instance'; instanceId: string }, o: LogReadOptions): Promise<{ ok: boolean; value: LogReadResult; error: { code: string; message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.readLog(target, opts)
+              if (!result.ok) throw new Error(`console.readLog failed: ${result.error.code}: ${result.error.message}`)
               return result.value
             },
           }

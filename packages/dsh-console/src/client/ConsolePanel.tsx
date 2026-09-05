@@ -8,16 +8,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConsoleHost } from './types'
-import type { ConsoleInstanceViewItem } from 'dsh-console/types'
+import type { ConsoleInstanceViewItem, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget } from 'dsh-console/types'
 
 // ---- 页签定义 ----
-type TabId = 'overview' | 'instances' | 'hosts' | 'deploy' | 'upgrade'
+type TabId = 'overview' | 'instances' | 'hosts' | 'deploy' | 'upgrade' | 'logs'
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: 'overview', label: '总览', icon: '▤' },
   { id: 'instances', label: '实例', icon: '☰' },
   { id: 'hosts', label: '主机 / 守护', icon: '⛁' },
   { id: 'deploy', label: '部署主机', icon: '＋' },
   { id: 'upgrade', label: '升级', icon: '⇪' },
+  { id: 'logs', label: '日志', icon: '⎙' },
 ]
 
 /** 实例列表静默轮询周期（ms）：部署/引导/升级后无需重开面板即可看到新状态。 */
@@ -111,6 +112,16 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [upgradeTarget, setUpgradeTarget] = useState('0.1.2-rc.1')
   const [upgradeBusy, setUpgradeBusy] = useState(false)
   const [upgradeLog, setUpgradeLog] = useState<string[]>([])
+  // 日志页签状态：实例下拉 + tail 配置 + 自动 tail 开关 + 内容缓存
+  const [logTarget, setLogTarget] = useState<LogTarget>({ kind: 'daemon' })
+  const [logTail, setLogTail] = useState(200)
+  const [logContent, setLogContent] = useState<string>('')
+  const [logTruncated, setLogTruncated] = useState(false)
+  const [logTotal, setLogTotal] = useState(0)
+  const [logError, setLogError] = useState<string | null>(null)
+  const [logFiles, setLogFiles] = useState<LogFileList>({ daemon: null, instances: [] })
+  const [logAutoTail, setLogAutoTail] = useState(false)
+  const logBoxRef = useRef<HTMLDivElement>(null)
 
   const toggleUpgradeSel = (id: string): void => {
     setUpgradeSel((prev) => {
@@ -202,6 +213,51 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     closeRef.current?.focus()
     return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [onClose])
+
+  // 日志读取：拉取 + 自动 tail 周期（3s）+ 滚到底（仅 autoTail 开启时）。
+  const fetchLog = useCallback(async (autoScroll: boolean): Promise<void> => {
+    try {
+      const r = await host.readLog(logTarget, { tail: logTail })
+      setLogContent(r.content)
+      setLogTruncated(r.truncated)
+      setLogTotal(r.total)
+      setLogError(null)
+      if (autoScroll) {
+        // 下一帧再滚到底（DOM 还没更新）
+        requestAnimationFrame(() => { if (logBoxRef.current) logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight })
+      }
+    } catch (e) {
+      setLogError(e instanceof Error ? e.message : String(e))
+    }
+  }, [host, logTarget, logTail])
+
+  const refreshLogFiles = useCallback(async (): Promise<void> => {
+    try {
+      const list = await host.listLogFiles()
+      setLogFiles(list)
+    } catch {
+      // 不阻塞主流程：下拉回退到只剩 'daemon' target
+    }
+  }, [host])
+
+  // 切换到 logs 页签：拉一次文件列表（决定下拉选项）
+  // 自动 tail：3s 周期 + 滚到底
+  useEffect(() => {
+    if (tab !== 'logs') return
+    void refreshLogFiles()
+    void fetchLog(false)
+    if (!logAutoTail) return
+    const timer = window.setInterval(() => { void fetchLog(true) }, 3000)
+    return () => window.clearInterval(timer)
+  }, [tab, logTarget, logTail, logAutoTail, fetchLog, refreshLogFiles]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const copyLog = useCallback((): void => {
+    void navigator.clipboard?.writeText(logContent)
+  }, [logContent])
+
+  const scrollToBottom = useCallback((): void => {
+    if (logBoxRef.current) logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight
+  }, [])
 
   const close = useCallback(() => onClose(), [onClose])
   const online = instances.filter((i) => i.status === 'online').length
@@ -330,6 +386,59 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 <div className="dsh-console-code">{deployResult.commands.map((c) => `$ ${c}`).join('\n')}</div>
               </>
             )}
+          </>
+        )
+      case 'logs':
+        return (
+          <>
+            <div className="dsh-console-toolbar">
+              <span className="hint">来源</span>
+              <select
+                className="dsh-console-select"
+                value={logTarget.kind === 'daemon' ? 'daemon' : `instance:${logTarget.instanceId}`}
+                onChange={(e) => {
+                  const v = e.target.value
+                  if (v === 'daemon') setLogTarget({ kind: 'daemon' })
+                  else if (v.startsWith('instance:')) setLogTarget({ kind: 'instance', instanceId: v.slice('instance:'.length) })
+                }}
+                title="选择要查看的日志来源（daemon = 守护自身/console.log；instance = 守护下的实例日志）"
+              >
+                {logFiles.daemon && <option value="daemon">daemon（自身）</option>}
+                {logFiles.instances.map((f) => (
+                  <option key={f.id} value={`instance:${f.id}`}>{f.id}（{Math.round(f.size / 1024)}KB）</option>
+                ))}
+                {!logFiles.daemon && logFiles.instances.length === 0 && <option value="daemon">daemon（无日志）</option>}
+              </select>
+              <span className="hint">行数</span>
+              <select className="dsh-console-select" value={logTail} onChange={(e) => setLogTail(Number(e.target.value))}>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+                <option value={500}>500</option>
+                <option value={1000}>1000</option>
+              </select>
+              <button type="button" className="dsh-console-btn" onClick={() => { void fetchLog(false) }} title="立即读取">⟳ 重载</button>
+              <label className="hint" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" checked={logAutoTail} onChange={(e) => setLogAutoTail(e.target.checked)} />
+                自动 tail（3s）
+              </label>
+              <div className="grow" />
+              <button type="button" className="dsh-console-btn" onClick={scrollToBottom} title="滚到底部">⤓ 滚到底</button>
+              <button type="button" className="dsh-console-btn" onClick={copyLog} disabled={!logContent} title="复制全文">⧉ 复制</button>
+            </div>
+            <div className="dsh-console-toolbar" style={{ background: 'transparent', border: 'none', padding: 0, marginBottom: 8 }}>
+              <span className="hint">
+                {logError
+                  ? <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>读取失败：{logError}</span>
+                  : (logTotal > 0 ? `共 ${logTotal} 行，显示最后 ${logTail} 行${logTruncated ? '（已截断，原文件超过 512KB）' : ''}` : '暂无内容')}
+              </span>
+            </div>
+            <div
+              ref={logBoxRef}
+              className="dsh-console-code"
+              style={{ maxHeight: '50vh', overflow: 'auto', marginTop: 0 }}
+            >
+              {logContent || (logError ? '' : '（日志为空）')}
+            </div>
           </>
         )
       case 'upgrade':

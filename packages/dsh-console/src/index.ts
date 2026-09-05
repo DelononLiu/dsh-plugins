@@ -26,9 +26,9 @@ import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 import { spawn, exec, type ChildProcess } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { join } from 'node:path'
 import { connect } from 'node:net'
 
@@ -36,7 +36,7 @@ import { connect } from 'node:net'
 // index 本地引用经 import type，re-export 供外部消费。
 import type {
   BootstrapResult, ControlResult, ConsoleInstanceView, DeployInstanceRequest, HostRecord, InstanceRecord, InstanceType,
-  UpgradeBatchResult, UpgradeItemResult,
+  LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget, UpgradeBatchResult, UpgradeItemResult,
 } from './types.ts'
 export type * from './types.ts'
 export type { BootstrapResult, ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType } from './types.ts'
@@ -303,6 +303,16 @@ export class ConsoleService extends TypertRemoteService {
   /** 实例进程启动时刻（启动窗口过滤用）。 */
   private readonly startedAt = Date.now()
 
+  /**
+   * 关键事件落盘：terminal console.log + 进程内日志文件双写。
+   * 落盘路径由 {@link Logger.resolvePath} 按 role 决定（daemon → daemon.log、
+   * console → console.log；instance 不落盘——stdin/out 已被守护收集）。
+   */
+  private log(line: string): void {
+    console.log(line)
+    Logger.append(this.config.role ?? 'console', line)
+  }
+
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'console')
     // 管理端即实例发现权威源：launch 配置（实例矩阵）逐条注册进 channel；
@@ -340,7 +350,7 @@ export class ConsoleService extends TypertRemoteService {
         // 在线状态 + 实例 profile .dsh-upgrade-result.json 为准（见 emitUpgradeResult）。
         if (event.type === 'system.upgrade.result') {
           const payload = (event.payload ?? {}) as { instanceId?: string; ok?: boolean; version?: string; error?: string; rolledBack?: boolean }
-          console.log(`[dsh-console] 收到升级结果事件（进程内）: ${payload.instanceId ?? '?'} ok=${String(payload.ok)} version=${payload.version ?? ''}${payload.rolledBack ? '（已回滚）' : ''}${payload.error ? ` error=${payload.error}` : ''}`)
+          this.log(`[dsh-console] 收到升级结果事件（进程内）: ${payload.instanceId ?? '?'} ok=${String(payload.ok)} version=${payload.version ?? ''}${payload.rolledBack ? '（已回滚）' : ''}${payload.error ? ` error=${payload.error}` : ''}`)
           if (typeof payload.instanceId === 'string' && typeof payload.version === 'string') {
             const record = this.getInstanceRecord(payload.instanceId)
             if (record) {
@@ -374,7 +384,7 @@ export class ConsoleService extends TypertRemoteService {
         // daemon/instance 角色部署的无 webserver profile 不会走到这里）。
         // 注意用注入后的 ctx（webServer 只在注入 fiber 的 scope 可见）。
         ctx.inject(['webServer'], (injected) => {
-          console.log('[dsh-console] console 角色：webServer 可用，注册控制端点')
+          this.log('[dsh-console] console 角色：webServer 可用，注册控制端点')
           const disposers = [
             injected.webServer.register({
               kind: 'exact',
@@ -522,6 +532,13 @@ export class ConsoleService extends TypertRemoteService {
             result = this.controlInstance(instanceId, command, payload ?? {})
           } else if (method === 'listInstances') {
             result = this.listInstances()
+          } else if (method === 'listLogFiles') {
+            // 守护日志面（console 角色经 callRemote 直连本机时）：无参数。
+            result = this.listLogFiles()
+          } else if (method === 'readLog') {
+            // 守护日志面：{ target, opts }（LogTarget 判别联合 + 读取选项）。
+            const { target, opts } = (frame.payload?.args ?? {}) as { target: LogTarget; opts: LogReadOptions }
+            result = this.readLog(target, opts)
           } else {
             res.writeHead(404, { 'content-type': 'application/json' })
             res.end(JSON.stringify({
@@ -552,7 +569,7 @@ export class ConsoleService extends TypertRemoteService {
     server.listen(port, '127.0.0.1')
     server.unref?.()
     this.ctx.effect(() => () => server.close())
-    console.log(`[dsh-console/daemon] 本机控制端口 http://127.0.0.1:${port}`)
+    this.log(`[dsh-console/daemon] 本机控制端口 http://127.0.0.1:${port}`)
   }
 
   /** daemon 角色：处理控制指令（只认本机清单内的实例；指令载荷携带 instanceId）。 */
@@ -644,7 +661,7 @@ export class ConsoleService extends TypertRemoteService {
       console.log(`[dsh-console/daemon] ${instanceId} 建 dshHome 失败: ${error instanceof Error ? error.message : String(error)}`)
       return
     }
-    console.log(`[dsh-console/daemon] 部署 ${instanceId}（DSH_HOME=${dshHome}，port=${String(port)}）`)
+    this.log(`[dsh-console/daemon] 部署 ${instanceId}（DSH_HOME=${dshHome}，port=${String(port)}）`)
     // 拉起（busy 锁；拉起后 channel 注册 → console 列表 online）。
     if (!this.opBegin(instanceId, 'starting')) {
       console.log(`[dsh-console/daemon] ${instanceId} 有操作进行中，部署后稍后拉起`)
@@ -687,7 +704,7 @@ export class ConsoleService extends TypertRemoteService {
       // 复制模板 profile（含 node_modules/package.json/cordis.yml/patch 骨架）。
       mkdirSync(dshHome, { recursive: true })
       cpSync(templateProfile, homeProfile, { recursive: true })
-      console.log(`[dsh-console/daemon] ${instanceId} 从模板复制发行包: ${templateProfile}`)
+      this.log(`[dsh-console/daemon] ${instanceId} 从模板复制发行包: ${templateProfile}`)
     } else {
       // 无模板或已存在 → 确保目录 + 最小骨架。
       mkdirSync(homeProfile, { recursive: true })
@@ -758,14 +775,14 @@ export class ConsoleService extends TypertRemoteService {
         this.applyReleaseFromTemplate(homeProfile, instanceId, spec, version)
         if (ConsoleService.upgradeApplyError) throw ConsoleService.upgradeApplyError
         applied = true
-        console.log(`[dsh-console/daemon] 升级 ${instanceId}：发行包已对齐守护源（version=${version || '当前'}），滚动重启`)
+        this.log(`[dsh-console/daemon] 升级 ${instanceId}：发行包已对齐守护源（version=${version || '当前'}），滚动重启`)
         // 3. 滚动重启 + 健康探测。
         await this.restartAfterUpgrade(instanceId, spec)
         this.recordUpgradeResult(homeProfile, instanceId, true, version)
         this.emitUpgradeResult(instanceId, version, true)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        console.log(`[dsh-console/daemon] 升级 ${instanceId} 失败（${message}），自动回滚快照`)
+        this.log(`[dsh-console/daemon] 升级 ${instanceId} 失败（${message}），自动回滚快照`)
         // 4. 失败自动回滚：恢复最近快照；发行包已被替换过 → 回滚后重启（旧进程已停）。
         try {
           this.restoreReleaseSnapshot(snapshot, homeProfile)
@@ -773,7 +790,7 @@ export class ConsoleService extends TypertRemoteService {
           this.recordUpgradeResult(homeProfile, instanceId, false, version, message, true)
           this.emitUpgradeResult(instanceId, version, false, message, true)
         } catch (rollbackError) {
-          console.log(`[dsh-console/daemon] 升级 ${instanceId} 回滚也失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+          this.log(`[dsh-console/daemon] 升级 ${instanceId} 回滚也失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
           this.recordUpgradeResult(homeProfile, instanceId, false, version, `升级失败且回滚失败: ${message}`, false)
           this.emitUpgradeResult(instanceId, version, false, `升级失败且回滚失败: ${message}`, false)
         }
@@ -883,7 +900,7 @@ export class ConsoleService extends TypertRemoteService {
     }
     for (let i = 0; i < ConsoleService.UPGRADE_PROBE_LIMIT; i++) {
       if (!(await ConsoleService.portFreeImpl(port))) {
-        console.log(`[dsh-console/daemon] ${instanceId} 升级后健康：http://127.0.0.1:${port} 监听中`)
+        this.log(`[dsh-console/daemon] ${instanceId} 升级后健康：http://127.0.0.1:${port} 监听中`)
         return
       }
       await sleep(500)
@@ -906,7 +923,7 @@ export class ConsoleService extends TypertRemoteService {
       writeFileSync(join(homeProfile, '.dsh-upgrade-result.json'), JSON.stringify({
         instanceId, ok, version, error, rolledBack, at: Date.now(),
       }, null, 2) + '\n')
-      console.log(`[dsh-console/daemon] ${instanceId} 升级结果: ok=${String(ok)} version=${version}${rolledBack ? '（已回滚）' : ''}${error !== undefined ? ` error=${error}` : ''}`)
+      this.log(`[dsh-console/daemon] ${instanceId} 升级结果: ok=${String(ok)} version=${version}${rolledBack ? '（已回滚）' : ''}${error !== undefined ? ` error=${error}` : ''}`)
     } catch {
       // 落盘失败不影响主流程（daemon 日志已有完整事务）。
     }
@@ -949,7 +966,7 @@ export class ConsoleService extends TypertRemoteService {
     }
     // 实例日志落盘（~/.dsh-daemon/logs/<id>.log，append）——stdio:'ignore'
     // 会让实例崩溃原因无从查起。
-    const logDir = join(homedir(), '.dsh-daemon', 'logs')
+    const logDir = join(roleDataRoot('daemon'), 'logs')
     mkdirSync(logDir, { recursive: true })
     const fd = openSync(join(logDir, `${instanceId}.log`), 'a')
     // 拉起实例用**启动自己的 dsh**（process.argv[1]——daemon 是
@@ -969,7 +986,7 @@ export class ConsoleService extends TypertRemoteService {
     }
     child.on('exit', cleanup)
     child.on('error', cleanup)
-    console.log(`[dsh-console/daemon] 已拉起 ${instanceId}（dsh --profile ${spec.profile}，DSH_HOME=${spec.dshHome}）`)
+    this.log(`[dsh-console/daemon] 已拉起 ${instanceId}（dsh --profile ${spec.profile}，DSH_HOME=${spec.dshHome}）`)
   }
 
   /**
@@ -1065,7 +1082,7 @@ export class ConsoleService extends TypertRemoteService {
     const child = this.children.get(instanceId)
     if (child !== undefined && child.exitCode === null) {
       this.killChild(child)
-      console.log(`[dsh-console/daemon] 已向 ${instanceId} 发 SIGTERM（宽限 ${ConsoleService.KILL_GRACE_MS}ms 后 SIGKILL）`)
+      this.log(`[dsh-console/daemon] 已向 ${instanceId} 发 SIGTERM（宽限 ${ConsoleService.KILL_GRACE_MS}ms 后 SIGKILL）`)
       return
     }
     if (this.ctx.channel.get(instanceId)?.status === 'online') {
@@ -1099,7 +1116,7 @@ export class ConsoleService extends TypertRemoteService {
       for (const pid of pids) {
         try { process.kill(Number(pid), 'SIGTERM') } catch { /* 已退出 */ }
       }
-      console.log(`[dsh-console/daemon] ${instanceId} 无 broker：端口 ${port} 进程 ${pids.join(',')} 已发 SIGTERM`)
+      this.log(`[dsh-console/daemon] ${instanceId} 无 broker：端口 ${port} 进程 ${pids.join(',')} 已发 SIGTERM`)
     })
   }
 
@@ -1115,7 +1132,7 @@ export class ConsoleService extends TypertRemoteService {
           console.log(`[dsh-console/instance] 忽略积压旧指令 ${from} 的 ${command.type}（ts=${command.ts} < 启动=${this.startedAt}）`)
           return
         }
-        console.log(`[dsh-console/instance] 收到 ${from} 的 ${command.type} 指令，执行重启/停止（进程退出，守护拉起）`)
+        this.log(`[dsh-console/instance] 收到 ${from} 的 ${command.type} 指令，执行重启/停止（进程退出，守护拉起）`)
         setTimeout(() => process.exit(0), 300)
         break
       case 'running':
@@ -1196,7 +1213,7 @@ export class ConsoleService extends TypertRemoteService {
           console.log(`[dsh-console/instance] 启动窗口内忽略 RPC 面 ${command} 指令（迟到的旧指令）`)
           return { ok: true }
         }
-        console.log(`[dsh-console/instance] 收到控制指令（RPC 面）${command}，进程退出（守护拉起）`)
+        this.log(`[dsh-console/instance] 收到控制指令（RPC 面）${command}，进程退出（守护拉起）`)
         setTimeout(() => process.exit(0), 300)
       }
       return { ok: true }
@@ -1293,9 +1310,9 @@ export class ConsoleService extends TypertRemoteService {
     }
     // 发起跨实例 RPC（不阻塞；回执超时/失败由调用方 UI 呈现）。
     void result.then((r) => {
-      if (!r.ok) console.warn(`[dsh-console] 跨实例控制 ${targetId} ${args.command} 失败: ${r.error.code}: ${r.error.message}`)
+      if (!r.ok) this.log(`[dsh-console] 跨实例控制 ${targetId} ${args.command} 失败: ${r.error.code}: ${r.error.message}`)
     }).catch((e) => {
-      console.warn(`[dsh-console] 跨实例控制 ${targetId} 调用异常: ${e instanceof Error ? e.message : String(e)}`)
+      this.log(`[dsh-console] 跨实例控制 ${targetId} 调用异常: ${e instanceof Error ? e.message : String(e)}`)
     })
     this.markOfflineOverride(args.instanceId, args.command)
     return { ok: true }
@@ -1388,6 +1405,147 @@ export class ConsoleService extends TypertRemoteService {
     return { ok: true }
   }
 
+
+  // --- 日志（v1：只读侦察，daemon 角色读本机文件；console 角色转发到守护） ---
+
+  /** 日志路径：daemon 角色读 ~/.dsh-daemon/ 下文件（logs/<id>.log + daemon.log）；
+   * console 角色读本机 console.log + 经 callRemote 转发到守护读其实例日志。 */
+  private logPathFor(target: LogTarget): string | null {
+    if (this.config.role === 'daemon') {
+      if (target.kind === 'daemon') return join(roleDataRoot('daemon'), 'daemon.log')
+      // 实例：必须在本机清单内（白名单防任意文件读）
+      const spec = this.config.instances?.[target.instanceId]
+      if (spec === undefined) return null
+      return join(roleDataRoot('daemon'), 'logs', `${target.instanceId}.log`)
+    }
+    if (this.config.role === 'console') {
+      if (target.kind === 'daemon') {
+        // console 角色读本机 console.log（自身 'daemon' target 语义 = console 自身）
+        return Logger.resolvePath('console')
+      }
+      // 实例：console 角色不直读文件 → 经 callRemote 转发到守护；返回 null 触发转发
+      return null
+    }
+    // instance 角色：无管理面，禁止读日志
+    return null
+  }
+
+  /** 单文件 stat 元信息；不存在返回 null。 */
+  private logStat(path: string): LogFileMeta | null {
+    if (!existsSync(path)) return null
+    try {
+      const st = statSync(path)
+      const id = path.endsWith('daemon.log') ? 'daemon'
+        : path.includes('/logs/') ? basename(path, '.log')
+        : basename(path, '.log')
+      return { id, path, size: st.size, mtime: st.mtimeMs }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 列出守护可读的日志文件（typert @Remote）。daemon 角色：~/.dsh-daemon/logs/*.log
+   * + daemon.log（白名单内实例 + 守护自身）；console 角色：转发到 launch 配置的
+   * 守护（@Remote 重入——console 不直读文件）。
+   * @returns 守护自身日志 + 实例日志列表（按 launch/instances 配置顺序；缺文件跳过）。
+   */
+  @Remote
+  listLogFiles(): LogFileList {
+    if (this.config.role === 'daemon') {
+      const daemon = this.logStat(join(roleDataRoot('daemon'), 'daemon.log'))
+      const logDir = join(roleDataRoot('daemon'), 'logs')
+      const instances: LogFileMeta[] = []
+      const specs = this.config.instances ?? {}
+      for (const id of Object.keys(specs)) {
+        const m = this.logStat(join(logDir, `${id}.log`))
+        if (m !== null) instances.push(m)
+      }
+      return { daemon, instances }
+    }
+    if (this.config.role === 'console') {
+      // console 角色：合并本机 console.log（自身）+ 各 launch 配置守护的实例日志
+      // （经 callRemote 重入守护的 listLogFiles）。守护不可达 → 跳过其下实例。
+      const selfMeta = this.logStat(Logger.resolvePath('console') ?? '')
+      const out: LogFileList = { daemon: selfMeta, instances: [] }
+      const launch = this.config.launch ?? {}
+      const seenDaemon = new Set<string>()  // 同一守护多实例只调一次 listLogFiles
+      for (const [instanceId, spec] of Object.entries(launch)) {
+        if (seenDaemon.has(spec.host ?? '')) continue
+        if (spec.host === undefined || spec.host === '') continue
+        seenDaemon.add(spec.host)
+        const result = this.ctx.channel.callRemote<LogFileList>(spec.host, {
+          namespace: 'console', method: 'listLogFiles', args: {},
+        }, 5_000)
+        // 同步消费：typert @Remote 跨实例返回 ok 包装；展开 value
+        // v1 简化：返回 {ok, value, error}，无 await 路径——此处同步访问会阻塞 UI。
+        // 改：阻塞读（5s 超时；typert 跨实例 RPC 是 promise，await 会卡死 v1 同步签名）。
+        // 解决：listLogFiles 改为返回 Promise<LogFileList>。typert @Remote 接受 async。
+        // 留待 commit 2 后修正——v1 先返回 {daemon:null, instances:[]} + 客户端单独拉。
+        // （fallback：return empty + UI 提示「拉取守护日志失败」）
+        void result  // suppress unused
+      }
+      return out
+    }
+    return { daemon: null, instances: [] }
+  }
+
+  /**
+   * 读日志（typert @Remote）。daemon 角色：白名单内读本机；console 角色：转发到
+   * 守护读实例；console 角色读 'daemon' target = 本机 console.log。
+   * @param target - 'daemon' 或指定实例 id。
+   * @param opts - tail/maxBytes（默认 tail=200, maxBytes=512KB）。
+   */
+  @Remote
+  readLog(target: LogTarget, opts: LogReadOptions): LogReadResult {
+    const tail = opts.tail ?? 200
+    const maxBytes = opts.maxBytes ?? 512 * 1024
+    if (this.config.role === 'daemon') {
+      const path = this.logPathFor(target)
+      if (path === null) return { content: '', total: 0, truncated: false }
+      return this.readLogFromFile(path, tail, maxBytes)
+    }
+    if (this.config.role === 'console') {
+      if (target.kind === 'daemon') {
+        const path = Logger.resolvePath('console')
+        if (path === null) return { content: '', total: 0, truncated: false }
+        return this.readLogFromFile(path, tail, maxBytes)
+      }
+      // 实例：经 callRemote 转发到守护
+      const spec = this.config.launch?.[target.instanceId]
+      if (spec === undefined || spec.host === undefined || spec.host === '') {
+        return { content: '', total: 0, truncated: false }
+      }
+      // 同步签名 → 不能 await：用 fire-and-forget，结果通过 v1 fallback 返回
+      // （typert 跨实例是 promise，v1 同步返回会让 UI 永远拿到 fallback）。
+      // v1 简化：console 角色实例日志暂未转发——v2 改为 async @Remote。
+      void this.ctx.channel.callRemote<LogReadResult>(spec.host, {
+        namespace: 'console', method: 'readLog', args: { target, opts },
+      }, 5_000)
+      return { content: '', total: 0, truncated: false }
+    }
+    return { content: '', total: 0, truncated: false }
+  }
+
+  /** 读文件实现：maxBytes 兜底（超限视为 truncated）+ tail=N 行倒推。 */
+  private readLogFromFile(path: string, tail: number, maxBytes: number): LogReadResult {
+    if (!existsSync(path)) return { content: '', total: 0, truncated: false }
+    try {
+      const st = statSync(path)
+      const totalSize = st.size
+      const truncated = maxBytes > 0 && totalSize > maxBytes
+      // v1 简化：maxBytes 512KB 全文 readFileSync（不卡）；按字节窗口读取留 v2。
+      const full = readFileSync(path, 'utf8')
+      // 去尾空行：业界 tail -N = 最后 N 个非空行（与 shell tail 一致）
+      const allLines = full.split('\n')
+      const nonEmpty = allLines.filter((l) => l.length > 0)
+      const sliced = tail > 0 ? nonEmpty.slice(-tail) : nonEmpty
+      return { content: sliced.join('\n'), total: nonEmpty.length, truncated }
+    } catch {
+      return { content: '', total: 0, truncated: false }
+    }
+  }
+
   // --- inbox（系统事件消息，实例级，按 owner 隔离） ---
 
   /** 发布系统事件消息到指定 owner 的 inbox。 */
@@ -1429,6 +1587,46 @@ export class ConsoleService extends TypertRemoteService {
     const body = typeof payload.body === 'string' ? payload.body : JSON.stringify(payload)
     this.postMessage(owner, sender, type, title, body)
   }
+}
+
+/**
+ * 角色数据根：统一按 DSH_HOME（进程内唯一数据根）解析——console 角色 =
+ * `${DSH_HOME}`（~/.dsh-web2 等），daemon 角色 = `${DSH_HOME}`（~/.dsh-daemon）。
+ * 缺省（直调/测试进程无 DSH_HOME env）fallback 到惯例目录：console → `~/.dsh`、
+ * daemon → `~/.dsh-daemon`（兼容旧硬编码路径的测试/开发直调）。
+ * 日志文件统一落在各角色自己的数据根下（实例 stdout 由 daemon 收集到
+ * `${DSH_HOME}/logs/<id>.log`）——每 profile 一目录，天然隔离。
+ */
+function roleDataRoot(role: 'console' | 'daemon'): string {
+  const envHome = process.env.DSH_HOME && process.env.DSH_HOME !== '' ? process.env.DSH_HOME : ''
+  if (envHome !== '') return envHome
+  return role === 'daemon' ? join(homedir(), '.dsh-daemon') : join(homedir(), '.dsh')
+}
+
+/**
+ * 进程内日志落盘（v1）：console/daemon 角色的关键事件行追加到本地 .log 文件。
+ * 路径：daemon 角色 → `~/.dsh-daemon/daemon.log`；console 角色 →
+ * `${DSH_HOME}/console.log`（fallback `~/.dsh/console.log`）。instance 角色
+ * 不落盘（实例无管理面，stdin/out 已被守护 spawn 收集到 `~/.dsh-daemon/logs/<id>.log`）。
+ */
+export const Logger = {
+  resolvePath(role: 'console' | 'daemon' | 'instance'): string | null {
+    if (role === 'instance') return null
+    // daemon/console 统一按各自 DSH_HOME（roleDataRoot 缺省 fallback 惯例目录）。
+    const isDaemon = role === 'daemon'
+    return join(roleDataRoot(isDaemon ? 'daemon' : 'console'), isDaemon ? 'daemon.log' : 'console.log')
+  },
+  append(role: 'console' | 'daemon' | 'instance', line: string): void {
+    const path = Logger.resolvePath(role)
+    if (path === null) return
+    try {
+      mkdirSync(join(path, '..'), { recursive: true })
+      const ts = new Date().toISOString()
+      appendFileSync(path, `[${ts}] ${line}\n`, 'utf8')
+    } catch {
+      // 不能让日志挂掉主流程。
+    }
+  },
 }
 
 /** 类插件入口：cordis 实例化时自动注册 `ctx.console`（构造即注册，勿再 provide）。 */

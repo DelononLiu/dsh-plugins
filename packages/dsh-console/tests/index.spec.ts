@@ -8,13 +8,14 @@ import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import * as childProcess from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ChannelService from 'dsh-channel'
 import ConsoleService, {
   applyOverrideStatus,
   resolveControlAction,
+  Logger,
   resolveControlRoute,
   type InstanceRecord,
 } from '../src/index.ts'
@@ -773,5 +774,274 @@ describe('review 修复回归（去 broker 化边界）', () => {
     })
     expect(bad.status).toBe(400)
     ctx[Symbol.dispose]?.()
+  })
+  it('daemon 控制端口：日志面 client-request 信封 → listLogFiles/readLog 回执', async () => {
+    const port = 42100 + Math.floor(Math.random() * 500)
+    const ctx = await bootDaemon({
+      instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } },
+      controlPort: port,
+    })
+    // 等 server 起来
+    await new Promise((r) => setTimeout(r, 100))
+    // listLogFiles：无参数 → 回执 ok + daemon/instances 结构
+    const list = await fetch(`http://127.0.0.1:${port}/api/console/listLogFiles`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'l1', method: 'console/listLogFiles', payload: { args: {} } }),
+    })
+    const ldata = await list.json() as { result: { ok: boolean; value: { daemon: { id: string } | null; instances: Array<{ id: string }> } } }
+    expect(ldata.result.ok).toBe(true)
+    expect(Array.isArray(ldata.result.value.instances)).toBe(true)
+    // readLog：{ target: daemon, opts: { tail } } → 回执 ok
+    const read = await fetch(`http://127.0.0.1:${port}/api/console/readLog`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'client-request', rpcId: 'l2', method: 'console/readLog',
+        payload: { args: { target: { kind: 'daemon' }, opts: { tail: 3 } } },
+      }),
+    })
+    const rdata = await read.json() as { result: { ok: boolean; value: { content: string; total: number } } }
+    expect(rdata.result.ok).toBe(true)
+    expect(typeof rdata.result.value.total).toBe('number')
+    ctx[Symbol.dispose]?.()
+  })
+
+})
+
+describe('Logger（关键事件落盘）', () => {
+  const isolatedHome = (): string => mkdtempSync(join(tmpdir(), 'dsh-logger-'))
+
+  it('resolvePath：daemon → ~/.dsh-daemon/daemon.log', () => {
+    expect(Logger.resolvePath('daemon')).toBe(join(homedir(), '.dsh-daemon', 'daemon.log'))
+  })
+
+  it('resolvePath：daemon 优先 DSH_HOME env（统一按数据根，非硬编码 homedir）', () => {
+    const saved = process.env.DSH_HOME
+    process.env.DSH_HOME = '/tmp/dsh-daemon-custom'
+    try {
+      // daemon 数据根 = DSH_HOME（不再写死 ~/.dsh-daemon）
+      expect(Logger.resolvePath('daemon')).toBe('/tmp/dsh-daemon-custom/daemon.log')
+    } finally {
+      if (saved === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = saved
+    }
+  })
+
+  it('resolvePath：console → DSH_HOME/console.log；缺省 ~/.dsh/console.log', () => {
+    const saved = process.env.DSH_HOME
+    try {
+      process.env.DSH_HOME = '/tmp/test-dsh-home'
+      expect(Logger.resolvePath('console')).toBe('/tmp/test-dsh-home/console.log')
+    } finally {
+      if (saved === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = saved
+    }
+    const saved2 = process.env.DSH_HOME
+    delete process.env.DSH_HOME
+    expect(Logger.resolvePath('console')).toBe(join(homedir(), '.dsh', 'console.log'))
+    if (saved2 !== undefined) process.env.DSH_HOME = saved2
+  })
+
+  it('resolvePath：instance → null（不落盘）', () => {
+    expect(Logger.resolvePath('instance')).toBe(null)
+  })
+
+  it('append：console 角色写 DSH_HOME/console.log（带 ISO 时间戳）', () => {
+    const home = isolatedHome()
+    const saved = process.env.DSH_HOME
+    process.env.DSH_HOME = home
+    try {
+      Logger.append('console', 'test-event-x')
+      const content = readFileSync(join(home, 'console.log'), 'utf8')
+      expect(content).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] test-event-x\n$/)
+    } finally {
+      if (saved === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = saved
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('append：daemon 角色路径含 .dsh-daemon/daemon.log', () => {
+    const path = Logger.resolvePath('daemon')
+    expect(path).not.toBe(null)
+    expect(path).toContain('.dsh-daemon/daemon.log')
+  })
+
+  it('append：instance 角色静默不写', () => {
+    Logger.append('instance', 'should-not-write')
+  })
+
+  it('append：权限错/EACCES 静默吞（不挂主流程）', () => {
+    const saved = process.env.DSH_HOME
+    process.env.DSH_HOME = '/proc/1'
+    try {
+      expect(() => Logger.append('console', 'no-perm')).not.toThrow()
+    } finally {
+      if (saved === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = saved
+    }
+  })
+})
+
+describe('日志（@Remote readLog / listLogFiles）', () => {
+  // 用临时 DSH_HOME + 临时 daemon 路径隔离
+  const isolatedHome = (): string => mkdtempSync(join(tmpdir(), 'dsh-logs-'))
+
+  it('logPathFor：daemon 角色读 ~/.dsh-daemon/logs/<id>.log（白名单校验）', async () => {
+    const home = isolatedHome()
+    process.env.HOME = home
+    try {
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
+      await ctx.plugin(ConsoleService, {
+        role: 'daemon',
+        hostId: 'host1',
+        instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } },
+      })
+      const logPathFor = (target: { kind: 'daemon' } | { kind: 'instance'; instanceId: string }): string | null => {
+        return (ctx.console as unknown as { logPathFor: (t: { kind: 'daemon' } | { kind: 'instance'; instanceId: string }) => string | null }).logPathFor(target)
+      }
+      // 白名单内：web3
+      expect(logPathFor({ kind: 'instance', instanceId: 'web3' })).toContain('.dsh-daemon/logs/web3.log')
+      // 白名单外：null
+      expect(logPathFor({ kind: 'instance', instanceId: 'evil' })).toBe(null)
+      // daemon target
+      expect(logPathFor({ kind: 'daemon' })).toContain('.dsh-daemon/daemon.log')
+      ctx[Symbol.dispose]?.()
+    } finally {
+      // restore HOME
+    }
+  })
+
+  it('listLogFiles：daemon 角色返回本机 logs/ + daemon.log', async () => {
+    const home = isolatedHome()
+    process.env.HOME = home
+    const logDir = join(home, '.dsh-daemon', 'logs')
+    mkdirSync(logDir, { recursive: true })
+    writeFileSync(join(logDir, 'web3.log'), 'line1\nline2\n')
+    writeFileSync(join(home, '.dsh-daemon', 'daemon.log'), 'd1\n')
+    try {
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
+      await ctx.plugin(ConsoleService, {
+        role: 'daemon', hostId: 'host1',
+        instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } },
+      })
+      const list = (ctx.console as unknown as { listLogFiles: () => { daemon: unknown; instances: Array<{ id: string }> } }).listLogFiles()
+      expect(list.daemon).not.toBe(null)
+      expect((list.daemon as { id: string }).id).toBe('daemon')
+      expect(list.instances).toHaveLength(1)
+      expect(list.instances[0].id).toBe('web3')
+      ctx[Symbol.dispose]?.()
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('readLog：daemon 角色读本机 logs/<id>.log（tail 倒推）', async () => {
+    const home = isolatedHome()
+    process.env.HOME = home
+    const logDir = join(home, '.dsh-daemon', 'logs')
+    mkdirSync(logDir, { recursive: true })
+    const lines = Array.from({ length: 500 }, (_, i) => `line-${i}`)
+    writeFileSync(join(logDir, 'web3.log'), lines.join('\n') + '\n')
+    try {
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
+      await ctx.plugin(ConsoleService, {
+        role: 'daemon', hostId: 'host1',
+        instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } },
+      })
+      const readLog = (target: { instanceId: string }, opts: { tail?: number }): { content: string; total: number; truncated: boolean } => {
+        return (ctx.console as unknown as {
+          readLog: (t: { instanceId: string }, o: { tail?: number }) => { content: string; total: number; truncated: boolean }
+        }).readLog(target, opts)
+      }
+      // tail=3：最后 3 行
+      const r = readLog({ instanceId: 'web3' }, { tail: 3 })
+      expect(r.content).toBe('line-497\nline-498\nline-499')
+      expect(r.total).toBe(500)
+      // 不存在的实例 → 空
+      const r2 = readLog({ instanceId: 'nope' }, { tail: 3 })
+      expect(r2.content).toBe('')
+      // 不存在的文件
+      const r3 = readLog({ instanceId: 'fresh' }, { tail: 3 })
+      // 注意：fresh 不在白名单 → 之前 test 的 null 路径
+      ctx[Symbol.dispose]?.()
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('readLog：maxBytes 超限标记 truncated', async () => {
+    const home = isolatedHome()
+    process.env.HOME = home
+    const logDir = join(home, '.dsh-daemon', 'logs')
+    mkdirSync(logDir, { recursive: true })
+    const big = 'x'.repeat(1000)
+    writeFileSync(join(logDir, 'web3.log'), big)
+    try {
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
+      await ctx.plugin(ConsoleService, {
+        role: 'daemon', hostId: 'host1',
+        instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', port: 3083 } },
+      })
+      const readLog = (target: { instanceId: string }, opts: { maxBytes?: number }) => {
+        return (ctx.console as unknown as {
+          readLog: (t: { instanceId: string }, o: { maxBytes?: number }) => { content: string; truncated: boolean }
+        }).readLog(target, opts)
+      }
+      // 100 字节 maxBytes vs 1000 字节内容 → truncated=true
+      const r = readLog({ instanceId: 'web3' }, { maxBytes: 100 })
+      expect(r.truncated).toBe(true)
+      ctx[Symbol.dispose]?.()
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('readLog：console 角色读 daemon target = 本机 console.log', async () => {
+    const home = isolatedHome()
+    const saved = process.env.DSH_HOME
+    process.env.DSH_HOME = home
+    writeFileSync(join(home, 'console.log'), 'c1\nc2\nc3\n')
+    try {
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
+      await ctx.plugin(ConsoleService, {})
+      const readLog = (target: { kind: 'daemon' }, opts: { tail?: number }) => {
+        return (ctx.console as unknown as {
+          readLog: (t: { kind: 'daemon' }, o: { tail?: number }) => { content: string }
+        }).readLog(target, opts)
+      }
+      const r = readLog({ kind: 'daemon' }, { tail: 2 })
+      expect(r.content).toBe('c2\nc3')
+      ctx[Symbol.dispose]?.()
+    } finally {
+      if (saved === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = saved
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('readLog：instance 角色一律返回空（无管理面）', async () => {
+    const home = isolatedHome()
+    process.env.HOME = home
+    try {
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
+      await ctx.plugin(ConsoleService, { role: 'instance' })
+      const readLog = (target: { instanceId: string }) => {
+        return (ctx.console as unknown as {
+          readLog: (t: { instanceId: string }) => { content: string }
+        }).readLog(target, {})
+      }
+      expect(readLog({ instanceId: 'web3' }).content).toBe('')
+      ctx[Symbol.dispose]?.()
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })

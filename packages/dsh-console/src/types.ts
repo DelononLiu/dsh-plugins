@@ -137,3 +137,46 @@ export interface DeployInstanceRequest {
   /** 额外环境变量（如 DSH_RELAY_AGENT/DSH_CONSOLE_ADDR）。 */
   env?: Record<string, string>
 }
+
+/** 日志文件元信息（listLogFiles 元素）。 */
+export interface LogFileMeta {
+  /** 日志标识（实例 id 或 'daemon'）。 */
+  id: string
+  /** 文件路径（debug/展示用；非读取接口参数）。 */
+  path: string
+  /** 文件大小（字节）。 */
+  size: number
+  /** 最后修改时间（epoch ms）。 */
+  mtime: number
+}
+
+/** 日志读取目标：守护自身 or 指定实例（白名单由 role.instances/launch 校验）。 */
+export type LogTarget =
+  | { kind: 'daemon' }
+  | { kind: 'instance'; instanceId: string }
+
+/** 日志读取选项。 */
+export interface LogReadOptions {
+  /** 从文件尾部倒推 N 行（默认 200，0=全文）。 */
+  tail?: number
+  /** 最大字节数（默认 512KB，0=不限）。 */
+  maxBytes?: number
+}
+
+/** 日志读取结果。 */
+export interface LogReadResult {
+  /** 文件内容（已截断/截行后）。 */
+  content: string
+  /** 原始总行数（content 行数 ≤ total）。 */
+  total: number
+  /** 是否被 maxBytes 截断（true=内容不全）。 */
+  truncated: boolean
+}
+
+/** 日志列表视图：守护 + 实例（实例列表由 launch 顺序稳定）。 */
+export interface LogFileList {
+  /** 守护自身日志（如有；可能 null = 未生成过）。 */
+  daemon: LogFileMeta | null
+  /** 实例日志列表（按 launch 配置顺序；缺日志文件 = 跳过）。 */
+  instances: LogFileMeta[]
+}
