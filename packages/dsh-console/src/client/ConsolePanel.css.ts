@@ -46,7 +46,12 @@ const css = `
 .dsh-console-row .grow{flex:1;min-width:0}
 .dsh-console-row .name{font-size:14px;font-weight:500;color:var(--dsw-alias-label-primary)}
 .dsh-console-row .meta{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dsh-console-ver{font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:2px 9px;white-space:nowrap}
+.dsh-console-ver{font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:2px 9px;white-space:nowrap;width:88px;flex:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis}
+/* 实例行操作列：固定宽度列 + 不可用时 disabled 灰显留位占，保证三行同名列横坐标一致 */
+.dsh-console-row .dsh-console-act{flex:none;width:72px;box-sizing:border-box;justify-content:center}
+.dsh-console-row .dsh-console-act-more{width:40px;display:flex;justify-content:flex-end}
+.dsh-console-row .dsh-console-act-btn{width:36px;padding:6px 0;box-sizing:border-box;justify-content:center}
+.dsh-console-row .dsh-console-btn:disabled{opacity:.45;cursor:not-allowed}
 .dsh-console-btn{border:none;border-radius:8px;font-size:12px;padding:6px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-family:inherit;background:transparent;color:var(--dsw-alias-label-secondary)}
 .dsh-console-menu-item{display:block;width:100%;border:none;background:transparent;text-align:left;font-family:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);padding:7px 12px;border-radius:7px;cursor:pointer}
 .dsh-console-menu-item:hover{background:var(--dsw-alias-interactive-bg-hover)}

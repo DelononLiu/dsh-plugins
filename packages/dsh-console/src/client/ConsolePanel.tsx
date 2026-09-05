@@ -47,6 +47,9 @@ function InstanceRow(props: {
   // 行尾「⋯」菜单展开状态（单开：记录展开的实例 id 由 ConsolePanel 管理更简——
   // 这里用本地 state，点击其它行自然收起？多行各自独立——用 id 匹配外部更干净，见 onMore 语义）。
   const [menuOpen, setMenuOpen] = useState(false)
+  // 操作列固定宽度、按"列"渲染：版本胶囊 / 跳转 / 启停 / 重启 / ⋯ 五个槽位
+  // 在每行里都存在（不可用 disabled 灰显留位占），保证三行同名列横坐标一致。
+  const canMore = !!onMore
   return (
     <div className="dsh-console-row">
       <span className={`dot ${opLabel ? 'pend' : (online ? 'on' : 'off')}`} />
@@ -54,34 +57,54 @@ function InstanceRow(props: {
         <div className="name">{item.name}</div>
         <div className="meta">{opLabel ?? (online ? '在线' : '离线')} · {machineName ?? item.host ?? item.id}{item.self ? ' · 当前实例' : ''}</div>
       </div>
-      <span className="dsh-console-ver">{item.version ?? '—'}</span>
-      {canJump && (
-        <button type="button" className="dsh-console-btn" title="打开此实例" onClick={() => { window.open(item.addr, '_blank', 'noopener') }}>
-          跳转⧉
-        </button>
-      )}
-      <button type="button" className="dsh-console-btn" disabled={!!opLabel} title={online ? '停止' : '启动'} onClick={() => { onControl?.(item.id, online ? 'stop' : 'start') }}>
+      <span className="dsh-console-ver" title={item.version ?? ''}>{item.version ?? '—'}</span>
+      <button
+        type="button"
+        className="dsh-console-btn dsh-console-act"
+        disabled={!canJump}
+        title={canJump ? '打开此实例' : (online ? '当前实例不可跳转' : '实例离线，跳转不可用')}
+        onClick={() => { window.open(item.addr, '_blank', 'noopener') }}
+      >
+        跳转⧉
+      </button>
+      <button
+        type="button"
+        className="dsh-console-btn dsh-console-act"
+        disabled={!!opLabel}
+        title={online ? '停止' : '启动'}
+        onClick={() => { onControl?.(item.id, online ? 'stop' : 'start') }}
+      >
         {opLabel ?? (online ? '停止' : '启动')}
       </button>
-      <button type="button" className="dsh-console-btn danger" disabled={!!opLabel} title="重启" onClick={() => { onControl?.(item.id, 'restart') }}>
+      <button
+        type="button"
+        className="dsh-console-btn dsh-console-act danger"
+        disabled={!!opLabel}
+        title="重启"
+        onClick={() => { onControl?.(item.id, 'restart') }}
+      >
         {opLabel === '重启中…' ? '重启中…' : '重启'}
       </button>
-      {onMore && (
-        <div style={{ position: 'relative' }}>
-          <button type="button" className="dsh-console-btn" title="更多操作" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
-          {menuOpen && (
-            <>
-              {/* 点击外部关闭 */}
-              <div style={{ position: 'fixed', inset: 0, zIndex: 1999 }} onClick={() => setMenuOpen(false)} />
-              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 2000, minWidth: 160, background: 'var(--dsw-alias-bg-layer-2)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, boxShadow: 'var(--dsw-shadow-lv2)', padding: 4 }}>
-                <button type="button" className="dsh-console-menu-item" onClick={() => { setMenuOpen(false); onMore('upgrade', item.id) }}>
-                  升级到 0.1.2-rc.1
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+      <div className="dsh-console-act dsh-console-act-more" style={{ position: 'relative' }}>
+        <button
+          type="button"
+          className="dsh-console-btn dsh-console-act-btn"
+          disabled={!canMore}
+          title={canMore ? '更多操作' : '当前实例不可操作'}
+          onClick={() => { if (canMore) setMenuOpen((v) => !v) }}
+        >⋯</button>
+        {canMore && menuOpen && (
+          <>
+            {/* 点击外部关闭 */}
+            <div style={{ position: 'fixed', inset: 0, zIndex: 1999 }} onClick={() => setMenuOpen(false)} />
+            <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 2000, minWidth: 160, background: 'var(--dsw-alias-bg-layer-2)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, boxShadow: 'var(--dsw-shadow-lv2)', padding: 4 }}>
+              <button type="button" className="dsh-console-menu-item" onClick={() => { setMenuOpen(false); onMore!('upgrade', item.id) }}>
+                升级到 0.1.2-rc.1
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
