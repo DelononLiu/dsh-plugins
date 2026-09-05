@@ -596,7 +596,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             <span style={{ width: 22, height: 22, borderRadius: 6, background: 'linear-gradient(135deg,#60a5fa,#818cf8)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#0b1220' }}>d</span>
             dsh 控制台
           </div>
-          <div className="dsh-console-nav-title">导航</div>
           <div className="dsh-console-nav-list">
             {TABS.map((t) => (
               <button key={t.id} type="button" className={`dsh-console-nav-cell${tab === t.id ? ' active' : ''}`} aria-current={tab === t.id ? 'true' : undefined} onClick={() => { setTab(t.id); void refreshInstances() }}>
