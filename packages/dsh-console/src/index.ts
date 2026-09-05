@@ -330,13 +330,17 @@ export class ConsoleService extends TypertRemoteService {
           : (typeof spec.port === 'number' ? `http://127.0.0.1:${spec.port}` : '')
         // declare（管理端声明）：不校验 agent token（register 的 token 校验是
         // agent 自证身份契约；配置清单声明不受 tokens 配置影响）。
+        // 初始 online（声明即身份 + 直连前提）——但构造尾部立即首轮 probe，
+        // 不可达实例马上被 setStatus(offline)，消除"重启即全绿"的假在线窗口。
         ctx.channel.declare({ id, name: id, addr, status: 'online' })
       }
     }
-    // 直连状态探测（管理端 launch / daemon 本机 instances 通用）：注册即 online，
-    // 但无心跳续期会被 sweep 标离线（30s）→ callRemote 直连条件（status online）
-    // 失效、daemon restart 误判离线。周期探测可达性，可达 → heartbeat 续期。
+    // 直连状态探测（管理端 launch / daemon 本机 instances 通用）：可达 → heartbeat
+    // 续期 online；**不可达 → setStatus(offline) 立即离线**（不等 sweep 超时——
+    // 否则声明即 online 后，实例挂了要 heartbeatTimeoutMs 才转灰，UI 假绿）。
+    // declare 后立即首轮 probe（不等 setInterval 首拍 15s），重启瞬间即反映真实状态。
     if (config.launch || config.instances) {
+      this.probeLaunch()
       const probeTimer = setInterval(() => this.probeLaunch(), ConsoleService.PROBE_INTERVAL_MS)
       probeTimer.unref?.()
       ctx.effect(() => () => clearInterval(probeTimer))
@@ -455,7 +459,11 @@ export class ConsoleService extends TypertRemoteService {
         .then(() => {
           try { this.ctx.channel.heartbeat(id, '') } catch { /* 未注册 */ }
         })
-        .catch(() => { /* 不可达/超时：不续期，sweep 会标离线 */ })
+        .catch(() => {
+          // 不可达/超时：立即标离线（不续期等 sweep）——探测结果驱动状态，
+          // 避免"进程已停仍绿 heartbeatTimeoutMs"的假在线。
+          try { this.ctx.channel.setStatus(id, 'offline') } catch { /* 未注册 */ }
+        })
     }
   }
 

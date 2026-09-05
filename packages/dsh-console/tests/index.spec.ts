@@ -731,7 +731,7 @@ describe('review 修复回归（去 broker 化边界）', () => {
     if (prev === undefined) delete process.env.DSH_RELAY_AGENT; else process.env.DSH_RELAY_AGENT = prev
   })
 
-  it('直连探测：可达 → heartbeat 续期保持 online；不可达 → 不续期', async () => {
+  it('直连探测：可达 → heartbeat 续期保持 online；不可达 → 立即 setStatus(offline)（不假绿）', async () => {
     let reachable = true
     vi.stubGlobal('fetch', vi.fn(async () => {
       if (!reachable) throw new Error('ECONNREFUSED')
@@ -742,11 +742,36 @@ describe('review 修复回归（去 broker 化边界）', () => {
     await ctx.plugin(ConsoleService, { launch: { web3: { host: 'host1', addr: 'http://127.0.0.1:3083', dshHome: 'x', profile: 'web' } } })
     const consoleSvc = ctx.console as unknown as { probeLaunch(): Promise<void> }
     await consoleSvc.probeLaunch()
+    await new Promise((r) => setTimeout(r, 20))
     expect(ctx.channel.get('web3')?.status).toBe('online')
-    // 不可达 → 不续期（但声明仍在线；sweep 才会标离线）
+    // 不可达 → 立即标离线（探测结果驱动——不等 sweep 窗口，消除假绿）
     reachable = false
     await consoleSvc.probeLaunch()
-    expect(ctx.channel.get('web3')?.status).toBe('online') // lastSeen 未刷新，但未到 sweep 窗口
+    await new Promise((r) => setTimeout(r, 20))
+    expect(ctx.channel.get('web3')?.status).toBe('offline')
+    // 恢复可达 → 再探回 online
+    reachable = true
+    await consoleSvc.probeLaunch()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(ctx.channel.get('web3')?.status).toBe('online')
+    vi.unstubAllGlobals()
+  })
+
+  it('构造后立即首轮 probe：launch 中不可达实例即刻 offline（重启不假绿）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }))
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    // 构造即首轮 probe——不可达的 web3/web4 应立即转 offline，不等 15s interval 首拍 + 30s sweep。
+    await ctx.plugin(ConsoleService, {
+      launch: {
+        web3: { host: 'host1', addr: 'http://127.0.0.1:3083', dshHome: 'x', profile: 'web' },
+        web4: { host: 'host1', addr: 'http://127.0.0.1:3084', dshHome: 'x', profile: 'web' },
+      },
+    })
+    // 等首轮 probe 的异步 fetch 完成（构造内立即调用，非 interval 15s）
+    await new Promise((r) => setTimeout(r, 50))
+    expect(ctx.channel.get('web3')?.status).toBe('offline')
+    expect(ctx.channel.get('web4')?.status).toBe('offline')
     vi.unstubAllGlobals()
   })
 

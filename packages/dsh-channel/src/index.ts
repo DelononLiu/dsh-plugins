@@ -311,6 +311,21 @@ export class ChannelService extends TypertRemoteService {
   }
 
   /**
+   * 设置实例状态（管理端探测结果驱动）。本地管理面调用（进程内）——
+   * 不 @Remote（跨进程实例状态以各自 register/心跳为准，防止远端越权改状态）。
+   * 用于管理端探测到不可达时**立即**标离线（不等心跳超时 sweep——
+   * 否则 launch 声明即 online 的假绿窗口长达 heartbeatTimeoutMs）。
+   * @param instanceId - 实例 id。
+   * @param status - 目标状态。
+   */
+  setStatus(instanceId: string, status: 'online' | 'offline'): void {
+    const entry = this.instances.get(instanceId)
+    if (!entry) return // 未声明：不抛（探测竞态下实例可能刚被清理）
+    entry.status = status
+    if (status === 'online') entry.lastSeen = Date.now()
+  }
+
+  /**
    * 发现：列出全部已知实例（含离线——离线由心跳超时标记）。
    * @returns 实例基础身份列表。
    */
