@@ -437,9 +437,19 @@ export class ConsoleService extends TypertRemoteService {
     })
     // 主机守护（host<hostId>）与普通实例分开返回，UI 分别呈现。
     // HostRecord.version 必填，但守护经 broker peers 发现（无版本信息）→ 补默认空串（未知）。
+    // 主机条目带机器名/IP（launch 的 host 键条目配 name/ip——UI 呈现机器，
+    // 不暴露 agent id）。HostRecord.version 必填，守护无版本信息补空串。
     const hosts = view
       .filter((i) => isHostAgent(i.id))
-      .map((h) => ({ ...h, version: h.version ?? '' }))
+      .map((h) => {
+        const hostSpec = this.config.launch?.[h.id] as { name?: string; ip?: string } | undefined
+        return {
+          ...h,
+          version: h.version ?? '',
+          name: hostSpec?.name,
+          ip: hostSpec?.ip,
+        }
+      })
     const instanceList = view.filter((i) => !isHostAgent(i.id))
     return { instances: instanceList as unknown as InstanceRecord[], hosts: hosts as unknown as HostRecord[] }
   }

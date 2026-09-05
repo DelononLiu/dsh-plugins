@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConsoleHost } from './types'
-import type { ConsoleInstanceViewItem, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget } from 'dsh-console/types'
+import type { ConsoleInstanceViewItem, HostRecord, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget } from 'dsh-console/types'
 
 // ---- 页签定义 ----
 type TabId = 'overview' | 'instances' | 'hosts' | 'logs'
@@ -35,8 +35,9 @@ function InstanceRow(props: {
   checked?: boolean
   statusBadge?: React.ReactNode
   onSelect?: () => void
+  machineName?: string
 }): React.JSX.Element {
-  const { item, host, checked, statusBadge, onSelect } = props
+  const { item, host, checked, statusBadge, onSelect, machineName } = props
   const online = item.status === 'online'
   const canJump = online && item.addr !== '' && item.id !== 'self'
   return (
@@ -49,7 +50,7 @@ function InstanceRow(props: {
       <span className={`dot ${online ? 'on' : 'off'}`} />
       <div className="grow">
         <div className="name">{item.name}</div>
-        <div className="meta">{item.host ?? item.id}{item.self ? '（本端）' : ''} · {online ? '在线' : '离线'}</div>
+        <div className="meta">{machineName ?? item.host ?? item.id}{item.self ? '（本端）' : ''} · {online ? '在线' : '离线'}</div>
       </div>
       <span className="dsh-console-ver">{item.version ?? '—'}</span>
       {statusBadge}
@@ -87,6 +88,8 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const { host, onClose } = props
   const [tab, setTab] = useState<TabId>('overview')
   const [instances, setInstances] = useState<ConsoleInstanceViewItem[]>([])
+  /** 主机记录（v.hosts：含机器 name/ip，agent id 不展示）。 */
+  const [hostRecords, setHostRecords] = useState<HostRecord[]>([])
   const [loaded, setLoaded] = useState(false)
   const [lastUpdated, setLastUpdated] = useState(0)
   /** 已知守护主机（新建实例的目标下拉选项：view.hosts + 实例所属 host 去重）。 */
@@ -191,6 +194,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     try {
       const v = await host.listInstances()
       setInstances(v.instances ?? [])
+      setHostRecords(v.hosts ?? [])
       // 守护选项：hosts（host\d+ 守护）+ 实例所属 host 去重；空则保留默认 host1。
       const hosts = Array.from(new Set([
         ...(v.hosts ?? []).map((h) => h.id),
@@ -266,6 +270,11 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   }, [])
 
   const close = useCallback(() => onClose(), [onClose])
+  /** host id（agent 名）→ 机器名（hostRecords 映射；未知回退 hostId）。 */
+  const machineNameOf = (hostId: string | undefined): string => {
+    if (!hostId) return ''
+    return hostRecords.find((h) => h.id === hostId)?.name ?? hostId
+  }
   const online = instances.filter((i) => i.status === 'online').length
   const hostCount = new Set(instances.map((i) => i.host ?? i.id)).size
 
@@ -286,7 +295,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               <div className="dsh-console-row" key={i.id}>
                 <span className={`dot ${i.status === 'online' ? 'on' : 'off'}`} />
                 <div className="grow">
-                  <div className="name">{i.name} <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>· {i.host ?? i.id}</span></div>
+                  <div className="name">{i.name} <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>· {machineNameOf(i.host) || i.id}</span></div>
                   <div className="meta">{i.version ?? '—'}</div>
                 </div>
                 <span style={{ color: i.status === 'online' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>
@@ -352,6 +361,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 key={i.id}
                 item={i}
                 host={host}
+                machineName={machineNameOf(i.host)}
                 checked={showUpgrade && upgradeSel.has(i.id) ? true : undefined}
                 onSelect={showUpgrade && !i.self ? () => toggleUpgradeSel(i.id) : undefined}
                 statusBadge={i.self ? <span className="dsh-console-badge idle">本端</span> : undefined}
@@ -368,19 +378,30 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               <button type="button" className="dsh-console-btn" onClick={() => { void refreshInstances() }} title="立即刷新（每 10s 自动）">⟳ 刷新</button>
               <button type="button" className="dsh-console-btn primary" onClick={() => setShowDeploy((v) => !v)}>{showDeploy ? '收起部署' : '＋ 部署新主机'}</button>
             </div>
-            {loaded && [...new Set(instances.map((i) => i.host ?? i.id))].map((h) => {
-              const onHost = instances.filter((i) => (i.host ?? i.id) === h)
+            {loaded && hostRecords.length > 0 && hostRecords.map((hr) => {
+              // 管理端宿主识别：instances 中 self（本端管理端）实例的 host = 该主机 id。
+              const isConsoleHost = instances.some((i) => i.self === true && (i.host ?? i.id) === hr.id)
+              const onHost = instances.filter((i) => (i.host ?? i.id) === hr.id)
               const anyOnline = onHost.some((i) => i.status === 'online')
+              const displayName = hr.name && hr.name !== '' ? hr.name : (isConsoleHost ? '本机' : hr.id)
               return (
-                <div className="dsh-console-row" key={h}>
+                <div className="dsh-console-row" key={hr.id}>
                   <span className={`dot ${anyOnline ? 'on' : 'off'}`} />
                   <div className="grow">
-                    <div className="name">{h} <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>· 守护 daemon</span></div>
-                    <div className="meta">{onHost.length} 个实例 · {anyOnline ? '在线' : '离线'}</div>
+                    <div className="name">
+                      {displayName}
+                      <span className="dsh-console-badge" style={{ marginLeft: 8, ...(isConsoleHost
+                        ? { background: 'color-mix(in srgb,var(--dsw-alias-brand-primary) 15%,transparent)', color: 'var(--dsw-alias-brand-primary)' }
+                        : { background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-secondary)', border: '1px solid var(--dsw-alias-border-l1)' }) }}>
+                        {isConsoleHost ? '管理主机' : '主机'}
+                      </span>
+                    </div>
+                    <div className="meta">{hr.ip && hr.ip !== '' ? hr.ip : '—'} · {onHost.length} 个实例 · {anyOnline ? '在线' : '离线'}</div>
                   </div>
                 </div>
               )
             })}
+            {loaded && hostRecords.length === 0 && <div className="dsh-console-toolbar"><span className="hint">暂无主机</span></div>}
             {showDeploy && (
               <>
             <div style={{ background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12, padding: '12px 14px', fontSize: 12, lineHeight: 1.9, color: 'var(--dsw-alias-label-secondary)', marginBottom: 18, whiteSpace: 'pre-line' }}>

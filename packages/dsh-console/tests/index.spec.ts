@@ -775,6 +775,24 @@ describe('review 修复回归（去 broker 化边界）', () => {
     vi.unstubAllGlobals()
   })
 
+
+  it('listInstances：host 条目带 name/ip → hosts 返回机器名/IP（不暴露 agent 名语义）', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, {
+      launch: {
+        host1: { host: 'host1', name: '本机开发机', ip: '127.0.0.1', addr: 'http://127.0.0.1:3089' },
+        web2: { host: 'host1', addr: 'http://127.0.0.1:3082' },
+      },
+    })
+    const view = (ctx.console as unknown as { listInstances(): { hosts: Array<{ id: string; name?: string; ip?: string }> } }).listInstances()
+    const h1 = view.hosts.find((h) => h.id === 'host1')
+    expect(h1).toBeDefined()
+    expect(h1?.name).toBe('本机开发机')
+    expect(h1?.ip).toBe('127.0.0.1')
+    ctx[Symbol.dispose]?.()
+  })
+
   it('daemon 控制端口：client-request 信封 → controlInstance/listInstances 回执', async () => {
     const port = 41100 + Math.floor(Math.random() * 500)
     const ctx = await bootDaemon({

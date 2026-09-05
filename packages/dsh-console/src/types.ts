@@ -32,10 +32,14 @@ export interface InstanceRecord {
 
 /** 主机档案（部署单元）。 */
 export interface HostRecord {
-  /** 主机 id。 */
+  /** 主机 id（内部键，可能为 agent 名——UI 不直接展示）。 */
   id: string
-  /** 主机名/地址。 */
+  /** 机器地址（守护控制/访问地址，内部用；IP 展示见 ip）。 */
   addr: string
+  /** 机器友好名（launch hosts.name；如"本机开发机"）。 */
+  name?: string
+  /** 机器 IP（launch hosts.ip；如 192.168.1.5）。 */
+  ip?: string
   /** 在线状态（聚合自其下实例心跳）。 */
   status: 'online' | 'offline'
   /** 已部署的发行包版本。 */
