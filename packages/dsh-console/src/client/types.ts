@@ -4,7 +4,7 @@
 import type { BrokerStatusView } from 'dsh-channel/types'
 import type {
   BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest,
-  LogFileList, LogReadOptions, LogReadResult, UpgradeBatchResult,
+  LogFileList, LogReadOptions, LogReadResult, UpgradeBatchResult, UpgradeStatus,
 } from 'dsh-console/types'
 
 /** ConsoleHost 数据源（apply 注入：typert remote 面）。 */
@@ -20,6 +20,8 @@ export interface ConsoleHost {
   upgradeInstances(instanceIds: string[], version: string): Promise<UpgradeBatchResult>
   /** 列日志文件（v1：daemon 角色本机；console 角色仅自身 console.log）。 */
   listLogFiles(): Promise<LogFileList>
+  /** 查实例升级状态（进度轮询；daemon 落盘状态文件，console 跨实例转发查询）。 */
+  getUpgradeStatus(instanceId: string): Promise<UpgradeStatus>
   /** 读日志（target.kind: 'daemon' = 守护自身/console.log；'instance' = 指定实例）。 */
   readLog(target: { kind: 'daemon' } | { kind: 'instance'; instanceId: string }, opts: LogReadOptions): Promise<LogReadResult>
 }

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConsoleHost } from './types'
 import type { ConsoleInstanceViewItem, HostRecord, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget } from 'dsh-console/types'
+import { UpgradeDialog } from './UpgradeDialog'
 
 // ---- 页签定义 ----
 type TabId = 'overview' | 'instances' | 'hosts' | 'logs'
@@ -136,21 +137,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     }
   }
 
-  // 单实例升级（行「⋯」菜单入口）：下发守护执行，结果 toast + 状态轮询收敛。
-  const upgradeInstance = async (id: string): Promise<void> => {
-    try {
-      const r = await host.upgradeInstances([id], '0.1.2-rc.1')
-      const res = r.results[0]
-      if (res?.ok) {
-        setToast({ kind: 'ok', msg: `已下发升级 ${id}（守护将快照→对齐→滚动重启，完成以重新在线为准）` })
-      } else {
-        setToast({ kind: 'error', msg: `升级 ${id} 失败：${res?.error ?? '未知原因'}` })
-      }
-    } catch (e) {
-      setToast({ kind: 'error', msg: `升级 ${id} 调用异常：${e instanceof Error ? e.message : String(e)}` })
-    }
-  }
-
   // pending 状态收敛检查：轮询数据里目标状态已达成 → 清 pending + ok toast（如刚启动完成）
   // 由 refreshInstances 调用（每 10s 轮询，含打开/操作后立即刷新路径）。
   const settlePending = (list: ConsoleInstanceViewItem[]): void => {
@@ -195,6 +181,8 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   }
   /** 操作结果 toast：{kind: 'ok'|'error', msg}——自动消失。 */
   const [toast, setToast] = useState<{ kind: 'ok' | 'error'; msg: string } | null>(null)
+  /** 升级对话框目标实例（null = 关闭）。 */
+  const [upgradeTarget, setUpgradeTarget] = useState<ConsoleInstanceViewItem | null>(null)
   const [newInstId, setNewInstId] = useState('')
   const [newInstPort, setNewInstPort] = useState('')
   const [newInstHost, setNewInstHost] = useState('host1')
@@ -404,7 +392,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 machineName={machineNameOf(i.host)}
                 opLabel={opPending?.id === i.id ? (opPending.op === 'start' ? '启动中…' : opPending.op === 'stop' ? '停止中…' : '重启中…') : undefined}
                 onControl={(id, op) => { void runControl(id, op) }}
-                onMore={i.self ? undefined : (id) => { void upgradeInstance(id) }}
+                onMore={i.self ? undefined : (_action, id) => { const inst = sortedInstances.find((x) => x.id === id); if (inst) setUpgradeTarget(inst) }}
               />
             ))}
           </>
@@ -547,6 +535,14 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
         <div className={`dsh-console-toast ${toast.kind}`} role="status">
           {toast.kind === 'ok' ? '✓ ' : '✗ '}{toast.msg}
         </div>
+      )}
+      {upgradeTarget && (
+        <UpgradeDialog
+          item={upgradeTarget}
+          host={host}
+          version="0.1.2-rc.1"
+          onClose={() => setUpgradeTarget(null)}
+        />
       )}
       <div className="dsh-console-panel" role="dialog" aria-modal="true" aria-label="dsh 控制台">
         <nav className="dsh-console-nav">

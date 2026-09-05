@@ -14,7 +14,7 @@
 
 import { createElement } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, LogFileList, LogReadOptions, LogReadResult, UpgradeBatchResult } from 'dsh-console/types'
+import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, LogFileList, LogReadOptions, LogReadResult, UpgradeBatchResult, UpgradeStatus } from 'dsh-console/types'
 import type { BrokerStatusView } from 'dsh-channel/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
@@ -131,6 +131,14 @@ export function apply(ctx: ClientContext): void {
               await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
               const result = await ns!.readLog(target, opts)
               if (!result.ok) throw new Error(`console.readLog failed: ${result.error.code}: ${result.error.message}`)
+              return result.value
+            },
+            getUpgradeStatus: async (instanceId) => {
+              await consoleReady
+              let ns: { getUpgradeStatus(id: string): Promise<{ ok: boolean; value: UpgradeStatus; error: { code: string; message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.getUpgradeStatus(instanceId)
+              if (!result.ok) throw new Error(`console.getUpgradeStatus failed: ${result.error.code}: ${result.error.message}`)
               return result.value
             },
           }

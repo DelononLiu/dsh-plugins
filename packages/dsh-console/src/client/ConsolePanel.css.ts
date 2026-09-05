@@ -70,6 +70,8 @@ const css = `
 .dsh-console-step .b{position:absolute;left:20%;top:0;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-bg-layer-1);border:2px solid var(--dsw-alias-border-l2);z-index:1}
 .dsh-console-step.done .b{background:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}
 .dsh-console-step.doing .b{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 4px rgba(96,165,250,.25)}
+.dsh-console-step.fail .b{background:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
+.dsh-console-step.fail:before{background:var(--dsw-alias-state-error-primary)}
 .dsh-console-step .c{font-size:11px;color:var(--dsw-alias-label-secondary);line-height:1.5}
 .dsh-console-step.done .c{color:var(--dsw-alias-label-primary)}
 .dsh-console-code{margin-top:24px;padding:14px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;font-size:12px;color:var(--dsw-alias-label-secondary);font-family:var(--ds-font-family-code);white-space:pre-wrap;word-break:break-all}

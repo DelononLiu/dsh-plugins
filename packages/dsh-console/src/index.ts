@@ -37,6 +37,7 @@ import { connect } from 'node:net'
 import type {
   BootstrapResult, ControlResult, ConsoleInstanceView, DeployInstanceRequest, HostRecord, InstanceRecord, InstanceType,
   LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget, UpgradeBatchResult, UpgradeItemResult,
+  UpgradeStatus, UpgradeStep,
 } from './types.ts'
 export type * from './types.ts'
 export type { BootstrapResult, ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType } from './types.ts'
@@ -759,6 +760,19 @@ export class ConsoleService extends TypertRemoteService {
     this.ops.delete(instanceId)
   }
 
+  /**
+   * 落盘升级状态到实例 home 的 .dsh-upgrade-status.json（进度 UI 轮询读）。
+   * daemon 执行面每步完成调用；console 经 @Remote getUpgradeStatus 跨实例查询。
+   */
+  private writeUpgradeStatus(spec: LaunchSpec, instanceId: string, status: Omit<UpgradeStatus, 'instanceId' | 'ts'>): void {
+    try {
+      const path = join(spec.dshHome, '.dsh-upgrade-status.json')
+      writeFileSync(path, JSON.stringify({ instanceId, ...status, ts: Date.now() }, null, 2) + '\n', 'utf8')
+    } catch {
+      // 状态落盘失败不阻断升级事务。
+    }
+  }
+
   // --- daemon 角色：统一升级事务（快照 → 对齐发行包源 → 滚动重启 → 健康探测 → 失败自动回滚） ---
 
   /**
@@ -786,31 +800,45 @@ export class ConsoleService extends TypertRemoteService {
         return
       }
       // 1. 快照（升级前状态 = 回滚点）。
+      this.writeUpgradeStatus(spec, instanceId, { step: 'snapshot', done: false, version, message: '开始升级：快照当前发行包…' })
       const snapRoot = join(spec.dshHome, '.dsh-upgrade-snapshots', instanceId)
       const snapshot = this.saveReleaseSnapshot(snapRoot, homeProfile)
       let applied = false
       try {
         // 2. reconcile 到守护发行包源。
+        this.writeUpgradeStatus(spec, instanceId, { step: 'snapshot', done: true, version, message: '快照完成（保留为回滚点）' })
+        this.writeUpgradeStatus(spec, instanceId, { step: 'align', done: false, version, message: '对齐守护发行包源…' })
         this.applyReleaseFromTemplate(homeProfile, instanceId, spec, version)
         if (ConsoleService.upgradeApplyError) throw ConsoleService.upgradeApplyError
         applied = true
         this.log(`[dsh-console/daemon] 升级 ${instanceId}：发行包已对齐守护源（version=${version || '当前'}），滚动重启`)
+        this.writeUpgradeStatus(spec, instanceId, { step: 'align', done: true, version, message: '发行包已对齐守护源' })
         // 3. 滚动重启 + 健康探测。
+        this.writeUpgradeStatus(spec, instanceId, { step: 'restart', done: false, version, message: '滚动重启实例…' })
         await this.restartAfterUpgrade(instanceId, spec)
+        this.writeUpgradeStatus(spec, instanceId, { step: 'restart', done: true, version, message: '实例已重启' })
+        this.writeUpgradeStatus(spec, instanceId, { step: 'health', done: false, version, message: '健康探测…' })
+        // 健康探测结果经 restartAfterUpgrade 内确认；完成后标记 done。
+        this.writeUpgradeStatus(spec, instanceId, { step: 'health', done: true, version, message: '健康检查通过' })
         this.recordUpgradeResult(homeProfile, instanceId, true, version)
+        this.writeUpgradeStatus(spec, instanceId, { step: 'done', done: true, ok: true, version, message: '升级完成' })
         this.emitUpgradeResult(instanceId, version, true)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         this.log(`[dsh-console/daemon] 升级 ${instanceId} 失败（${message}），自动回滚快照`)
         // 4. 失败自动回滚：恢复最近快照；发行包已被替换过 → 回滚后重启（旧进程已停）。
         try {
+          this.writeUpgradeStatus(spec, instanceId, { step: 'rollback', done: false, version, message: `升级失败（${message}），自动回滚…` })
           this.restoreReleaseSnapshot(snapshot, homeProfile)
           if (applied) await this.restartAfterUpgrade(instanceId, spec)
           this.recordUpgradeResult(homeProfile, instanceId, false, version, message, true)
+          this.writeUpgradeStatus(spec, instanceId, { step: 'rollback', done: true, version, message: '已回滚到升级前版本' })
+          this.writeUpgradeStatus(spec, instanceId, { step: 'done', done: true, ok: false, error: message, rolledBack: true, version, message: '升级失败，已回滚' })
           this.emitUpgradeResult(instanceId, version, false, message, true)
         } catch (rollbackError) {
           this.log(`[dsh-console/daemon] 升级 ${instanceId} 回滚也失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
           this.recordUpgradeResult(homeProfile, instanceId, false, version, `升级失败且回滚失败: ${message}`, false)
+          this.writeUpgradeStatus(spec, instanceId, { step: 'done', done: true, ok: false, error: `升级失败且回滚失败: ${message}`, version, message: '升级与回滚均失败' })
           this.emitUpgradeResult(instanceId, version, false, `升级失败且回滚失败: ${message}`, false)
         }
       }
@@ -1549,6 +1577,49 @@ export class ConsoleService extends TypertRemoteService {
       return { content: '', total: 0, truncated: false }
     }
     return { content: '', total: 0, truncated: false }
+  }
+
+  /**
+   * 查升级状态（typert @Remote）。daemon 角色：读本机实例 home 的状态文件；
+   * console 角色：经 callRemote 转发到守护查询（与日志转发同模式）。
+   * @param instanceId - 实例 id。
+   * @returns 状态（无记录/不可达 → step='done' + ok=false + error 说明）。
+   */
+  @Remote
+  async getUpgradeStatus(instanceId: string): Promise<UpgradeStatus> {
+    if (this.config.role === 'daemon') {
+      const spec = this.config.instances?.[instanceId]
+      if (spec === undefined) {
+        return { instanceId, step: 'done', done: true, ok: false, version: '', error: '实例不在本机清单', ts: Date.now(), message: '无状态' }
+      }
+      try {
+        const path = join(spec.dshHome, '.dsh-upgrade-status.json')
+        if (!existsSync(path)) {
+          return { instanceId, step: 'done', done: true, version: '', ts: Date.now(), message: '无升级记录' }
+        }
+        const raw = JSON.parse(readFileSync(path, 'utf8')) as UpgradeStatus
+        return { ...raw, instanceId }
+      } catch {
+        return { instanceId, step: 'done', done: true, ok: false, version: '', error: '状态文件损坏', ts: Date.now(), message: '状态读取失败' }
+      }
+    }
+    if (this.config.role === 'console') {
+      // 实例：经 callRemote 转发到守护查（@Remote 跨实例重入，async 可 await）。
+      const spec = this.config.launch?.[instanceId]
+      if (spec === undefined || spec.host === undefined || spec.host === '') {
+        return { instanceId, step: 'done', done: true, ok: false, version: '', error: '无守护宿主', ts: Date.now(), message: '无状态' }
+      }
+      try {
+        const r = await this.ctx.channel.callRemote<UpgradeStatus>(spec.host, {
+          namespace: 'console', method: 'getUpgradeStatus', args: { instanceId },
+        }, 5_000)
+        if (r.ok) return { ...(r.value as UpgradeStatus), instanceId }
+        return { instanceId, step: 'done', done: true, ok: false, version: '', error: `守护查询失败: ${r.error?.code ?? 'unknown'}`, ts: Date.now(), message: '无状态' }
+      } catch (e) {
+        return { instanceId, step: 'done', done: true, ok: false, version: '', error: e instanceof Error ? e.message : String(e), ts: Date.now(), message: '守护不可达' }
+      }
+    }
+    return { instanceId, step: 'done', done: true, version: '', ts: Date.now(), message: '' }
   }
 
   /** 读文件实现：maxBytes 兜底（超限视为 truncated）+ tail=N 行倒推。 */
