@@ -388,7 +388,8 @@ export class ConsoleService extends TypertRemoteService {
         // daemon/instance 角色部署的无 webserver profile 不会走到这里）。
         // 注意用注入后的 ctx（webServer 只在注入 fiber 的 scope 可见）。
         ctx.inject(['webServer'], (injected) => {
-          this.log('[dsh-console] console 角色：webServer 可用，注册控制端点')
+          // 启动注册是固定动作非审计事件——仅终端可见，不落盘（避免噪音刷屏审计日志）。
+          console.log('[dsh-console] console 角色：webServer 可用，注册控制端点')
           const disposers = [
             injected.webServer.register({
               kind: 'exact',
@@ -1252,19 +1253,24 @@ export class ConsoleService extends TypertRemoteService {
     const route = resolveControlRoute(command, online, daemonAgent)
     switch (route.action) {
       case 'noop':
+        this.log(`[dsh-console] 控制 ${instanceId} ${command} → noop 忽略（${online ? '已在线' : '已离线'}）`)
         return { ok: true }
       case 'daemon': {
         // 守护从未注册（launch.host 拼错）→ 显式失败。
         if (this.ctx.channel.get(route.daemonAgent) === undefined) {
+          this.log(`[dsh-console] 控制 ${instanceId} ${command} → 失败：目标守护 ${route.daemonAgent} 未注册（launch 配置 host 疑错）`)
           return { ok: false, error: `目标守护 ${route.daemonAgent} 未注册（检查 launch 配置 host）` }
         }
         // 跨实例 RPC：daemon 的 console.controlInstance 本地执行（拿到回执）。
+        this.log(`[dsh-console] 控制 ${instanceId} ${command} → 下发守护 ${route.daemonAgent}`)
         return this.remoteControl(route.daemonAgent, { instanceId, command: route.command })
       }
       case 'instance':
         // 跨实例 RPC：instance 的 console.controlInstance 自退处理。
+        this.log(`[dsh-console] 控制 ${instanceId} ${command} → 下发实例自退（无守护兜底）`)
         return this.remoteControl(instanceId, { instanceId, command: route.command })
       case 'error':
+        this.log(`[dsh-console] 控制 ${instanceId} ${command} → 失败：${route.reason}`)
         return { ok: false, error: route.reason }
     }
   }
