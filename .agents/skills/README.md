@@ -1,17 +1,20 @@
-# Skills（vendored 自官方 harness 并适配）
+# Skills（vendored 自官方 harness 并适配，外加社区/工具 skill）
 
-本目录 skills **vendored 自官方仓库** [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（`.agents/skills/`，MIT License，© 2026 DeepSeek），并在本仓库语境下适配（去掉官方脚本/文档引用，替换为本仓库规则）。
+本目录大部分 skills **vendored 自官方仓库** [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（`.agents/skills/`，MIT License，© 2026 DeepSeek），并在本仓库语境下适配（去掉官方脚本/文档引用，替换为本仓库规则）。
 
-| Skill | 适配情况 |
-| --- | --- |
-| dsh-trim-cot-leakage | 直接用（删失效引用）——修剪思维链泄漏散文 |
-| dsh-prose-standard | 适配（去官方文档引用 → 本仓库 AGENTS/architecture） |
-| dsh-code-review | 重写为本仓库规则（分层/note/提交/整体性） |
-| dsh-pre-push-checks | 重写为本仓库自检清单（typecheck/规则/同步/残留/diff） |
-| dsh-kernel-upgrade | 本仓库原创——内核/依赖基线升级流程（隔离 web5 验证 + 适配 + 铺开，含 `verify-kernel-upgrade.sh` 强制验证） |
-| record-browser-gif | 工具直接拷（含 encode_gif.py；依赖 harness 环境浏览器能力） |
+例外：`browser-skill` 不出自官方 harness——SKILL.md 主体字节抽取自 [Tencent BrowserSkill](https://github.com/Tencent/BrowserSkill) 的 `bsk` CLI 二进制内嵌资源（MIT，© Tencent BrowserSkill contributors），由本仓库降级为 agent skill 形态（通过 `bash` 调 `bsk` 而非 dsh 插件注册）。详见该 skill 的"版权与来源"段。
 
-保留官方版权声明（MIT © 2026 DeepSeek）；本仓库适配改动亦为 MIT（见根 LICENSE）。上游更新时按 vendoring policy 同步。
+| Skill | 来源 | 适配情况 |
+| --- | --- | --- |
+| dsh-trim-cot-leakage | 官方 harness | 直接用（删失效引用）——修剪思维链泄漏散文 |
+| dsh-prose-standard | 官方 harness | 适配（去官方文档引用 → 本仓库 AGENTS/architecture） |
+| dsh-code-review | 官方 harness | 重写为本仓库规则（分层/note/提交/整体性） |
+| dsh-pre-push-checks | 官方 harness | 重写为本仓库自检清单（typecheck/规则/同步/残留/diff） |
+| dsh-kernel-upgrade | 本仓库原创 | 内核/依赖基线升级流程（隔离 web5 验证 + 适配 + 铺开，含 `verify-kernel-upgrade.sh` 强制验证） |
+| record-browser-gif | 官方 harness | 工具直接拷（含 encode_gif.py；依赖 harness 环境浏览器能力） |
+| browser-skill | 社区（Tencent BrowserSkill） | 字节抽取 bsk 内嵌 SKILL.md → agent skill 形态（`bash` 调 `bsk` CLI；不依赖 dsh 插件）；要求 `bsk` 在 PATH 上 + bsk daemon 在跑 + 浏览器扩展已连 |
+
+官方 skills 保留官方版权声明（MIT © 2026 DeepSeek）；`browser-skill` 保留 Tencent BrowserSkill 版权声明（MIT）。两者本仓库的适配改动均归本仓库 MIT（见根 LICENSE）。上游更新时按 vendoring policy 同步。
 
 ## 检查脚本化原则（2026-09 立，所有检查型 skills 适用）
 
