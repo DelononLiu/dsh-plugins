@@ -9,3 +9,9 @@ coverage/
 # bootstrap/测试产物（bootstrapHost 生成的 agent profile 目录）
 agent-*/
 __pycache__/
+
+# pnpm 本地 store 缓存（意外落在仓库根的孤立副本；正常 store 在 ~/.local/share/pnpm/store）
+.pnpm-store/
+
+# 仓库内嵌 worktree 容器（git worktree 物理位置，如 .kilo 工具创建；.git 链接不跟踪）
+.worktrees/
