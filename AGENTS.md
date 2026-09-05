@@ -61,7 +61,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
 - **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
 - 本项目当前为**已实现 + 部分接入**：6 插件实现（124 测试全绿）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
-- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-rc.1）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 rc.1 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态/重启用 `scripts/dsh-profile.sh`（别名 `web`=web2；restart 继承旧进程 env）。实例 profile 目录名 = 实例名（web2/3/4 各持自家 home 下 `profiles/web2|web3|web4`——内容同源 web 全家桶，目录各归各实例，console launch 逐实例指向，见下）：
+- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-rc.1）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 rc.1 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态/重启用 `scripts/dsh-profile.sh`——**动态发现模型**（不写死清单）：参数 = 实例名，按 `~/.dsh-<名>` 找 + 校验 `profiles/<名>` per-instance 布局 + 读该实例自己 cordis.patch.yml 的 webserver.port（daemon 无 webserver = headless）；未知名/布局非法报错（不设别名）；restart 继承旧进程 env；自操作防护：当前 shell 的 DSH_HOME 即目标实例时拒绝 stop/restart（防止自己杀自己）。下表现有已知实例，新实例建好 `~/.dsh-<名>/profiles/<名>` 即可被脚本发现（web2/3/4 内容同源 web 全家桶，目录各归各实例，console launch 逐实例指向）：
 
   | 环境 | DSH_HOME | 启动 | 端口 | 角色 |
   | --- | --- | --- | --- | --- |

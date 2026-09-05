@@ -1,66 +1,87 @@
 #!/usr/bin/env bash
-# dsh 测试实例一键启停/重启：固定矩阵（实例/DSH_HOME/端口/角色），见 AGENTS.md「测试环境」。
+# dsh 实例一键启停/重启：按名字动态发现，不写死清单。见 AGENTS.md「测试环境」。
 #
-# 命名（两层，勿混）：
-#   profile 目录名 = 实例名：每个实例在自家 DSH_HOME 下持有一份以自己命名的 profile
-#                   （~/.dsh-web2/profiles/web2、~/.dsh-web3/profiles/web3 …），
-#                   dsh --profile <名> 即 boot $DSH_HOME/profiles/<名>；web2/3/4 内容
-#                   同源（web 全家桶），目录各归各实例——console launch 逐实例指向、各自补丁。
-#   实例名        = 数据根 DSH_HOME 目录后缀（~/.dsh-<实例名>）。
-# 本脚本参数 = **实例名**（web2/web3/web4/daemon）；"web" 是 web2 的日常简称（管理端）。
-#   dsh-profile.sh restart web    # = 重启 web2（管理端 console，3082）
-#   dsh-profile.sh start daemon   # = 启动守护宿主（daemon profile，headless）
-# 默认（无参数）= 全部实例。
+# 发现规则（约定）：
+#   实例名 → DSH_HOME = ~/.dsh-<实例名>，profile = 同名（per-instance 布局：
+#   ~/.dsh-web2/profiles/web2、~/.dsh-web3/profiles/web3 …），
+#   dsh --profile <名> 即 boot $DSH_HOME/profiles/<名>。
+#   port 从该实例自己的 cordis.patch.yml 读（webserver.config.port）；daemon 无
+#   webserver = headless。web2/3/4 内容同源（web 全家桶），目录各归各实例。
+#   传名不在 ~/.dsh-<名> 或布局不合法 → 报错退出（不静默别名/不猜）。
+#   默认（无参数）= 扫描 ~/.dsh-*/ 下全部 per-instance 布局实例。
 #
-# 日志落盘：各实例自己的 DSH_HOME 下（~/.dsh-web2/console.log、~/.dsh-daemon/daemon.log…），
-# 由 dsh-console 按 roleDataRoot(process.env.DSH_HOME) 解析，天然隔离。
-#
+# 🔴 自操作防护：当前 shell 的 DSH_HOME 就是目标实例时 stop/restart 拒绝
+#   （自己杀自己）；在实例环境外（无 DSH_HOME）执行。
 # 🔴 永不触碰正式 ~/.dsh（3080 禁令，见 AGENTS.md）。
+#
+# 用法：
+#   scripts/dsh-profile.sh status                              # 扫描全部实例
+#   scripts/dsh-profile.sh start|stop|restart <name> [...]     # 操作指定实例（可多个）
 
 set -euo pipefail
 
 # 内核 0.1.2-rc.1 独立 CLI（测试环境不与正式 ~/.dsh 共用内核；覆盖用 DSH_BIN）。
 DSH_BIN="${DSH_BIN:-/home/long2015/dsh-alpha5-cli/node_modules/.bin/dsh}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 环境矩阵：name|DSH_HOME|profile|port|DSH_RELAY_AGENT
-# profile = 实例名（profile 目录名 = 实例名，彻底隔离：~/.dsh-web2/profiles/web2 等，
-# dsh --profile <名> 即 boot $DSH_HOME/profiles/<名>；发行包模板（profiles/web 等）是
-# 另一层命名，勿混）。
-# 通信插件部署（三实例联调）：web2/web3/web4 + daemon 连同一 broker（19121，
-# 共享 secret——broker 注册表 agent 名唯一）。relay 经 env 注入（channel 兜底）。
-ENVS=(
-  "web2|$HOME/.dsh-web2|web2|3082|web2"
-  "web3|$HOME/.dsh-web3|web3|3083|web3"
-  "web4|$HOME/.dsh-web4|web4|3084|web4"
-  "daemon|$HOME/.dsh-daemon|daemon|0|host1"
-)
-
-# broker 共享配置（与 daemon patch 的 test-secret-relay-2026 一致）。
+# broker 共享配置（daemon 与实例 patch 的 test-secret-relay-2026 一致；仅 relay 部署用）。
 RELAY_BROKER_URL="http://127.0.0.1:19121"
 RELAY_SECRET="test-secret-relay-2026"
 
-# 实例名 → 规范实例名：web（日常叫法）= web2（管理端实例）；web2/3/4/daemon 原样。
-# 注意：web 是 web2 的简称；web2/3/4 的 profile 目录名 = 实例名（profiles/web2 等）。
-canonical() {
-  case "$1" in
-    web) echo web2 ;;
-    web2|web3|web4|daemon) echo "$1" ;;
-    *) echo "" ;;
-  esac
+# 禁止触碰的正式 home（3080 禁令）。
+OFFICIAL_HOME="$HOME/.dsh"
+
+# 从实例自己 cordis.patch.yml 读 webserver.config.port（该段下第一个 port: N）。
+# 返回 0=有 port（echo），1=无 webserver（headless，如 daemon）。
+read_instance_port() {
+  local home="$1" prof="$2" patch="$home/profiles/$prof/cordis.patch.yml"
+  [[ -f "$patch" ]] || return 1
+  # webserver 段（"- id: webserver"）到下一顶级 "- id:" 之间的 "port: <n>"。
+  # awk 程序整体单引号——双引号内 $0 会被外层 shell 展开成空导致语法错。
+  awk -v f=0 '
+    /^- id: webserver$/ { f=1; next }
+    /^- id:/ { if (f) exit }
+    f && /^[[:space:]]*port:[[:space:]]*[0-9]+$/ {
+      line=$0; gsub(/[^0-9]/,"",line); print line; exit
+    }
+  ' "$patch"
+}
+# 解析实例：<name> → 校验布局 → 输出 "home|profile|port(空=daemon|relay"
+# relay：daemon 特判 host1；其它 = 实例名（web3 → DSH_RELAY_AGENT=web3）。
+# 返回 0=有效（echo 元数据），1=无效（已打印原因）。
+resolve_instance() {
+  local name="$1"
+  local home="$HOME/.dsh-$name"
+  if [[ "$home" == "$OFFICIAL_HOME" ]]; then
+    echo "[$name] 🔴 拒绝：正式 home（~/.dsh，3080 禁令）" >&2
+    return 1
+  fi
+  [[ -d "$home" ]] || { echo "未知实例: $name（无 $home）" >&2; return 1; }
+  local prof="$name"
+  [[ -d "$home/profiles/$prof" ]] || {
+    echo "[$name] ✗ 布局无效：无 $home/profiles/$prof（per-instance 布局要求 profile 目录名 = 实例名）" >&2
+    return 1
+  }
+  # port：读实例自己 webserver 段；daemon 无 webserver → headless（port 空）。
+  local port=""
+  if [[ -f "$home/profiles/$prof/cordis.patch.yml" ]]; then
+    port="$(read_instance_port "$home" "$prof" 2>/dev/null || true)"
+  fi
+  local relay="$name"
+  [[ "$name" == "daemon" ]] && relay="host1"
+  echo "$home|$prof|$port|$relay"
 }
 
-find_env() {
-  local name="$1"
-  for e in "${ENVS[@]}"; do
-    IFS='|' read -r n home profile port relay <<< "$e"
-    if [[ "$n" == "$name" ]]; then
-      echo "$home|$profile|$port|$relay"
-      return 0
-    fi
-  done
-  echo "未知环境: $name（可用: web(=web2) web3 web4 daemon）" >&2
-  return 1
+# 自操作防护：目标 home == 当前环境 DSH_HOME → 拒绝（stop/restart 会杀掉承载
+# 当前命令的实例进程）。返回 0=允许，1=拒绝（已打印原因）。
+guard_no_self_operate() {
+  local name="$1" home="$2"
+  if [[ -n "${DSH_HOME:-}" && "$home" == "$DSH_HOME" ]]; then
+    echo "[$name] 🔴 自操作拒绝：当前 shell 的 DSH_HOME（$DSH_HOME）就是目标实例——"
+    echo "        stop/restart 会杀掉承载当前命令的进程（自己杀自己）。"
+    echo "        请在实例环境外（无 DSH_HOME 的终端）执行，或改用 start/status。"
+    return 1
+  fi
+  return 0
 }
 
 is_running() {
@@ -83,32 +104,30 @@ is_running() {
 
 start_one() {
   local name="$1"
-  local info; info="$(find_env "$name")"
+  local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port relay <<< "$info"
   local pid; pid="$(is_running "$home" || true)"
   if [[ -n "$pid" ]]; then
     echo "[$name] 已在运行 pid=$pid（$home）"
     return 0
   fi
-  mkdir -p "$home"
-  echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）  ← 实例 $name 用 $profile 模板"
+  echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
   local env_args=()
-  if [[ -n "$relay" ]]; then
-    # 通信插件部署：relay 三件套（agent/broker/secret）——broker 仅作跨实例传输
-    # 兜底（实例发现权威源是管理端 launch 配置，不依赖 broker）。
-    env_args+=(
-      "DSH_RELAY_AGENT=$relay"
-      "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL"
-      "DSH_RELAY_SECRET=$RELAY_SECRET"
-    )
-  fi
+  # relay 三件套：仅通信插件部署（web2/3/4/daemon 经 broker 联调）；作传输兜底
+  # （实例发现权威源是管理端 launch 配置，不依赖 broker）。
+  env_args+=(
+    "DSH_RELAY_AGENT=$relay"
+    "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL"
+    "DSH_RELAY_SECRET=$RELAY_SECRET"
+  )
   env DSH_HOME="$home" "${env_args[@]}" nohup "$DSH_BIN" --profile "$profile" > "/tmp/dsh-$name.log" 2>&1 &
 }
 
 stop_one() {
   local name="$1"
-  local info; info="$(find_env "$name")"
+  local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port relay <<< "$info"
+  guard_no_self_operate "$name" "$home" || return 1
   local pid; pid="$(is_running "$home" || true)"
   if [[ -n "$pid" ]]; then
     echo "[$name] 停止 pid=$pid"
@@ -124,10 +143,10 @@ stop_one() {
 }
 
 # 重启：保留旧进程的关键 env（KILO_API_KEY 等——GUI LLM provider 依赖，脚本不硬编码），
-# stop 后以继承的 env 重启。避免 `restart web2` 后 GUI 模型失效（早期手动带 key 启动的原因）。
+# stop 后以继承的 env 重启。避免 restart 后 GUI 模型失效（早期手动带 key 启动的原因）。
 restart_one() {
   local name="$1"
-  local info; info="$(find_env "$name")"
+  local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port relay <<< "$info"
   local pid; pid="$(is_running "$home" || true)"
   local -a inherit=()
@@ -144,52 +163,60 @@ restart_one() {
   fi
   stop_one "$name"
   local env_args=()
-  if [[ -n "$relay" ]]; then
-    env_args+=( "DSH_RELAY_AGENT=$relay" "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL" "DSH_RELAY_SECRET=$RELAY_SECRET" )
-  fi
-  mkdir -p "$home"
-  echo "[$name] 重启：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）  ← 实例 $name 用 $profile 模板"
+  env_args+=(
+    "DSH_RELAY_AGENT=$relay"
+    "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL"
+    "DSH_RELAY_SECRET=$RELAY_SECRET"
+  )
+  echo "[$name] 重启：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
   env DSH_HOME="$home" "${inherit[@]}" "${env_args[@]}" nohup "$DSH_BIN" --profile "$profile" > "/tmp/dsh-$name.log" 2>&1 &
 }
 
+# 扫描 ~/.dsh-*/ 下全部 per-instance 布局实例（~/.dsh-<名>/profiles/<名>），按名排序。
+list_instances() {
+  for d in "$HOME"/.dsh-*; do
+    [[ -d "$d" ]] || continue
+    local name; name="$(basename "$d")"; name="${name#.dsh-}"
+    [[ "$name" == "dsh" || -z "$name" ]] && continue
+    # 只认 per-instance 布局；老布局（profiles/web）不列（resolve 时会提示）。
+    [[ -d "$d/profiles/$name" ]] && echo "$name"
+  done | sort
+}
+
 status() {
-  echo "环境状态（矩阵见 AGENTS.md「测试环境」）："
-  for e in "${ENVS[@]}"; do
-    IFS='|' read -r name home profile port relay <<< "$e"
+  echo "实例状态（动态扫描 ~/.dsh-<名>/profiles/<名>，见 AGENTS.md「测试环境」）："
+  local any=0
+  for name in $(list_instances); do
+    any=1
+    local info; info="$(resolve_instance "$name")" || continue
+    IFS='|' read -r home profile port relay <<< "$info"
     local pid; pid="$(is_running "$home" || true)"
     local port_txt="headless"
-    if [[ "$port" != "0" ]]; then
+    if [[ -n "$port" ]]; then
       port_txt=":$(ss -tln 2>/dev/null | grep ":$port " >/dev/null && echo "$port (监听)" || echo "$port (未监听)")"
     fi
     if [[ -n "$pid" ]]; then
-      echo "  $name: RUNNING pid=$pid port$port_txt  $home（profile $profile）"
+      echo "  $name: RUNNING pid=$pid port$port_txt  $home"
     else
-      echo "  $name: stopped  port$port_txt  $home（profile $profile）"
+      echo "  $name: stopped  port$port_txt  $home"
     fi
   done
+  [[ $any -eq 1 ]] || echo "  （无 per-instance 布局实例：$HOME 下未见 ~/.dsh-<名>/profiles/<名>）"
 }
 
 main() {
   local cmd="${1:-status}"
   shift || true
-  # 参数规范化：web → web2；非法名报错。缺省 = 全部（web2 web3 web4 daemon）。
   local targets=()
   if [[ $# -eq 0 ]]; then
-    targets=(web2 web3 web4 daemon)
+    targets=(daemon web2 web3 web4)   # status/默认操作仅知名实例集（避免误碰 web5 等开发目录）
+    # 注：无参数时操作哪些实例——daemon/web2/3/4 是"已知矩阵"；其余实例需显式点名。
   else
-    for raw in "$@"; do
-      local c; c="$(canonical "$raw")"
-      if [[ -z "$c" ]]; then
-        echo "未知环境: $raw（可用: web web2 web3 web4 daemon）" >&2
-        exit 2
-      fi
-      targets+=("$c")
-    done
+    targets=("$@")
   fi
   case "$cmd" in
     start)
       for t in "${targets[@]}"; do start_one "$t"; done
-      echo "已请求启动；数秒后 logs 见 /tmp/dsh-<name>.log，状态见 scripts/dsh-profile.sh status"
       ;;
     stop)
       for t in "${targets[@]}"; do stop_one "$t"; done
@@ -201,7 +228,8 @@ main() {
       status
       ;;
     *)
-      echo "用法: $0 {start|stop|restart|status} [web|web2|web3|web4|daemon ...]   # web = web2（管理端实例）" >&2
+      echo "用法: $0 {start|stop|restart|status} [<实例名> ...]   # 如 dsh-profile.sh restart web2 web77" >&2
+      echo "      实例 = ~/.dsh-<名>/profiles/<名>（per-instance 布局）；不写死清单。" >&2
       exit 2
       ;;
   esac
