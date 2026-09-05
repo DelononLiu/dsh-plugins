@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# 测试环境一键启停：固定矩阵（DSH_HOME/端口/角色），见 AGENTS.md「测试环境」。
+# dsh 测试 profile 一键启停/重启：固定矩阵（profile/DSH_HOME/端口/角色），见 AGENTS.md「测试环境」。
 # 用法：
-#   scripts/dev-test-env.sh start [web2|web3|web4|daemon]   # 启动指定环境（默认全部）
-#   scripts/dev-test-env.sh stop  [web2|web3|web4|daemon]   # 停止指定环境（默认全部）
-#   scripts/dev-test-env.sh status                          # 查看各环境端口/进程
+#   scripts/dsh-profile.sh start   [web|web2|web3|web4|daemon ...]   # 启动指定 profile（默认全部）
+#   scripts/dsh-profile.sh stop    [web|web2|web3|web4|daemon ...]   # 停止指定 profile（默认全部）
+#   scripts/dsh-profile.sh restart [web|web2|web3|web4|daemon ...]   # 重启指定 profile（默认全部）
+#   scripts/dsh-profile.sh status                                    # 查看各 profile 端口/进程
+#
+# 别名：web = web2（管理端 console，3082）。web3/web4 是 web 类实例（3083/3084），
+# daemon 是守护宿主（headless）。可同时传多个：restart web daemon。
 #
 # 🔴 永不触碰正式 ~/.dsh（3080 禁令，见 AGENTS.md）。
 
 set -euo pipefail
 
-# 内核 0.1.2-alpha.5 独立 CLI（测试环境不与正式 ~/.dsh 共用内核；覆盖用 DSH_BIN）。
+# 内核 0.1.2-rc.1 独立 CLI（测试环境不与正式 ~/.dsh 共用内核；覆盖用 DSH_BIN）。
 DSH_BIN="${DSH_BIN:-/home/long2015/dsh-alpha5-cli/node_modules/.bin/dsh}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -27,6 +31,15 @@ ENVS=(
 RELAY_BROKER_URL="http://127.0.0.1:19121"
 RELAY_SECRET="test-secret-relay-2026"
 
+# 环境名 → 规范名（web = web2 别名；web2/3/4/daemon 原样）。
+canonical() {
+  case "$1" in
+    web) echo web2 ;;
+    web2|web3|web4|daemon) echo "$1" ;;
+    *) echo "" ;;
+  esac
+}
+
 find_env() {
   local name="$1"
   for e in "${ENVS[@]}"; do
@@ -36,7 +49,7 @@ find_env() {
       return 0
     fi
   done
-  echo "未知环境: $name（可用: web2 web3 web4 daemon）" >&2
+  echo "未知环境: $name（可用: web(=web2) web3 web4 daemon）" >&2
   return 1
 }
 
@@ -100,6 +113,35 @@ stop_one() {
   fi
 }
 
+# 重启：保留旧进程的关键 env（KILO_API_KEY 等——GUI LLM provider 依赖，脚本不硬编码），
+# stop 后以继承的 env 重启。避免 `restart web2` 后 GUI 模型失效（早期手动带 key 启动的原因）。
+restart_one() {
+  local name="$1"
+  local info; info="$(find_env "$name")"
+  IFS='|' read -r home profile port relay <<< "$info"
+  local pid; pid="$(is_running "$home" || true)"
+  local -a inherit=()
+  if [[ -n "$pid" ]]; then
+    # 收集旧进程自定义 env（DSH_HOME/relay 三件套除外——脚本自己管理），
+    # 以 VAR=value 形式继承。只挑显式赋值项，避开 PATH/HOME 等自动变量噪音。
+    while IFS= read -r kv; do
+      inherit+=("$kv")
+    done < <(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
+      | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' \
+      | grep -vE '^(DSH_HOME|DSH_RELAY_AGENT|DSH_RELAY_BROKER_URL|DSH_RELAY_SECRET|PWD|SHLVL|_|PATH|HOME|USER|SHELL|LANG|LOGNAME|TERM|SSH_|DISPLAY|XDG_|DBUS_|CLAUDE_)=' \
+      || true)
+    echo "[$name] 继承旧进程 env: ${inherit[*]:-（无额外）}"
+  fi
+  stop_one "$name"
+  local env_args=()
+  if [[ -n "$relay" ]]; then
+    env_args+=( "DSH_RELAY_AGENT=$relay" "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL" "DSH_RELAY_SECRET=$RELAY_SECRET" )
+  fi
+  mkdir -p "$home"
+  echo "[$name] 重启：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
+  env DSH_HOME="$home" "${inherit[@]}" "${env_args[@]}" nohup "$DSH_BIN" --profile "$profile" > "/tmp/dsh-$name.log" 2>&1 &
+}
+
 status() {
   echo "环境状态（矩阵见 AGENTS.md「测试环境」）："
   for e in "${ENVS[@]}"; do
@@ -120,20 +162,36 @@ status() {
 main() {
   local cmd="${1:-status}"
   shift || true
-  local targets=("${@:-web2 web3 web4 daemon}")
+  # 参数规范化：web → web2；非法名报错。缺省 = 全部（web2 web3 web4 daemon）。
+  local targets=()
+  if [[ $# -eq 0 ]]; then
+    targets=(web2 web3 web4 daemon)
+  else
+    for raw in "$@"; do
+      local c; c="$(canonical "$raw")"
+      if [[ -z "$c" ]]; then
+        echo "未知环境: $raw（可用: web web2 web3 web4 daemon）" >&2
+        exit 2
+      fi
+      targets+=("$c")
+    done
+  fi
   case "$cmd" in
     start)
       for t in "${targets[@]}"; do start_one "$t"; done
-      echo "已请求启动；数秒后 logs 见 /tmp/dsh-<name>.log，端口见 scripts/dev-test-env.sh status"
+      echo "已请求启动；数秒后 logs 见 /tmp/dsh-<name>.log，状态见 scripts/dsh-profile.sh status"
       ;;
     stop)
       for t in "${targets[@]}"; do stop_one "$t"; done
+      ;;
+    restart)
+      for t in "${targets[@]}"; do restart_one "$t"; done
       ;;
     status)
       status
       ;;
     *)
-      echo "用法: $0 {start|stop|status} [web2|web3|web4|daemon ...]" >&2
+      echo "用法: $0 {start|stop|restart|status} [web|web2|web3|web4|daemon ...]" >&2
       exit 2
       ;;
   esac

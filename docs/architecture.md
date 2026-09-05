@@ -218,7 +218,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 原则：**web 是正式基线（~/.dsh），测试环境用独立 DSH_HOME 目录隔离**（非共享 home 的 profile 隔离，sessions/settings/storages 完全独立）；自研插件经 cordis.patch.yml insert（不进 bundles）；webserver 端口独立配置（避开正式 3080）。版本矩阵锁（dsh.lock.json）各自维护。
 
-**测试环境固定矩阵**（2026-08 定，不靠猜——脚本 `scripts/dev-test-env.sh` 一键启停/status）：
+**测试环境固定矩阵**（2026-08 定，不靠猜——脚本 `scripts/dsh-profile.sh` 一键启停/restart/status）：
 
 | 环境 | DSH_HOME | profile | 端口 | 角色 |
 | --- | --- | --- | --- | --- |
@@ -379,7 +379,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | dsh-desk 工具入口组装器（re-parent 到 foot 区控制台上方 + 官方 trigger 契约样式 + 间距） | 10 测试 + web2 验证 |
 | dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关 + 组装器配置化/通用性 + **slots 型插件显隐 git-graph 开关**） | 25 测试（含 slots-controller 5） |
 | vendored 全家桶 5 包（better-sidebar/git-graph/ssh/task-board/skill-explorer） | profile 依赖 + lock 锁版本 |
-| 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dev-test-env.sh | scripts/ 已实测 |
+| 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh | scripts/ 已实测 |
 | vendoring 统一 npm（submodule 归零） | AGENTS.md policy |
 
 **❌ 未完成（开放项，见上）**
