@@ -887,9 +887,21 @@ export class ConsoleService extends TypertRemoteService {
    */
   private applyReleaseFromTemplate(homeProfile: string, instanceId: string, spec: LaunchSpec, version: string): void {
     const template = this.config.templateHome
-    const source = template !== undefined && template !== '' ? join(template, 'profiles', spec.profile) : ''
-    if (source === '' || !existsSync(source)) {
-      throw new Error('守护未配置发行包源（config.templateHome 或其 profile 不存在）')
+    // 源 = templateHome 下实际存在的发行包 profile（daemon 模板 home 的完整发行包）。
+    // 不按目标实例名猜（实例 profile 名 = 实例名，守护模板 home 只有自己的 profile）。
+    let source = ''
+    if (template !== undefined && template !== '') {
+      const dir = join(template, 'profiles')
+      if (existsSync(dir)) {
+        const candidates = readdirSync(dir).filter((n) => existsSync(join(dir, n, 'package.json')))
+        // 优先同 spec.profile 名（若守护模板恰好同名），否则取第一个完整发行包。
+        source = candidates.includes(spec.profile)
+          ? join(dir, spec.profile)
+          : (candidates.length > 0 ? join(dir, candidates[0]) : '')
+      }
+    }
+    if (source === '') {
+      throw new Error('守护未配置发行包源（config.templateHome 下无完整发行包 profile）')
     }
     for (const name of readdirSync(source)) {
       if (name === 'cordis.patch.yml' || name === '.dsh-release.json') continue
