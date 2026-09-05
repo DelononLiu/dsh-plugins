@@ -275,8 +275,10 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     if (!hostId) return ''
     return hostRecords.find((h) => h.id === hostId)?.name ?? hostId
   }
-  const online = instances.filter((i) => i.status === 'online').length
-  const hostCount = new Set(instances.map((i) => i.host ?? i.id)).size
+  /** 实例按 name 排序（复制不突变 state）。 */
+  const sortedInstances = [...instances].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
+  const online = sortedInstances.filter((i) => i.status === 'online').length
+  const hostCount = new Set(sortedInstances.map((i) => i.host ?? i.id)).size
 
   const view = (): React.JSX.Element => {
     switch (tab) {
@@ -291,7 +293,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             </div>
             <div className="dsh-console-sect"><h3>最近事件</h3><button type="button" className="dsh-console-more" onClick={() => setTab('instances')}>查看全部 →</button></div>
             {!loaded && <div className="dsh-console-toolbar"><span className="hint">加载中…</span></div>}
-            {loaded && instances.slice(0, 5).map((i) => (
+            {loaded && sortedInstances.slice(0, 5).map((i) => (
               <div className="dsh-console-row" key={i.id}>
                 <span className={`dot ${i.status === 'online' ? 'on' : 'off'}`} />
                 <div className="grow">
@@ -356,7 +358,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 )}
               </>
             )}
-            {loaded && instances.map((i) => (
+            {loaded && sortedInstances.map((i) => (
               <InstanceRow
                 key={i.id}
                 item={i}
