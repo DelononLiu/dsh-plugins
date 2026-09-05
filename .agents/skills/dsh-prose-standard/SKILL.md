@@ -64,7 +64,17 @@ Preserve searchable mechanism names and meaningful modal, temporal, or negative 
 
 1. Confirm the scope, mode, current branch or PR base, and applicable `AGENTS.md` files. Do not inspect unrelated branches.
 2. Read the repository AGENTS.md / docs/architecture.md and the owning code or document before judging a passage. For calibration or unfamiliar cases, read [the distilled examples](references/examples.md).
-3. Inspect the requested scope, not only the largest files. Use searches and word counts to find candidates, then judge passages semantically.
+3. Inspect the requested scope, not only the largest files. 用命令找候选（命令只筛范围，判读仍语义）:
+
+```sh
+SCOPE='<scope>'   # 例：docs/ packages/dsh-user/src（排除 vendor 见上）
+# 候选定位：注释密集文件 / 长中文行 / 待查术语出现处
+rg -c '//|/\*|#' $SCOPE --glob '!vendor/**' | sort -t: -k2 -rn | head -15
+rg -n '[一-鿿]{12,}' $SCOPE --glob '*.md' --glob '!vendor/**' | head -20
+rg -n 'contract|boundary|shape|surface|seam|gate|vocabulary' $SCOPE --glob '!vendor/**' | head -20
+```
+
+然后逐候选项做语义判断。
 4. Classify each candidate as keep, add, trim, restore, restructure, or defer. Apply clear changes only when the task authorizes edits; do not manufacture edits to satisfy a deletion target.
 5. Update the owner before derivative artifacts. Re-check analogous passages after learning a new rule.
 6. Run the narrow relevant checks, documentation gates, `git diff --check`, and behavior tests for visible strings. Verify the final diff contains no `vendor/` path and report any accidental vendor match rather than claiming a clean exclusion history.

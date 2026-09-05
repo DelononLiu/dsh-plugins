@@ -9,6 +9,11 @@ description: Use when upgrading the dsh kernel / official dependency baseline (e
 
 规则来源：[AGENTS.md](../../AGENTS.md)（测试环境矩阵 / vendoring / worktree 流程）+ 2026-08 rc.2→alpha.5 升级实测（见 `.agents/notes/proposed/architecture/2026-08-24-upgrade-012-align-design.md`）。
 
+> **强制验证脚本**（2026-09 起）：静态检查（内核包双实例/残留/link）+ 运行健康检查
+> 一律跑 `scripts/verify-kernel-upgrade.sh`——**不要靠自觉逐项查**（2026-09 rc.1
+> 曾因漏检 dsh-tools 双实例导致 agent 工具调用崩）。脚本全绿后仍需一次**工具调用
+> 冒烟**（发一轮触发 Bash 的消息，纯对话验证发现不了工具链问题）。
+
 ## 0. 升级前决策
 
 1. **确认目标版本 + 差异性质**：`npm view @deepseek-ai/dsh dist-tags`（latest/next/alpha）。大版本跳跃前先判断是否**架构重构**（如 rc.2→alpha.5 移除 dsh-client-runtime）——重构 ≠ 版本 bump，适配量大。
@@ -74,10 +79,10 @@ overrides:
 
 1. worktree 自检通过（dsh-pre-push-checks）→ 合入 main（原子 merge，typecheck 全绿）。
 2. **逐环境切 alpha CLI**（各环境独立 DSH_HOME，与正式内核解耦，可不停机逐个切）：
-   - 更新 `~/.dsh-<env>/profiles/<p>/package.json`：自研 `link:` → **worktree 路径**先验证 → merge 后**切回 main 路径**；删已合并/已删包的残留依赖（如 dsh-console-ui/dsh-nav）；`@deepseek-ai/dsh-tools` → 目标版（`<alpha-cli>` 的 node_modules 无法直接 serve——必须 profile 自己装）。
+   - 更新 `~/.dsh-<env>/profiles/<p>/package.json`：自研 `link:` → **worktree 路径**先验证 → merge 后**切回 main 路径**；删已合并/已删包的残留依赖（如 dsh-console-ui/dsh-nav）；**`@deepseek-ai/dsh-tools` 等官方内核包不要显式装进 profile**（内核 `<alpha-cli>` 已带，profile 显式装会造成**双实例**——dsh-tools 用 Symbol 挂 scheduler，Symbol 跨实例不共享 → agent 工具调用 `ctx.tools[scheduler].prepare` undefined 崩，且只在跑 agent 任务的环境暴露）。仅当启动报 "cannot find package" 时才补，补完验证工具调用。
    - 在 profile 目录 `pnpm install`（⚠️ 别在仓库根跑——装错位置，daemon 曾因此炸 dsh-tools/dsh-llm 版本错配）。
    - 重启该环境：`env DSH_HOME=~/.dsh-<env> <alpha-cli>/dsh --profile <p> [--no-open]`，验证 0 错误 + 管理端视角该实例 online。
-3. **全部切完后收尾**：`scripts/dev-test-env.sh` 的 `DSH_BIN` 指向 alpha CLI；删 worktree（`git worktree remove` + `git branch -d`）；`AGENTS.md` 同步内核版本/矩阵/登录入口事实。
+3. **全部切完后收尾**：跑 `scripts/verify-kernel-upgrade.sh`（强制：静态双实例/残留/link + 运行健康全绿）→ 管理端发一轮触发 Bash 的消息做**工具冒烟** → `scripts/dev-test-env.sh` 的 `DSH_BIN` 指向 alpha CLI；删 worktree（`git worktree remove` + `git branch -d`）；`AGENTS.md` 同步内核版本/矩阵/登录入口事实。
 4. lock/依赖已在步骤 1 bump——确认 profile 模板一致。
 5. **回滚预案**：单环境秒回 = 换回旧 CLI + 还原 package.json 备份（`pnpm install` 前先 `cp package.json package.json.<旧版>.bak`）。
 
@@ -91,3 +96,5 @@ overrides:
 - **alpha.5 起官方 client-connection 给 web 加 BrowserAuth fence**（`?token=` 换 cookie，无用户/角色）——自研 HTTPS gateway 反代会 401（登录成功也进不去），需官方会话桥（见 `.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md`）。
 - **typert-protocol vendored 不可移除**：typert generator 的 `isTypeMetaSymbol` 要求 `@Remote` 符号声明位于 **workspace 注册包内**（registrationForFile 命中）——npm 版声明在 node_modules 里不命中 → 报 "publishes Remote artifacts but has no Remote methods"。vendor 保留 + `tsconfig.host.json` paths/references 指向它。官方若内置了同内容（rc.1 已含 remote-error），vendor 只是构建期镜像，仍不能删。
 - **vendoed 同步官方源码**：升级后对比官方 tag（`packages/typert/protocol/src`）与本地 vendored src，diff 一致即无需动；不一致则用 `git archive dsh-v<ver> packages/typert/protocol/` 同步。
+- **官方内核包（dsh-tools/dsh-session/dsh-llm…）禁止 profile 显式装**：内核 CLI 已带一份；profile 再装 = 双实例。凡用 **Symbol 键挂服务**（如 dsh-tools 的 `TOOL_RUNTIME_SCHEDULER`）的官方包，跨实例 Symbol 不共享 → 运行期取服务 undefined（典型：`Cannot read properties of undefined (reading 'prepare')`，agent 工具调用崩）。**纯对话冒烟发现不了**——验证清单必须含"发一条会触发 Bash/工具的轮次"。
+- **升级验证要测工具调用路径**（2026-09 rc.1 实测教训）：纯对话两轮正常 ≠ agent 可用；工具 scheduler/双实例类问题只在 agent 调工具时暴露。验收至少跑一次工具任务。

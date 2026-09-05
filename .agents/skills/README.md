@@ -1,6 +1,6 @@
 # Skills（vendored 自官方 harness 并适配）
 
-本目录 5 个 skill **vendored 自官方仓库** [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（`.agents/skills/`，MIT License，© 2026 DeepSeek），并在本仓库语境下适配（去掉官方脚本/文档引用，替换为本仓库规则）。
+本目录 skills **vendored 自官方仓库** [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（`.agents/skills/`，MIT License，© 2026 DeepSeek），并在本仓库语境下适配（去掉官方脚本/文档引用，替换为本仓库规则）。
 
 | Skill | 适配情况 |
 | --- | --- |
@@ -8,7 +8,28 @@
 | dsh-prose-standard | 适配（去官方文档引用 → 本仓库 AGENTS/architecture） |
 | dsh-code-review | 重写为本仓库规则（分层/note/提交/整体性） |
 | dsh-pre-push-checks | 重写为本仓库自检清单（typecheck/规则/同步/残留/diff） |
-| dsh-kernel-upgrade | 本仓库原创——内核/依赖基线升级流程（隔离 web5 验证 + 适配 + 铺开，2026-08 rc.2→alpha.5 实测沉淀） |
+| dsh-kernel-upgrade | 本仓库原创——内核/依赖基线升级流程（隔离 web5 验证 + 适配 + 铺开，含 `verify-kernel-upgrade.sh` 强制验证） |
 | record-browser-gif | 工具直接拷（含 encode_gif.py；依赖 harness 环境浏览器能力） |
 
 保留官方版权声明（MIT © 2026 DeepSeek）；本仓库适配改动亦为 MIT（见根 LICENSE）。上游更新时按 vendoring policy 同步。
+
+## 检查脚本化原则（2026-09 立，所有检查型 skills 适用）
+
+**凡能确定性检查的步骤，把确切可执行的命令/命令片段写进 SKILL.md 提示词**——
+模型按命令执行，判读结果；不写"确认 X / 检查 Y"这类让模型自由发挥的模糊指令。
+经验来源：dsh-kernel-upgrade 曾靠模型自觉逐项验证，漏检 dsh-tools 双实例
+（Symbol 键服务跨实例不共享）→ agent 工具调用崩；纯对话冒烟也发现不了工具链问题。
+
+形态（按复杂度递增，够用就好）：
+
+1. **一行命令**——如 `pnpm typecheck`、`git diff --check`、`grep -rn '<pattern>' packages/*/src`。直接内联在检查项里。
+2. **命令片段/小脚本**——多步但确定（如"对每个环境查依赖+端口"），可内联 `for ... done`，或抽成仓库 `scripts/<name>.sh` 再由 SKILL.md 引用（如 dsh-kernel-upgrade 的 `verify-kernel-upgrade.sh`）。
+3. **判读规则写清**——命令后的"怎样算过"也要在提示词里（如 401 = fence 正常、TS18003 = 预期占位）。
+
+**边界**：只对**确定性**检查脚本化；**需语义判断**的（散文是否算泄漏、review 权衡、提交单元粒度）保留为模型判断，必要时先用脚本缩小范围（如 dsh-trim-cot-leakage：recall-batteries 是 probe 不是定义）。别把语义判断伪装成可脚本化，也别把可脚本化的留给自觉。
+
+落地清单（按需逐 skill 执行）：
+- [x] dsh-kernel-upgrade：`verify-kernel-upgrade.sh`（静态 + 运行健康），SKILL.md 引用
+- [ ] dsh-pre-push-checks：typecheck/diff 卫生/残留术语/依赖方向 → 内联命令或脚本
+- [ ] dsh-code-review：变更范围命令可内联；结论判断留模型
+- [ ] dsh-prose-standard / dsh-trim-cot-leakage：探测命令已有 → 保持 probe + 语义判读
