@@ -222,10 +222,12 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 | 环境 | DSH_HOME | profile | 端口 | 角色 |
 | --- | --- | --- | --- | --- |
-| web2 | `~/.dsh-web2` | web | 3082 | 管理端 console（全家桶 + 组装器验证） |
-| web3 | `~/.dsh-web3` | web | 3083 | instance（`DSH_RELAY_AGENT=web3`） |
-| web4 | `~/.dsh-web4` | web | 3084 | instance（`DSH_RELAY_AGENT=web4`） |
+| web2 | `~/.dsh-web2` | web2 | 3082 | 管理端 console（全家桶 + 组装器验证） |
+| web3 | `~/.dsh-web3` | web3 | 3083 | instance（`DSH_RELAY_AGENT=web3`） |
+| web4 | `~/.dsh-web4` | web4 | 3084 | instance（`DSH_RELAY_AGENT=web4`） |
 | daemon | `~/.dsh-daemon` | daemon | 无 web（headless） | 守护 host1（broker `http://127.0.0.1:19121` 出站连） |
+
+profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名>`，`dsh --profile <名>` 即 boot 之）；web2/3/4 内容同源 web 全家桶，目录各归各实例，可逐实例补丁/升级。发行包模板（profiles/web|web2|web3）是另一层命名，勿混。
 
 实例矩阵权威源 = 管理端 web2 的 `dsh-console.launch` 配置；quick-nav/console 从 `DSH_CONSOLE_ADDR=http://127.0.0.1:3082` 拉实例表。
 

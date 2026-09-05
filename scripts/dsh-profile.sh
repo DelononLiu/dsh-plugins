@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# dsh 测试 profile 一键启停/重启：固定矩阵（profile/DSH_HOME/端口/角色），见 AGENTS.md「测试环境」。
-# 用法：
-#   scripts/dsh-profile.sh start   [web|web2|web3|web4|daemon ...]   # 启动指定 profile（默认全部）
-#   scripts/dsh-profile.sh stop    [web|web2|web3|web4|daemon ...]   # 停止指定 profile（默认全部）
-#   scripts/dsh-profile.sh restart [web|web2|web3|web4|daemon ...]   # 重启指定 profile（默认全部）
-#   scripts/dsh-profile.sh status                                    # 查看各 profile 端口/进程
+# dsh 测试实例一键启停/重启：固定矩阵（实例/DSH_HOME/端口/角色），见 AGENTS.md「测试环境」。
 #
-# 别名：web = web2（管理端 console，3082）。web3/web4 是 web 类实例（3083/3084），
-# daemon 是守护宿主（headless）。可同时传多个：restart web daemon。
+# 命名（两层，勿混）：
+#   profile 目录名 = 实例名：每个实例在自家 DSH_HOME 下持有一份以自己命名的 profile
+#                   （~/.dsh-web2/profiles/web2、~/.dsh-web3/profiles/web3 …），
+#                   dsh --profile <名> 即 boot $DSH_HOME/profiles/<名>；web2/3/4 内容
+#                   同源（web 全家桶），目录各归各实例——console launch 逐实例指向、各自补丁。
+#   实例名        = 数据根 DSH_HOME 目录后缀（~/.dsh-<实例名>）。
+# 本脚本参数 = **实例名**（web2/web3/web4/daemon）；"web" 是 web2 的日常简称（管理端）。
+#   dsh-profile.sh restart web    # = 重启 web2（管理端 console，3082）
+#   dsh-profile.sh start daemon   # = 启动守护宿主（daemon profile，headless）
+# 默认（无参数）= 全部实例。
+#
+# 日志落盘：各实例自己的 DSH_HOME 下（~/.dsh-web2/console.log、~/.dsh-daemon/daemon.log…），
+# 由 dsh-console 按 roleDataRoot(process.env.DSH_HOME) 解析，天然隔离。
 #
 # 🔴 永不触碰正式 ~/.dsh（3080 禁令，见 AGENTS.md）。
 
@@ -18,12 +24,15 @@ DSH_BIN="${DSH_BIN:-/home/long2015/dsh-alpha5-cli/node_modules/.bin/dsh}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 环境矩阵：name|DSH_HOME|profile|port|DSH_RELAY_AGENT
+# profile = 实例名（profile 目录名 = 实例名，彻底隔离：~/.dsh-web2/profiles/web2 等，
+# dsh --profile <名> 即 boot $DSH_HOME/profiles/<名>；发行包模板（profiles/web 等）是
+# 另一层命名，勿混）。
 # 通信插件部署（三实例联调）：web2/web3/web4 + daemon 连同一 broker（19121，
 # 共享 secret——broker 注册表 agent 名唯一）。relay 经 env 注入（channel 兜底）。
 ENVS=(
-  "web2|$HOME/.dsh-web2|web|3082|web2"
-  "web3|$HOME/.dsh-web3|web|3083|web3"
-  "web4|$HOME/.dsh-web4|web|3084|web4"
+  "web2|$HOME/.dsh-web2|web2|3082|web2"
+  "web3|$HOME/.dsh-web3|web3|3083|web3"
+  "web4|$HOME/.dsh-web4|web4|3084|web4"
   "daemon|$HOME/.dsh-daemon|daemon|0|host1"
 )
 
@@ -31,7 +40,8 @@ ENVS=(
 RELAY_BROKER_URL="http://127.0.0.1:19121"
 RELAY_SECRET="test-secret-relay-2026"
 
-# 环境名 → 规范名（web = web2 别名；web2/3/4/daemon 原样）。
+# 实例名 → 规范实例名：web（日常叫法）= web2（管理端实例）；web2/3/4/daemon 原样。
+# 注意：web 是 web2 的简称；web2/3/4 的 profile 目录名 = 实例名（profiles/web2 等）。
 canonical() {
   case "$1" in
     web) echo web2 ;;
@@ -81,7 +91,7 @@ start_one() {
     return 0
   fi
   mkdir -p "$home"
-  echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
+  echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）  ← 实例 $name 用 $profile 模板"
   local env_args=()
   if [[ -n "$relay" ]]; then
     # 通信插件部署：relay 三件套（agent/broker/secret）——broker 仅作跨实例传输
@@ -138,7 +148,7 @@ restart_one() {
     env_args+=( "DSH_RELAY_AGENT=$relay" "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL" "DSH_RELAY_SECRET=$RELAY_SECRET" )
   fi
   mkdir -p "$home"
-  echo "[$name] 重启：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
+  echo "[$name] 重启：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）  ← 实例 $name 用 $profile 模板"
   env DSH_HOME="$home" "${inherit[@]}" "${env_args[@]}" nohup "$DSH_BIN" --profile "$profile" > "/tmp/dsh-$name.log" 2>&1 &
 }
 
@@ -152,9 +162,9 @@ status() {
       port_txt=":$(ss -tln 2>/dev/null | grep ":$port " >/dev/null && echo "$port (监听)" || echo "$port (未监听)")"
     fi
     if [[ -n "$pid" ]]; then
-      echo "  $name: RUNNING pid=$pid port$port_txt  $home"
+      echo "  $name: RUNNING pid=$pid port$port_txt  $home（profile $profile）"
     else
-      echo "  $name: stopped  port$port_txt  $home"
+      echo "  $name: stopped  port$port_txt  $home（profile $profile）"
     fi
   done
 }
@@ -191,7 +201,7 @@ main() {
       status
       ;;
     *)
-      echo "用法: $0 {start|stop|restart|status} [web|web2|web3|web4|daemon ...]" >&2
+      echo "用法: $0 {start|stop|restart|status} [web|web2|web3|web4|daemon ...]   # web = web2（管理端实例）" >&2
       exit 2
       ;;
   esac

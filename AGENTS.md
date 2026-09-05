@@ -61,13 +61,13 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
 - **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
 - 本项目当前为**已实现 + 部分接入**：6 插件实现（124 测试全绿）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
-- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-rc.1）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 rc.1 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态/重启用 `scripts/dsh-profile.sh`（别名 `web`=web2；restart 继承旧进程 env）。
+- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-rc.1）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 rc.1 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态/重启用 `scripts/dsh-profile.sh`（别名 `web`=web2；restart 继承旧进程 env）。实例 profile 目录名 = 实例名（web2/3/4 各持自家 home 下 `profiles/web2|web3|web4`——内容同源 web 全家桶，目录各归各实例，console launch 逐实例指向，见下）：
 
   | 环境 | DSH_HOME | 启动 | 端口 | 角色 |
   | --- | --- | --- | --- | --- |
-  | web2 | `~/.dsh-web2` | `DSH_HOME=~/.dsh-web2 dsh --profile web --no-open` | 3082 | 管理端 console（装全家桶 + 组装器验证） |
-  | web3 | `~/.dsh-web3` | `DSH_HOME=~/.dsh-web3 dsh --profile web --no-open` | 3083 | instance 角色（`DSH_RELAY_AGENT=web3`） |
-  | web4 | `~/.dsh-web4` | `DSH_HOME=~/.dsh-web4 dsh --profile web --no-open` | 3084 | instance 角色（`DSH_RELAY_AGENT=web4`） |
+  | web2 | `~/.dsh-web2` | `DSH_HOME=~/.dsh-web2 dsh --profile web2 --no-open` | 3082 | 管理端 console（装全家桶 + 组装器验证） |
+  | web3 | `~/.dsh-web3` | `DSH_HOME=~/.dsh-web3 dsh --profile web3 --no-open` | 3083 | instance 角色（`DSH_RELAY_AGENT=web3`） |
+  | web4 | `~/.dsh-web4` | `DSH_HOME=~/.dsh-web4 dsh --profile web4 --no-open` | 3084 | instance 角色（`DSH_RELAY_AGENT=web4`） |
   | daemon | `~/.dsh-daemon` | `DSH_HOME=~/.dsh-daemon dsh --profile daemon` | 无 web（headless） | 守护 host1（broker `http://127.0.0.1:19121`，出站连） |
 
   实例矩阵权威源 = 管理端 web2 的 `dsh-console.launch` 配置（cordis.patch.yml）；quick-nav/console 从 `DSH_CONSOLE_ADDR`（管理端 3082）拉实例表。启动脚本见 `scripts/dsh-profile.sh`。
