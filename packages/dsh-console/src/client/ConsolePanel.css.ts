@@ -5,6 +5,10 @@
  * --dsw-alias-* 变量（深色/浅色主题自动适配套）。
  */
 const css = `
+.dsh-console-toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:2100;padding:9px 16px;border-radius:10px;font-size:13px;line-height:20px;box-shadow:var(--dsw-shadow-lv2);pointer-events:none;animation:dshToastIn .18s ease-out}
+.dsh-console-toast.ok{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-success-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-success-primary) 35%,transparent)}
+.dsh-console-toast.error{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-state-error-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 35%,transparent)}
+@keyframes dshToastIn{from{opacity:0;transform:translateX(-50%) translateY(-6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .dsh-console-panel-overlay{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center}
 .dsh-console-panel-mask{position:absolute;inset:0;background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur)}
 .dsh-console-panel{position:relative;z-index:1;display:flex;width:min(880px,calc(100vw - 48px));height:min(720px,calc(100vh - 48px));border-radius:24px;overflow:hidden;background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-shadow-lv3);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2)}
@@ -36,6 +40,8 @@ const css = `
 .dsh-console-row.sel{border-color:var(--dsw-alias-brand-primary)}
 .dsh-console-row .dot{width:8px;height:8px;border-radius:50%;flex:none}
 .dsh-console-row .dot.on{background:var(--dsw-alias-state-success-primary);box-shadow:0 0 0 4px rgba(74,222,128,.12)}
+.dot.pend{background:var(--dsw-alias-state-warning-primary);animation:dshPulse 1.2s ease-in-out infinite}
+@keyframes dshPulse{0%,100%{opacity:1}50%{opacity:.35}}
 .dsh-console-row .dot.off{background:var(--dsw-alias-label-tertiary)}
 .dsh-console-row .grow{flex:1;min-width:0}
 .dsh-console-row .name{font-size:14px;font-weight:500;color:var(--dsw-alias-label-primary)}

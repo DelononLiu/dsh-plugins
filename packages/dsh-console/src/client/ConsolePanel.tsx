@@ -33,11 +33,14 @@ function InstanceRow(props: {
   item: ConsoleInstanceViewItem
   host: ConsoleHost
   checked?: boolean
-  statusBadge?: React.ReactNode
   onSelect?: () => void
   machineName?: string
+  /** 该实例操作 pending 的具体文案（如"启动中…"；undefined = 无 pending）。 */
+  opLabel?: string
+  /** 点击启停/重启（ConsolePanel 注入 runControl）。 */
+  onControl?: (id: string, op: 'start' | 'stop' | 'restart') => void
 }): React.JSX.Element {
-  const { item, host, checked, statusBadge, onSelect, machineName } = props
+  const { item, host, checked, onSelect, machineName, opLabel, onControl } = props
   const online = item.status === 'online'
   const canJump = online && item.addr !== '' && item.id !== 'self'
   return (
@@ -47,13 +50,12 @@ function InstanceRow(props: {
       style={onSelect ? { cursor: 'pointer' } : undefined}
     >
       {checked !== undefined && <span className="dsh-console-chk">✓</span>}
-      <span className={`dot ${online ? 'on' : 'off'}`} />
+      <span className={`dot ${opLabel ? 'pend' : (online ? 'on' : 'off')}`} />
       <div className="grow">
         <div className="name">{item.name}</div>
-        <div className="meta">{machineName ?? item.host ?? item.id}{item.self ? '（本端）' : ''} · {online ? '在线' : '离线'}</div>
+        <div className="meta">{opLabel ?? (online ? '在线' : '离线')} · {machineName ?? item.host ?? item.id}{item.self ? ' · 当前实例' : ''}</div>
       </div>
       <span className="dsh-console-ver">{item.version ?? '—'}</span>
-      {statusBadge}
       {checked === undefined && (
         <>
           {canJump && (
@@ -61,11 +63,11 @@ function InstanceRow(props: {
               跳转⧉
             </button>
           )}
-          <button type="button" className="dsh-console-btn" title={online ? '停止' : '启动'} onClick={() => { void host.controlInstance(item.id, online ? 'stop' : 'start') }}>
-            {online ? '停止' : '启动'}
+          <button type="button" className="dsh-console-btn" disabled={!!opLabel} title={online ? '停止' : '启动'} onClick={() => { onControl?.(item.id, online ? 'stop' : 'start') }}>
+            {opLabel ?? (online ? '停止' : '启动')}
           </button>
-          <button type="button" className="dsh-console-btn danger" title="重启" onClick={() => { void host.controlInstance(item.id, 'restart') }}>
-            重启
+          <button type="button" className="dsh-console-btn danger" disabled={!!opLabel} title="重启" onClick={() => { onControl?.(item.id, 'restart') }}>
+            {opLabel === '重启中…' ? '重启中…' : '重启'}
           </button>
         </>
       )}
@@ -106,11 +108,72 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   /** 实例页内联升级面板（升级不再独立页签——它是实例列表的批量操作）。 */
   const [showUpgrade, setShowUpgrade] = useState(false)
   // 展开升级面板：清空上次勾选，重新选择。
+  // 实例启停/重启：设 pending（行内反馈）→ 下发 → toast 成败。
+  // pending 保留到轮询确认目标状态（start→online / stop→offline）；超时兜底清除。
+  const runControl = async (id: string, op: 'start' | 'stop' | 'restart'): Promise<void> => {
+    if (opPendingRef.current?.id === id) return // 该实例已有操作进行中（读 ref 最新值）
+    updateOpPending({ id, op, ts: Date.now() })
+    try {
+      const r = await host.controlInstance(id, op)
+      if (r.ok) {
+        setToast({ kind: 'ok', msg: `已下发${op === 'start' ? '启动' : op === 'stop' ? '停止' : '重启'} ${id}（执行中）` })
+      } else {
+        setToast({ kind: 'error', msg: `${op === 'start' ? '启动' : op === 'stop' ? '停止' : '重启'} ${id} 失败：${r.error ?? '未知原因'}` })
+        updateOpPending(null) // 下发失败 → 立即清 pending
+      }
+    } catch (e) {
+      setToast({ kind: 'error', msg: `${op} ${id} 调用异常：${e instanceof Error ? e.message : String(e)}` })
+      updateOpPending(null)
+    }
+  }
+
+  // pending 状态收敛检查：轮询数据里目标状态已达成 → 清 pending + ok toast（如刚启动完成）
+  // 由 refreshInstances 调用（每 10s 轮询，含打开/操作后立即刷新路径）。
+  const settlePending = (list: ConsoleInstanceViewItem[]): void => {
+    // 从 ref 读最新 pending（refreshInstances useCallback 闭包捕获的 opPending 是旧 null）。
+    const pend = opPendingRef.current
+    if (!pend) return
+    const cur = list.find((i) => i.id === pend.id)
+    if (!cur) return
+    // 收敛目标：
+    //   start → 实例 online；stop → 实例 offline；restart → 实例回到 online（先停后起全程）。
+    // restart 中途会先 offline（停止阶段）——此时不清 pending，等回 online 才算完成。
+    const targetOk = (pend.op === 'start' && cur.status === 'online')
+      || (pend.op === 'stop' && cur.status === 'offline')
+      || (pend.op === 'restart' && cur.status === 'online')
+    if (targetOk) {
+      const label = pend.op === 'start' ? '启动' : pend.op === 'stop' ? '停止' : '重启'
+      const state = cur.status === 'online' ? '在线' : '离线'
+      setToast({ kind: 'ok', msg: `${label}完成：${pend.id} 已${state}` })
+      updateOpPending(null)
+      return
+    }
+    // restart 中途 offline（停止阶段）→ 若超过 30s 仍未回 online（拉起失败/停滞），
+    // 视为异常：清 pending + error toast（重启了但没起来）。
+    if (pend.op === 'restart' && cur.status === 'offline' && Date.now() - pend.ts > 30_000) {
+      setToast({ kind: 'error', msg: `重启 ${pend.id} 未完成：实例处于离线（守护拉起失败或未就绪）` })
+      updateOpPending(null)
+      return
+    }
+    // 超时兜底（90s 未收敛 → 清 pending，避免永远转圈；状态以轮询为准）
+    if (Date.now() - pend.ts > 90_000) updateOpPending(null)
+  }
+
   const toggleUpgradePanel = (): void => {
     setShowUpgrade((v) => { if (!v) setUpgradeSel(new Set()); return !v })
   }
   /** 主机页内联部署新主机面板（引导接入守护——不占独立页签）。 */
   const [showDeploy, setShowDeploy] = useState(false)
+  /** 实例操作 pending：{id, op, ts}——点击后行内 pending 直到状态收敛或超时。 */
+  const [opPending, setOpPending] = useState<{ id: string; op: 'start' | 'stop' | 'restart'; ts: number } | null>(null)
+  /** opPending 的 ref 镜像（settlePending 从 ref 读最新值——闭包捕获会拿到旧 null）。 */
+  const opPendingRef = useRef(opPending)
+  const updateOpPending = (v: { id: string; op: 'start' | 'stop' | 'restart'; ts: number } | null): void => {
+    opPendingRef.current = v
+    setOpPending(v)
+  }
+  /** 操作结果 toast：{kind: 'ok'|'error', msg}——自动消失。 */
+  const [toast, setToast] = useState<{ kind: 'ok' | 'error'; msg: string } | null>(null)
   const [newInstId, setNewInstId] = useState('')
   const [newInstPort, setNewInstPort] = useState('')
   const [newInstHost, setNewInstHost] = useState('host1')
@@ -195,6 +258,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
       const v = await host.listInstances()
       setInstances(v.instances ?? [])
       setHostRecords(v.hosts ?? [])
+      settlePending(v.instances ?? [])
       // 守护选项：hosts（host\d+ 守护）+ 实例所属 host 去重；空则保留默认 host1。
       const hosts = Array.from(new Set([
         ...(v.hosts ?? []).map((h) => h.id),
@@ -223,6 +287,13 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     closeRef.current?.focus()
     return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [onClose])
+
+  // toast 自动消失
+  useEffect(() => {
+    if (!toast) return
+    const t = window.setTimeout(() => setToast(null), 3500)
+    return () => window.clearTimeout(t)
+  }, [toast])
 
   // 日志读取：拉取 + 自动 tail 周期（3s）+ 滚到底（仅 autoTail 开启时）。
   const fetchLog = useCallback(async (autoScroll: boolean): Promise<void> => {
@@ -278,6 +349,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   /** 实例按 name 排序（复制不突变 state）。 */
   const sortedInstances = [...instances].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
   const online = sortedInstances.filter((i) => i.status === 'online').length
+
   const hostCount = new Set(sortedInstances.map((i) => i.host ?? i.id)).size
 
   const view = (): React.JSX.Element => {
@@ -297,7 +369,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               <div className="dsh-console-row" key={i.id}>
                 <span className={`dot ${i.status === 'online' ? 'on' : 'off'}`} />
                 <div className="grow">
-                  <div className="name">{i.name} <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>· {machineNameOf(i.host) || i.id}</span></div>
+                  <div className="name">{i.name} <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>· {machineNameOf(i.host) || i.id}{i.self ? ' · 当前实例' : ''}</span></div>
                   <div className="meta">{i.version ?? '—'}</div>
                 </div>
                 <span style={{ color: i.status === 'online' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>
@@ -337,7 +409,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             {showUpgrade && (
               <>
                 <div className="dsh-console-toolbar">
-                  <span className="hint">勾选下方实例 → 统一升级到守护发行包（本端不可选）</span>
+                  <span className="hint">勾选下方实例 → 统一升级到守护发行包（当前实例不可选）</span>
                   <div className="grow" />
                   <select className="dsh-console-select" value={upgradeTarget} onChange={(e) => setUpgradeTarget(e.target.value)} title="目标发行包版本（守护以本机发行包源为实，此值写入实例记录）">
                     <option value="0.1.2-rc.1">目标：0.1.2-rc.1</option>
@@ -366,7 +438,8 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 machineName={machineNameOf(i.host)}
                 checked={showUpgrade && upgradeSel.has(i.id) ? true : undefined}
                 onSelect={showUpgrade && !i.self ? () => toggleUpgradeSel(i.id) : undefined}
-                statusBadge={i.self ? <span className="dsh-console-badge idle">本端</span> : undefined}
+                opLabel={opPending?.id === i.id ? (opPending.op === 'start' ? '启动中…' : opPending.op === 'stop' ? '停止中…' : '重启中…') : undefined}
+                onControl={(id, op) => { void runControl(id, op) }}
               />
             ))}
           </>
@@ -512,6 +585,11 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   return (
     <div className="dsh-console-panel-overlay" role="presentation">
       <div className="dsh-console-panel-mask" aria-hidden="true" onClick={close} />
+      {toast && (
+        <div className={`dsh-console-toast ${toast.kind}`} role="status">
+          {toast.kind === 'ok' ? '✓ ' : '✗ '}{toast.msg}
+        </div>
+      )}
       <div className="dsh-console-panel" role="dialog" aria-modal="true" aria-label="dsh 控制台">
         <nav className="dsh-console-nav">
           <div className="dsh-console-nav-brand">
