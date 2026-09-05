@@ -258,7 +258,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（better-sidebar 侧边栏 / 布局；**不含 skin-center，皮肤否决**）+ 功能应用（task-board 任务看板 / git-graph / ssh / skill-explorer；**v1 引入 5 包**） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除——不装皮肤则无关） |
 | better-sidebar（omdsh-dev） | UI | 侧边栏框架（文件/编辑器/终端/Git 面板），registerTab/registerFileViewer 扩展点 | MIT；全家桶已集成，也可独立引入 |
 | dst-agent-teams（@nanmicoder） | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员**；npm 安装 + lock 锁版本（v0.1.12） |
-| dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定 + web2 接入（3443 登录/登出；dsh-user 验签其 cookie 会话）；强制 HTTPS——HTTP 直连走 web2 3082（静态兜底，无登录） |
+| dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定；**不随 dsh 实例启动**（2026-09：多实例应共享单一网关，实例内置会各自抢端口/职责错位）——独立部署为 backlog，见 §9 |
 | dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.4 活跃）；纯本地；npm 安装 + lock 锁版本；**消费方 = agent 会话/上层插件经 ctx.memory 运行时使用（非 type-only 协作）**；官方无 memory，社区填补 |
 | dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | 挂起（console 总览复用，见 §9） |
 
@@ -362,6 +362,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 
 - [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」；**第一二期已落地**，见 [typert-integration](../.agents/notes/implemented/architecture/2026-08-23-typert-integration.md)）：`typert → dsh-channel`（typert 调用帧经 channel 传输，broker 为 channel 可选后端）。内核 0.1.1-rc.2 内置 typert 运行时；构建期 generator 需源码（vendored typert-protocol）。**第一期**：channel @Remote（list/get/brokerStatus）+ 构建管线 + quick-nav `ctx.remote.channel.list()`。**第二期**：console @Remote（listInstances/controlInstance）+ ConsoleBadge 改 ctx.remote；**broker 下沉 channel**（console 无 broker 接口，经 `ctx.remote.channel.brokerStatus()`）。**剩余（第三期）**：① 跨实例 @RemoteScope 控制指令（console→instance/daemon）② transport 选择策略（直连 vs broker）③ typert forwardable events ↔ channel 三平面映射。
 - [ ] **多 dsh 协同（主端集群控制 → 自主协同干活）**（2026-09 用户愿景，见 [multi-dsh-collaboration](../.agents/notes/proposed/architecture/2026-09-03-multi-dsh-collaboration.md)）：登录一个主端，便捷部署/启动其他主机 dsh、主端统一插件升级、（最好）打开他机工作区、最终多 dsh 自主协同。已确认方向：星型（console 协调）+ 干活型/动脑型都要 + 邀请制授权。**v1**：部署新主机 UI（SSH bootstrap 已有脚本 → console 补 UI）+ 统一升级（捡起挂起的升级回滚，**引擎已落地** 2026-09-04，见 unified-upgrade-engine note）+ 便捷跳转（quick-nav 已有）。**v2**：远程工作区（跨实例会话共享，最难，官方无概念；v1 用跳转替代）。**v3**：自主协同（console 调度员拆任务分派，需能力发现/可用性/任务委托协议）。
+- [ ] **认证网关独立部署**（2026-09 用户定：网关应只有**一个**、不随 dsh 实例启动，见 [gateway-standalone-deployment](../.agents/notes/implemented/architecture/2026-09-05-gateway-standalone-deployment.md)）：已从实例 profile 移除（web2 去 patch insert + 去依赖，重启验证）；待落地：单一共享网关进程（独立 DSH_HOME/进程）+ 各实例 dsh-user `gatewayCookie`/网关注入改指该网关 + 官方 BrowserAuth fence 会话桥（见 [alpha5-auth-official-token-vs-user-login](../.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md)）。
 
 - [x] ~~dsh-desk 布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-tabs / dsh-quick-nav 订阅 `my-ui-layout` **实时注册/注销**（slots.inject 内订阅配置，visible=false 注销、恢复重新注册）；组装器配置化（tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默 + **slots 型插件显隐（git-graph 开关）** 全部落地。
 
@@ -372,7 +373,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | 项 | 证据 |
 | --- | --- |
 | dsh-user 身份模型（current/instanceAccess/isOwner + IdentityResolver 适配层 + 侧边栏用户徽标/登出） | 29 测试 + web2 实测 |
-| dsh-gateway 集成（clarknu，HTTPS 3443：admin/user 登录 + 会话 + 登出） | 已部署（测试 home settings，不入库） |
+| dsh-gateway 集成（clarknu，HTTPS 3443：admin/user 登录 + 会话 + 登出） | 曾以插件随 web2 启动验证过；2026-09 起从实例移除（网关不随 dsh 实例启动，独立部署 backlog，见 §9） |
 | dsh-channel 通信（发现/心跳/事件总线 at-least-once/鉴权/控制指令） | 29 测试 |
 | dsh-console（档案/生命周期/inbox/三角色 daemon·instance·console + 3 HTTP 端点） | 37 测试 |
 | console UI（并入 dsh-console client 半区：ConsoleBadge + 控制面板） | sidebar.footer.action，仅管理端 |

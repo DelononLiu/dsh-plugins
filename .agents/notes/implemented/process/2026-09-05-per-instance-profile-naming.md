@@ -23,4 +23,4 @@ Status: implemented
 
 - 测试环境现状：四实例 profile 目录名 = 实例名；`scripts/dsh-profile.sh restart web2|web3|web4|daemon`（别名 web = web2）可用。
 - 新增实例流程：建 DSH_HOME → 装同名 profile 目录 → 更新 console launch 与脚本 ENVS。
-- 已知无关项：正式 GUI（3080，`~/.dsh`）占用 127.0.0.1:3443，web2 的 dsh-gateway（3443）bind 失败——迁移前即存在，与本次无关。
+- 原 3443 冲突项已消除：web2 的 dsh-gateway 已从实例组合移除（网关不随 dsh 实例启动，见 [gateway-standalone-deployment](../architecture/2026-09-05-gateway-standalone-deployment.md)），3443 现归正式 GUI 独占。
