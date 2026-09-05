@@ -1,3 +1,33 @@
 # 发行包 profile 补丁层：团队默认配置 + 用户覆盖（自定义化核心）。
 # 每个 bundle 层之后应用；可配置覆盖、disable、insert 列表。
-[]
+
+# 默认 LLM provider 路由：给 base bundle 里 dormant 挂载的 llm-pi-ai 行补上
+# providers（web GUI 的 Models 页写的就是同一份结构；用户设置文档里再出现的
+# `llm-pi-ai:` 节会覆盖这里的整行 config，所以这只是开箱默认值）。
+#
+# 这四个免费模型走 Kilo Gateway（OpenRouter 兼容，免费档匿名可用）：
+#   kilo-auto/free                    自动路由：挑当前可用的免费模型兜底
+#   cohere/north-mini-code:free       30B/3B 激活，快速问答首选
+#   minimax/minimax-m3:free           ~428B MoE，主力备胎（限流 30 req/min，429 重试）
+#   nvidia/nemotron-3-ultra-550b-a55b:free  550B/55B，主力备胎（服务端强制轻思考）
+#
+# 凭据：apiKeyEnv 引用 KILO_API_KEY，值为字符串 anonymous（免费档匿名 key；
+# 以后充值换真 key 改同一处即可）。运行环境需能解析它：export KILO_API_KEY=anonymous，
+# 或写入该 DSH_HOME 的 .credentials.yaml refs 段。
+- id: llm-pi-ai
+  config:
+    providers:
+      kilo-free:
+        displayName: Kilo Free (Gateway)
+        apiKeyEnv: KILO_API_KEY
+        api: openai-completions
+        baseURL: https://api.kilo.ai/api/openrouter
+        models:
+          - id: kilo-auto/free
+            contextWindow: 256000
+          - id: cohere/north-mini-code:free
+            contextWindow: 256000
+          - id: minimax/minimax-m3:free
+            contextWindow: 1048576
+          - id: nvidia/nemotron-3-ultra-550b-a55b:free
+            contextWindow: 1000000

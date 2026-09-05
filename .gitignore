@@ -8,3 +8,4 @@ coverage/
 .DS_Store
 # bootstrap/测试产物（bootstrapHost 生成的 agent profile 目录）
 agent-*/
+__pycache__/
