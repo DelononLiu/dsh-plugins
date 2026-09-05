@@ -11,13 +11,11 @@ import type { ConsoleHost } from './types'
 import type { ConsoleInstanceViewItem, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget } from 'dsh-console/types'
 
 // ---- 页签定义 ----
-type TabId = 'overview' | 'instances' | 'hosts' | 'deploy' | 'upgrade' | 'logs'
+type TabId = 'overview' | 'instances' | 'hosts' | 'logs'
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: 'overview', label: '总览', icon: '▤' },
   { id: 'instances', label: '实例', icon: '☰' },
-  { id: 'hosts', label: '主机 / 守护', icon: '⛁' },
-  { id: 'deploy', label: '部署主机', icon: '＋' },
-  { id: 'upgrade', label: '升级', icon: '⇪' },
+  { id: 'hosts', label: '主机', icon: '⛁' },
   { id: 'logs', label: '日志', icon: '⎙' },
 ]
 
@@ -102,6 +100,14 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [deployBusy, setDeployBusy] = useState(false)
   // 新建实例（deploy 到已上线 daemon）表单
   const [showNewInst, setShowNewInst] = useState(false)
+  /** 实例页内联升级面板（升级不再独立页签——它是实例列表的批量操作）。 */
+  const [showUpgrade, setShowUpgrade] = useState(false)
+  // 展开升级面板：清空上次勾选，重新选择。
+  const toggleUpgradePanel = (): void => {
+    setShowUpgrade((v) => { if (!v) setUpgradeSel(new Set()); return !v })
+  }
+  /** 主机页内联部署新主机面板（引导接入守护——不占独立页签）。 */
+  const [showDeploy, setShowDeploy] = useState(false)
   const [newInstId, setNewInstId] = useState('')
   const [newInstPort, setNewInstPort] = useState('')
   const [newInstHost, setNewInstHost] = useState('host1')
@@ -298,7 +304,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               <div className="grow" />
               <button type="button" className="dsh-console-btn" onClick={() => { void refreshInstances() }} title="立即刷新（每 10s 自动）">⟳ 刷新</button>
               <button type="button" className="dsh-console-btn" onClick={() => setShowNewInst((v) => !v)}>{showNewInst ? '收起' : '新建实例'}</button>
-              <button type="button" className="dsh-console-btn primary" onClick={() => setTab('upgrade')}>批量升级</button>
+              <button type="button" className="dsh-console-btn primary" onClick={toggleUpgradePanel}>{showUpgrade ? '收起升级' : '批量升级'}</button>
             </div>
             {showNewInst && (
               <div className="dsh-console-toolbar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
@@ -317,7 +323,40 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 </div>
               </div>
             )}
-            {loaded && instances.map((i) => <InstanceRow key={i.id} item={i} host={host} />)}
+            {showUpgrade && (
+              <>
+                <div className="dsh-console-toolbar">
+                  <span className="hint">勾选下方实例 → 统一升级到守护发行包（本端不可选）</span>
+                  <div className="grow" />
+                  <select className="dsh-console-select" value={upgradeTarget} onChange={(e) => setUpgradeTarget(e.target.value)} title="目标发行包版本（守护以本机发行包源为实，此值写入实例记录）">
+                    <option value="0.1.2-rc.1">目标：0.1.2-rc.1</option>
+                  </select>
+                  <button type="button" className="dsh-console-btn primary" onClick={() => { void runUpgrade() }} disabled={upgradeSel.size === 0 || upgradeBusy}>
+                    {upgradeBusy ? '升级中…' : `升级所选（${upgradeSel.size}）`}
+                  </button>
+                  <button type="button" className="dsh-console-btn" onClick={() => setShowUpgrade(false)}>收起</button>
+                </div>
+                <div style={{ background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12, padding: '12px 14px', fontSize: 12, lineHeight: 1.8, color: 'var(--dsw-alias-label-secondary)', marginBottom: 14 }}>
+                  升级动作由实例所在<b>守护主机</b>执行：先快照实例发行包（保留 3 份回滚点）→ 对齐守护发行包源 → 滚动重启 →
+                  健康探测；<b>任一步失败自动回滚</b>并重启。完成态以实例重新在线为准（管理端自身与守护本体不可选）。
+                </div>
+                {upgradeLog.length > 0 && (
+                  <div className="dsh-console-code" style={{ marginTop: 0, marginBottom: 14, color: upgradeLog.every((l) => l.startsWith('✓')) ? undefined : 'var(--dsw-alias-label-secondary)' }}>
+                    {upgradeLog.join('\n')}
+                  </div>
+                )}
+              </>
+            )}
+            {loaded && instances.map((i) => (
+              <InstanceRow
+                key={i.id}
+                item={i}
+                host={host}
+                checked={showUpgrade && upgradeSel.has(i.id) ? true : undefined}
+                onSelect={showUpgrade && !i.self ? () => toggleUpgradeSel(i.id) : undefined}
+                statusBadge={i.self ? <span className="dsh-console-badge idle">本端</span> : undefined}
+              />
+            ))}
           </>
         )
       case 'hosts':
@@ -327,7 +366,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               <span className="hint">{hostCount} 台主机</span>
               <div className="grow" />
               <button type="button" className="dsh-console-btn" onClick={() => { void refreshInstances() }} title="立即刷新（每 10s 自动）">⟳ 刷新</button>
-              <button type="button" className="dsh-console-btn primary" onClick={() => setTab('deploy')}>＋ 部署主机</button>
+              <button type="button" className="dsh-console-btn primary" onClick={() => setShowDeploy((v) => !v)}>{showDeploy ? '收起部署' : '＋ 部署新主机'}</button>
             </div>
             {loaded && [...new Set(instances.map((i) => i.host ?? i.id))].map((h) => {
               const onHost = instances.filter((i) => (i.host ?? i.id) === h)
@@ -342,18 +381,14 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 </div>
               )
             })}
-          </>
-        )
-      case 'deploy':
-        return (
-          <>
-            <div className="dsh-console-sect"><h3>部署新主机 = 引导接入守护（半自动）</h3></div>
+            {showDeploy && (
+              <>
             <div style={{ background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12, padding: '12px 14px', fontSize: 12, lineHeight: 1.9, color: 'var(--dsw-alias-label-secondary)', marginBottom: 18, whiteSpace: 'pre-line' }}>
               {'本页与「实例 → 新建实例」不重复，是两级流程：\n' +
                 '① 本页：把一台还没接入的新机器引导成「守护主机」（headless daemon，负责在这台机器上托管实例）。' +
                 '填好 SSH 信息点「生成引导命令」，把命令复制到目标机器执行一次即接入（本端不代跑 SSH）。\n' +
                 '② 「实例 → 新建实例」：在已接入的守护主机上，一键自动部署界面实例（无需 SSH，daemon 复用本地发行包拉起）。\n' +
-                '接入后的守护主机出现在「主机 / 守护」页。'}
+                '接入后的守护主机显示在本页（主机）。'}
             </div>
             <div className="dsh-console-formrow">
               <div className="dsh-console-field"><label>目标机器 SSH 地址</label><input className="dsh-console-input" placeholder="user@10.0.0.15" value={deployHost} onChange={(e) => setDeployHost(e.target.value)} /></div>
@@ -384,6 +419,8 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                   <button type="button" className="dsh-console-btn" onClick={() => { void navigator.clipboard?.writeText(deployResult.commands.join('\n')) }}>复制全部</button>
                 </div>
                 <div className="dsh-console-code">{deployResult.commands.map((c) => `$ ${c}`).join('\n')}</div>
+              </>
+            )}
               </>
             )}
           </>
@@ -439,40 +476,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             >
               {logContent || (logError ? '' : '（日志为空）')}
             </div>
-          </>
-        )
-      case 'upgrade':
-        return (
-          <>
-            <div className="dsh-console-toolbar">
-              <span className="hint">勾选实例 → 统一升级到守护发行包</span>
-              <div className="grow" />
-              <select className="dsh-console-select" value={upgradeTarget} onChange={(e) => setUpgradeTarget(e.target.value)} title="目标发行包版本（守护以本机发行包源为实，此值写入实例记录）">
-                <option value="0.1.2-rc.1">目标：0.1.2-rc.1</option>
-              </select>
-              <button type="button" className="dsh-console-btn primary" onClick={() => { void runUpgrade() }} disabled={upgradeSel.size === 0 || upgradeBusy}>
-                {upgradeBusy ? '升级中…' : `升级所选（${upgradeSel.size}）`}
-              </button>
-            </div>
-            <div style={{ background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12, padding: '12px 14px', fontSize: 12, lineHeight: 1.8, color: 'var(--dsw-alias-label-secondary)', marginBottom: 14 }}>
-              升级动作由实例所在<b>守护主机</b>执行：先快照实例发行包（保留 3 份回滚点）→ 对齐守护发行包源 → 滚动重启 →
-              健康探测；<b>任一步失败自动回滚</b>并重启。完成态以实例重新在线为准（管理端自身与守护本体不可选）。
-            </div>
-            {upgradeLog.length > 0 && (
-              <div className="dsh-console-code" style={{ marginTop: 0, marginBottom: 14, color: upgradeLog.every((l) => l.startsWith('✓')) ? undefined : 'var(--dsw-alias-label-secondary)' }}>
-                {upgradeLog.join('\n')}
-              </div>
-            )}
-            {loaded && instances.map((i) => (
-              <InstanceRow
-                key={i.id}
-                item={i}
-                host={host}
-                checked={upgradeSel.has(i.id)}
-                onSelect={i.self ? undefined : () => toggleUpgradeSel(i.id)}
-                statusBadge={i.self ? <span className="dsh-console-badge idle">本端</span> : undefined}
-              />
-            ))}
           </>
         )
     }
