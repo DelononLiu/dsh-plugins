@@ -484,13 +484,6 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             {loaded && hostRecords.length === 0 && <div className="dsh-console-toolbar"><span className="hint">暂无主机</span></div>}
             {showDeploy && (
               <>
-            <div style={{ background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12, padding: '12px 14px', fontSize: 12, lineHeight: 1.9, color: 'var(--dsw-alias-label-secondary)', marginBottom: 18, whiteSpace: 'pre-line' }}>
-              {'本页与「实例 → 新建实例」不重复，是两级流程：\n' +
-                '① 本页：把一台还没接入的新机器引导成「守护主机」（headless daemon，负责在这台机器上托管实例）。' +
-                '填好 SSH 信息点「生成引导命令」，把命令复制到目标机器执行一次即接入（本端不代跑 SSH）。\n' +
-                '② 「实例 → 新建实例」：在已接入的守护主机上，一键自动部署界面实例（无需 SSH，daemon 复用本地发行包拉起）。\n' +
-                '接入后的守护主机显示在本页（主机）。'}
-            </div>
             <div className="dsh-console-formrow">
               <div className="dsh-console-field"><label>目标机器 SSH 地址</label><input className="dsh-console-input" placeholder="user@10.0.0.15" value={deployHost} onChange={(e) => setDeployHost(e.target.value)} /></div>
               <div className="dsh-console-field"><label>守护主机标识（agent 名）</label><input className="dsh-console-input" placeholder="host2" value={deployName} onChange={(e) => setDeployName(e.target.value)} /></div>
