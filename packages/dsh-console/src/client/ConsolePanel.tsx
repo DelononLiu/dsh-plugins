@@ -378,7 +378,12 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               <button type="button" className="dsh-console-btn" onClick={() => { void refreshInstances() }} title="立即刷新（每 10s 自动）">⟳ 刷新</button>
               <button type="button" className="dsh-console-btn primary" onClick={() => setShowDeploy((v) => !v)}>{showDeploy ? '收起部署' : '＋ 部署新主机'}</button>
             </div>
-            {loaded && hostRecords.length > 0 && hostRecords.map((hr) => {
+            {loaded && hostRecords.length > 0 && [...hostRecords]
+              .sort((a, b) => {
+                const na = (a.name && a.name !== '' ? a.name : a.id).localeCompare(b.name && b.name !== '' ? b.name : b.id, 'zh-Hans-CN')
+                return na
+              })
+              .map((hr) => {
               // 管理端宿主识别：instances 中 self（本端管理端）实例的 host = 该主机 id。
               const isConsoleHost = instances.some((i) => i.self === true && (i.host ?? i.id) === hr.id)
               const onHost = instances.filter((i) => (i.host ?? i.id) === hr.id)
