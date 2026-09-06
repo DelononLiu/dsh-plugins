@@ -10,6 +10,8 @@
  * - 点自己的 tab：拦截官方 setView（防占位）+ prune 清残留（轨迹）+ 借官方
  *   「对话」tab 的 setView('chat') 切回对话视图（官方可靠路径）。
  * - 点击左侧会话 → 默认「对话」（onCurrentChange 清新当前残留）。
+ * - 左侧栏「会话/工作区列表」之上注入只读「置顶」区（PinnedStrip）：镜像同一
+ *   固定列表（settings dsh-tabs-pinned），点击 = ctx.sessions.open 切会话。
  */
 
 import { createElement } from 'react'
@@ -20,6 +22,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { SessionView, type SessionViewInjected } from './SessionView'
+import { startPinnedStrip } from './PinnedStrip'
 
 /** 需要的 client 服务：插槽 + sessions + settings。 */
 export const inject = ['slots', 'sessions', 'settingsScope']
@@ -354,4 +357,14 @@ export function apply(ctx: ClientContext): void {
       clearAll()
     }
   })
+
+  // —— 左侧栏「置顶」区：只读镜像固定会话（数据 = 同一 dsh-tabs-pinned，
+  // 点击打开 = ctx.sessions.open；与 tab 行天然同步，见 PinnedStrip）——
+  const disposePinnedStrip = startPinnedStrip({
+    getPinned: () => pinnedOf(),
+    subscribeSettings: (fn) => settings.subscribe(fn),
+    sessions: sessionsOf(ctx).list,
+    open: (id: string) => { sessionsOf(ctx).open(id as never) },
+  })
+  ctx.effect(() => () => disposePinnedStrip(), 'dsh-tabs: sidebar pinned strip')
 }

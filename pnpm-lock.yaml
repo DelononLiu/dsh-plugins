@@ -246,6 +246,9 @@ importers:
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.18
+      happy-dom:
+        specifier: ^20.11.6
+        version: 20.11.6
       react:
         specifier: ^19.0.0
         version: 19.2.8
