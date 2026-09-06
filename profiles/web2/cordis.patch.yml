@@ -1,2 +1,74 @@
-# web2（单插件测试）补丁层：测试期临时配置覆盖放这里。
-[]
+# 独立 DSH_HOME 测试：insert 自研 host 插件（user/channel/console/my-ui）+ 独立端口
+- insert:
+    - id: dsh-user
+      name: dsh-user
+      config:
+        users:
+          - id: admin
+            name: 管理员
+            roles: [admin]
+          - id: user
+            name: 用户
+            roles: [member]
+        gatewayCookie:
+          cookieName: dsh_gw_sid
+          secretFile: gateway/state.json
+          hmacSecret: ''
+    - id: dsh-channel
+      name: dsh-channel
+    - id: dsh-console
+      name: dsh-console
+      config:
+        launch:
+          host1:
+            host: host1
+            name: 本机
+            ip: 127.0.0.1
+            addr: http://127.0.0.1:3089
+          web4:
+            host: host1
+            addr: http://127.0.0.1:3084
+          web3:
+            host: host1
+            addr: http://127.0.0.1:3083
+            dshHome: /home/long2015/.dsh-web3
+            profile: web3
+            env:
+              DSH_RELAY_AGENT: web3
+          web2:
+            host: host1
+            addr: http://127.0.0.1:3082
+            dshHome: /home/long2015/.dsh-web2
+            profile: web2
+            env:
+              DSH_RELAY_AGENT: web2
+    - id: dsh-desk
+      name: dsh-desk
+    - id: dsh-tabs
+      name: dsh-tabs
+    - id: dsh-quick-nav
+      name: dsh-quick-nav
+- insert:
+    - id: dsh-better-sidebar
+      name: dsh-better-sidebar
+    - id: '@linxin666/dsh-client-ui-git-graph'
+      name: '@linxin666/dsh-client-ui-git-graph'
+- id: webserver
+  config:
+    host: '127.0.0.1'
+    port: 3082
+- id: llm-pi-ai
+  config:
+    providers:
+      kilo-free:
+        displayName: Kilo Free (Gateway)
+        apiKeyEnv: KILO_API_KEY
+        api: openai-completions
+        baseURL: https://api.kilo.ai/api/openrouter
+        models:
+          - id: cohere/north-mini-code:free
+            contextWindow: 256000
+          - id: dots-studio/dots-3-note-preview:free
+            contextWindow: 512000
+          - id: nvidia/nemotron-3-super-120b-a12b:free
+            contextWindow: 262144

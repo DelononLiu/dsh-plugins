@@ -1,12 +1,23 @@
 {
   "schemaVersion": 1,
   "id": "dsh-distro-web2",
-  "name": "dsh 测试环境（web2：单插件隔离测试）",
+  "name": "dsh 测试环境（web2：管理端 console 全家桶）",
   "version": "0.0.0",
-  "kernel": "@deepseek-ai/dsh@0.1.1-rc.2",
+  "kernel": "@deepseek-ai/dsh@0.1.2-rc.1",
   "bundles": {
-    "@deepseek-ai/dsh-base": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-web-app": "0.1.1-rc.2"
+    "@deepseek-ai/dsh-base": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
+    "dsh-user": "0.0.0",
+    "dsh-channel": "0.0.0",
+    "dsh-console": "0.0.0",
+    "dsh-quick-nav": "0.0.0",
+    "dsh-tabs": "0.0.0",
+    "dsh-desk": "0.0.0",
+    "dsh-better-sidebar": "0.18.0-alpha.0",
+    "@linxin666/dsh-client-ui-git-graph": "0.3.12",
+    "@linxin666/dsh-client-ui-skill-explorer": "0.3.12",
+    "@linxin666/dsh-ssh": "0.3.12",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1"
   },
   "vendored": {}
 }
