@@ -70,5 +70,5 @@
             contextWindow: 256000
           - id: dots-studio/dots-3-note-preview:free
             contextWindow: 512000
-          - id: nvidia/nemotron-3-super-120b-a12b:free
+          - id: stepfun/step-3.7-flash:free
             contextWindow: 262144
