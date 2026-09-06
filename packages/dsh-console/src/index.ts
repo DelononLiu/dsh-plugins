@@ -1555,28 +1555,12 @@ export class ConsoleService extends TypertRemoteService {
       return { daemon, instances }
     }
     if (this.config.role === 'console') {
-      // console 角色：合并本机 console.log（自身）+ 各 launch 配置守护的实例日志
-      // （经 callRemote 重入守护的 listLogFiles）。守护不可达 → 跳过其下实例。
+      // console 角色：只返回本机 console.log（自身）。跨守护实例日志的转发读取属
+      // 异步 @Remote（v2，见 note）——v1 不在同步方法里 fire-and-forget callRemote：
+      // 守护(host1)不可达时其 5s 超时 rejection 无人 catch → Node unhandledRejection
+      // 会把整个 web2 判 fatal 崩掉（此前"web2 总断"根因）。实例日志项待 v2 补齐。
       const selfMeta = this.logStat(Logger.resolvePath('console') ?? '')
-      const out: LogFileList = { daemon: selfMeta, instances: [] }
-      const launch = this.config.launch ?? {}
-      const seenDaemon = new Set<string>()  // 同一守护多实例只调一次 listLogFiles
-      for (const [instanceId, spec] of Object.entries(launch)) {
-        if (seenDaemon.has(spec.host ?? '')) continue
-        if (spec.host === undefined || spec.host === '') continue
-        seenDaemon.add(spec.host)
-        const result = this.ctx.channel.callRemote<LogFileList>(spec.host, {
-          namespace: 'console', method: 'listLogFiles', args: {},
-        }, 5_000)
-        // 同步消费：typert @Remote 跨实例返回 ok 包装；展开 value
-        // v1 简化：返回 {ok, value, error}，无 await 路径——此处同步访问会阻塞 UI。
-        // 改：阻塞读（5s 超时；typert 跨实例 RPC 是 promise，await 会卡死 v1 同步签名）。
-        // 解决：listLogFiles 改为返回 Promise<LogFileList>。typert @Remote 接受 async。
-        // 留待 commit 2 后修正——v1 先返回 {daemon:null, instances:[]} + 客户端单独拉。
-        // （fallback：return empty + UI 提示「拉取守护日志失败」）
-        void result  // suppress unused
-      }
-      return out
+      return { daemon: selfMeta, instances: [] }
     }
     return { daemon: null, instances: [] }
   }
@@ -1610,12 +1594,14 @@ export class ConsoleService extends TypertRemoteService {
       if (spec === undefined || spec.host === undefined || spec.host === '') {
         return { records: [], total: 0, truncated: false }
       }
-      // 同步签名 → 不能 await：用 fire-and-forget，结果通过 v1 fallback 返回
-      // （typert 跨实例是 promise，v1 同步返回会让 UI 永远拿到 fallback）。
-      // v1 简化：console 角色实例日志暂未转发——v2 改为 async @Remote。
-      void this.ctx.channel.callRemote<LogReadResult>(spec.host, {
+      // 实例：经 callRemote 转发到守护（v1 同步签名无法 await——fire-and-forget；
+      // 结果由上方 fallback 空返回，转发仅为预触发）。必须 catch：守护不可达超时
+      // 的 rejection 不捕获会成 unhandledRejection → 崩整个进程。
+      this.ctx.channel.callRemote<LogReadResult>(spec.host, {
         namespace: 'console', method: 'readLog', args: { target, opts },
-      }, 5_000)
+      }, 5_000).catch((e: unknown) => {
+        this.log(`[dsh-console] 转发读实例日志失败（${spec.host}/${target.instanceId}）: ${e instanceof Error ? e.message : String(e)}`, { scope: 'console' })
+      })
       return { records: [], total: 0, truncated: false }
     }
     return { records: [], total: 0, truncated: false }
