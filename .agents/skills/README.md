@@ -11,6 +11,7 @@
 | dsh-code-review | 官方 harness | 重写为本仓库规则（分层/note/提交/整体性） |
 | dsh-pre-push-checks | 官方 harness | 重写为本仓库自检清单（typecheck/规则/同步/残留/diff） |
 | dsh-kernel-upgrade | 本仓库原创 | 内核/依赖基线升级流程（隔离 web5 验证 + 适配 + 铺开，含 `verify-kernel-upgrade.sh` 强制验证） |
+| dsh-subagent-model-test | 本仓库原创 | subagent 模型能力验证（确定性工具链冒烟 + 派发稳定性 + ACL 会话机制；备胎模型验收用） |
 | record-browser-gif | 官方 harness | 工具直接拷（含 encode_gif.py；依赖 harness 环境浏览器能力） |
 | browser-skill | 社区（Tencent BrowserSkill） | 字节抽取 bsk 内嵌 SKILL.md → agent skill 形态（`bash` 调 `bsk` CLI；不依赖 dsh 插件）；要求 `bsk` 在 PATH 上 + bsk daemon 在跑 + 浏览器扩展已连 |
 
