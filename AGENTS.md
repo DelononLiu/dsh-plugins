@@ -85,12 +85,12 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 
 ## 开发流程（worktree 分支）
 
-- **大功能在独立 worktree 分支开发**（互不影响）：
+- **大功能在独立 worktree 分支开发**（互不影响）；worktree 物理目录建在**仓库内 `.worktree/`**（勿建主目录外，保持随仓库移动、集中管理）：
   ```sh
-  git worktree add ../dsh-plugins-feat-xxx feat/xxx   # 独立工作目录 + 功能分支
+  git worktree add .worktree/feat-xxx feat/xxx   # 独立工作目录 + 功能分支（.worktree/ 已 gitignore）
   # 功能开发/自检/提交后：
   git merge feat/xxx --no-ff                          # 合入 main
-  git worktree remove ../dsh-plugins-feat-xxx         # 删除 worktree
+  git worktree remove .worktree/feat-xxx         # 删除 worktree
   ```
 - **main 保持稳定基线**：小改动/文档可直接在 main 提交（原子、单功能）；**大功能（跨多文件/多提交）一律走 worktree 分支**，分支命名 `feat/<功能名>`。
 - 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
