@@ -155,7 +155,7 @@ export function LayoutControl(props: LayoutControlProps & LayoutControlOwnProps)
           </Row>
         )
       })}
-      <Row title="工具入口（侧边栏控制台上方）" desc="task-board / SSH / 技能中心的入口行摆位开关（实时生效）">
+      <Row title="工具入口" desc="任务看板放会话头 ⚙快捷导航 右侧；SSH / 技能中心放侧边栏控制台上方（实时生效）">
         <span />
       </Row>
       {TOOLS.map((tool) => {

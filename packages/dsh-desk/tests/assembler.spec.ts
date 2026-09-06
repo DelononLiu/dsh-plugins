@@ -1,6 +1,9 @@
 /**
- * dsh-desk 组装器测试：把全家桶 data-dsh-*-entry 入口 re-parent 到
- * 侧边栏 footArea 顶部（控制台上方），保持 taskboard → ssh → skill 顺序；
+ * dsh-desk 组装器测试：把全家桶 data-dsh-*-entry 入口摆到最终落点——
+ * - 有 `[data-dsh-quicknav]` 顶部容器时：任务看板入口隐藏（display:none、不进 foot、
+ *   侧边栏根内保留防插件自愈），新建顶部按钮插到 quick-nav span 之后，点击转发到
+ *   隐藏原始入口；SSH / 技能中心照旧进 footArea 顶部。
+ * - 无 quick-nav 容器时：任务看板回退 footArea 顶部，保持 taskboard → ssh → skill 顺序。
  * 自愈兼容（entry 仍在 sidebar root / body 内时不触发插件重插）。
  */
 
@@ -52,6 +55,17 @@ function injectEntry(attr: string, into: HTMLElement, before: HTMLElement): HTML
 /** 当前 entry 的父容器。 */
 function parentOf(entry: HTMLElement): HTMLElement | null {
   return entry.parentElement
+}
+
+/** 构建会话头顶部容器：内含 quick-nav root span（data-dsh-quicknav）。 */
+function buildHeaderContainer(): { container: HTMLElement; qnav: HTMLElement } {
+  const container = document.createElement('div')
+  container.className = H('headerActions')
+  const qnav = document.createElement('span')
+  qnav.dataset.dshQuicknav = ''
+  container.appendChild(qnav)
+  document.body.appendChild(container)
+  return { container, qnav }
 }
 
 describe('startToolAssembler', () => {
@@ -225,5 +239,92 @@ describe('startToolAssembler', () => {
     expect(document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')).not.toBeNull()
     disposer()
     expect(document.querySelector('style[data-plugin-css="@dsh-desk/tool-assembler"]')).toBeNull()
+  })
+
+  describe('任务看板顶部摆位（有 [data-dsh-quicknav] 容器）', () => {
+    const regionEl = () => root.querySelector(`.${H('regionArea')}`) as HTMLElement
+    const footEl = () => root.querySelector(`.${H('footArea')}`) as HTMLElement
+    const qnavSel = '[data-dsh-desk-top-taskboard]'
+
+    it('任务看板原始入口隐藏不进 foot；ssh/skill 仍进 foot；顶部按钮位于 quick-nav span 之后', async () => {
+      const header = buildHeaderContainer()
+      const taskboard = injectEntry('data-dsh-taskboard-entry', root, regionEl())
+      const ssh = injectEntry('data-dsh-ssh-entry', root, regionEl())
+      const skill = injectEntry('data-dsh-skill-explorer-entry', root, regionEl())
+      disposers.push(startToolAssembler())
+
+      await vi.waitFor(() => {
+        // 任务看板原始入口隐藏（保留在根内、防插件自愈）、不进 foot
+        expect(taskboard.style.display).toBe('none')
+        expect(parentOf(taskboard)).toBe(root)
+        expect(footEl().contains(taskboard)).toBe(false)
+        // 其它工具照旧进 foot
+        expect(parentOf(ssh)).toBe(footEl())
+        expect(parentOf(skill)).toBe(footEl())
+      })
+      // 顶部按钮出现，且位于 quick-nav span 之后（右侧）
+      const topBtn = header.container.querySelector<HTMLElement>(qnavSel)
+      expect(topBtn).not.toBeNull()
+      expect(topBtn!.previousElementSibling).toBe(header.qnav)
+      expect(topBtn!.textContent).toBe('任务看板')
+      expect(topBtn!.dataset.dshPlugin).toBe('task-board')
+      expect(topBtn!.hasAttribute('data-dsh-part')).toBe(false)
+    })
+
+    it('顶部按钮点击转发：点顶部按钮 → 隐藏原始入口收到 click', async () => {
+      const header = buildHeaderContainer()
+      const taskboard = injectEntry('data-dsh-taskboard-entry', root, regionEl())
+      disposers.push(startToolAssembler())
+      await vi.waitFor(() => {
+        expect(header.container.querySelector(qnavSel)).not.toBeNull()
+      })
+      const clicked = vi.fn()
+      taskboard.addEventListener('click', clicked)
+      ;(header.container.querySelector<HTMLElement>(qnavSel)!).click()
+      expect(clicked).toHaveBeenCalledTimes(1)
+    })
+
+    it('无任务看板原始入口时不建顶部按钮；disposer 移除顶部按钮并恢复原始入口显隐', async () => {
+      const header = buildHeaderContainer()
+      // 只注入 ssh/skill，无 taskboard
+      injectEntry('data-dsh-ssh-entry', root, regionEl())
+      injectEntry('data-dsh-skill-explorer-entry', root, regionEl())
+      const taskboard = injectEntry('data-dsh-taskboard-entry', root, regionEl())
+      const disposer = startToolAssembler()
+      // 等待顶部按钮建好后 disposer 清理
+      await vi.waitFor(() => {
+        expect(header.container.querySelector(qnavSel)).not.toBeNull()
+      })
+      expect(taskboard.style.display).toBe('none')
+      disposer()
+      expect(header.container.querySelector(qnavSel)).toBeNull()
+      expect(taskboard.style.display).toBe('')
+    })
+
+    it('配置排除 taskboard 时不建顶部按钮、原始入口彻底隐藏', async () => {
+      const header = buildHeaderContainer()
+      const taskboard = injectEntry('data-dsh-taskboard-entry', root, regionEl())
+      const ssh = injectEntry('data-dsh-ssh-entry', root, regionEl())
+      const snapshot = { value: { assembler: { tools: { taskboard: { visible: false } } } } }
+      disposers.push(startToolAssembler(snapshot))
+      await vi.waitFor(() => { expect(parentOf(ssh)).toBe(footEl()) })
+      expect(header.container.querySelector(qnavSel)).toBeNull()
+      expect(taskboard.style.display).toBe('none')
+    })
+
+    it('顶部容器晚出现：observer 把任务看板从 foot 移到顶部摆位并补建按钮', async () => {
+      // 先无 quick-nav：任务看板回退 foot
+      const taskboard = injectEntry('data-dsh-taskboard-entry', root, regionEl())
+      disposers.push(startToolAssembler())
+      await vi.waitFor(() => { expect(parentOf(taskboard)).toBe(footEl()) })
+      expect(taskboard.style.display).not.toBe('none')
+      // 会话头渲染出 quick-nav span → observer 重摆位
+      const header = buildHeaderContainer()
+      await vi.waitFor(() => {
+        expect(taskboard.style.display).toBe('none')
+        expect(footEl().contains(taskboard)).toBe(false)
+        expect(header.container.querySelector(qnavSel)).not.toBeNull()
+      })
+    })
   })
 })

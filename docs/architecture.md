@@ -77,14 +77,14 @@
 | 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-quick-nav + 快捷操作 |
 | tab 区 | 会话级切换（固定标签 + Alt+1..9 跨工作区） | dsh-tabs |
 | 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
-| 侧边栏底部 | 功能区快捷入口（工具/控制台/设置），**工具入口经 dsh-desk 组装器摆到控制台上方** | 全家桶工具入口（task-board/ssh/skill-explorer）+ console 入口 + 设置 |
+| 侧边栏底部 | 功能区快捷入口（SSH/技能中心 + 控制台 + 设置；**任务看板入口在会话头 ⚙快捷导航 右侧**），SSH/技能中心入口经 dsh-desk 组装器摆到控制台上方 | 全家桶工具入口（task-board/ssh/skill-explorer）+ console 入口 + 设置 |
 | 侧边栏底部·用户徽标 | 当前用户（人形图标 + 用户名 + 角色 + 经网关时登出），**设置下方**，只消费身份模型 | dsh-user client 半区（/api/user/me） |
 
 **皮肤中心（dsh-web-ui 的 skin-center v2）不引入**：用户明确"不喜欢换皮肤，功能优先"；dsh-desk 自定义维度收敛为**布局 + 插件组合**（vendored 全家桶时可不装 skin-center 包）。
 
 **布局自定义机制**（2026-08 定，v1 从简）：插件组合走 cordis.patch.yml（DSH 原生）；布局调整（显隐/顺序/宽度）走 dsh-desk 的 Config 字段（cordis.yml 可配）+ 设置页开关（参考顶栏治理模式）；**布局配置按实例存**（每实例一套）——"每用户布局"（跨实例一致）留 v2（需用户级配置存储）。
 
-**工具入口组装器**（2026-08 实现，dsh-desk client）：全家桶工具（task-board/ssh/skill-explorer）不走官方 sidebar 插槽，而是各自 MutationObserver + 直接 DOM 注入侧边栏 entry（落点 logoRow 后、工作区上）。dsh-desk 组装器接管摆位：re-parent 到 foot 区（控制台上方）+ 样式对齐官方 `.trigger` 契约 + 间距统一。开放边界见 §9 与 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)。
+**工具入口组装器**（2026-08 实现，dsh-desk client）：全家桶工具（task-board/ssh/skill-explorer）不走官方 sidebar 插槽，而是各自 MutationObserver + 直接 DOM 注入侧边栏 entry（落点 logoRow 后、工作区上）。dsh-desk 组装器接管摆位：**任务看板**（task-board）改摆到**顶部会话头 ⚙快捷导航 右侧**（原始入口 `display:none` 隐藏防插件自愈、新建顶部按钮转发点击；无快捷导航/会话头时回退侧边栏 footArea），**SSH/技能中心摆到 foot 区（控制台上方）**，样式对齐官方 `.trigger` 契约 + 间距统一。开放边界见 §9 与 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)。
 
 ### 设计原则
 
@@ -247,7 +247,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示） | ✅ 已并入（非独立包） |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ✅ 已上线三端（2 测试） |
 | dsh-tabs | UI | 固定会话标签页（Alt+P 固定/取消、× 关闭、编号标题） | ✅ 已实现（2 测试，web2 验证） |
-| dsh-desk | UI（平台） | 布局/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：全家桶 entry 摆位到控制台上方 + 样式对齐官方契约）** | ✅ 组装器已实现（10 测试）；布局配置开关已实现，见 §9 |
+| dsh-desk | UI（平台） | 布局/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：SSH/技能中心摆控制台上方、任务看板摆会话头快捷导航右侧，均对齐官方契约；回退 foot）** | ✅ 组装器已实现（assembler.spec 15 测试）；布局配置开关已实现，见 §9 |
 
 > dsh-quick-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
 
@@ -379,7 +379,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | console UI（并入 dsh-console client 半区：ConsoleBadge + 控制面板） | sidebar.footer.action，仅管理端 |
 | dsh-quick-nav 顶栏导航（三端在线） | 2 测试 |
 | dsh-tabs 固定会话标签（Alt+P/×/编号） | 2 测试 |
-| dsh-desk 工具入口组装器（re-parent 到 foot 区控制台上方 + 官方 trigger 契约样式 + 间距） | 10 测试 + web2 验证 |
+| dsh-desk 工具入口组装器（SSH/技能中心 re-parent 到 foot 区控制台上方、任务看板隐藏 + 顶部按钮摆到会话头快捷导航右侧；均对齐官方契约样式 + 间距；无顶部目标回退 foot） | assembler.spec 15 测试 + web2 验证 |
 | dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关 + 组装器配置化/通用性 + **slots 型插件显隐 git-graph 开关**） | 25 测试（含 slots-controller 5） |
 | vendored 全家桶 5 包（better-sidebar/git-graph/ssh/task-board/skill-explorer） | profile 依赖 + lock 锁版本 |
 | 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh | scripts/ 已实测 |

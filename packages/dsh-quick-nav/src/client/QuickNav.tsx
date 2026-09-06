@@ -62,7 +62,7 @@ export function QuickNav(props: QuickNavProps & { host: QuickNavHost }): React.J
   }, [open, host])
 
   return (
-    <span ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>
+    <span ref={rootRef} data-dsh-quicknav style={{ position: 'relative', display: 'inline-flex' }}>
       <button
         type="button"
         title="快捷导航"
