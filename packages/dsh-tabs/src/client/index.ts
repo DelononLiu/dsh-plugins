@@ -2,7 +2,8 @@
  * dsh-tabs：UI·会话标签页（client 半区）——tab 行只显示 Alt+P 固定的会话。
  *
  * 保持官方行（conversation.view 条目，与官方「对话/轨迹」同行）：
- * - Alt+P 固定/取消固定当前会话；× 关闭；编号「1. 标题」
+ * - Alt+P 固定/取消固定当前会话；编号「1. 标题」；会话 tab 无 ×——取消钉
+ *   收敛到侧栏置顶区（行尾 × / 拖拽排序，见 PinnedStrip），tab 行 = 纯切换器。
  * - 点击会话 tab → 切到绑定的会话（官方 setView + SessionView open）
  * - 选中划线（单一，纯派生）：当前会话固定 → 会话 tab 蓝色划线（官方样式）
  *   并抑制官方「对话/轨迹」划线；未固定 → 官方划线。划线 = 固定且当前，
@@ -31,14 +32,10 @@ export const inject = ['slots', 'sessions', 'settingsScope', 'uiSession']
 
 /** 会话 tab 标识标记（区分官方「对话/轨迹」tab）。 */
 const SESSION_MARK = '\u200b'
-/** 会话 tab 关闭按钮（尾部可见字符）。 */
-const CLOSE_CHAR = ' ×'
 /** 会话 tab 划线类名。 */
 const ACTIVE_CLASS = 'dsh-tabs-active'
 /** 抑制官方划线状态类名（body 级：当前会话固定时生效，单一划线）。 */
 const PINNED_ACTIVE_CLASS = 'dsh-tabs-pinned-active'
-/** × 关闭热区宽度（button 右端像素）。 */
-const CLOSE_HOTZONE = 24
 /** 固定会话 settings 命名空间（与 host PINNED_NAMESPACE 对应）。 */
 const PINNED_NS = 'dsh-tabs-pinned'
 
@@ -46,7 +43,8 @@ const PINNED_NS = 'dsh-tabs-pinned'
 interface PinnedValue { pinned?: string[] }
 
 /**
- * Client 插件体：Alt+P/× 固定管理 + 动态注册固定会话 tab + 选中划线。
+ * Client 插件体：Alt+P 固定管理 + 动态注册固定会话 tab + 选中划线 + 侧栏置顶区
+ * （PinnedStrip，取消钉/排序的管理面）。
  * @param ctx - client 根上下文。
  */
 
@@ -200,7 +198,8 @@ export function apply(ctx: ClientContext): void {
     }
   }
 
-  // —— 事件委托（捕获阶段，先于官方 onClick）：× 关闭 + 点自己的 tab 恢复对话 ——
+  // —— 事件委托（捕获阶段，先于官方 onClick）：点会话 tab 恢复对话/切会话 ——
+  // 会话 tab 上无 ×（取消钉收敛到侧栏置顶区 × / Alt+P），tab 行 = 纯切换器。
   // programmaticClick：程序化触发官方「对话」tab（点自己的 tab 恢复对话视图）
   // 时绕过本委托——否则会被当成"真实点对话"覆盖 officialView 并触发记忆切回。
   let programmaticClick = false
@@ -240,20 +239,6 @@ export function apply(ctx: ClientContext): void {
     const pinnedExisting = [...new Set(pinnedOf())].filter((id) => list.ids.includes(id as never))
     const sessionId = pinnedExisting[idx]
     const current = list.current !== undefined ? String(list.current) : undefined
-    // 事件 4：点击尾部 × 热区 → 取消固定（拦截，避免触发官方 setView）→ 官方划线。
-    const rect = btn.getBoundingClientRect()
-    if (e.clientX > rect.right - CLOSE_HOTZONE) {
-      e.preventDefault()
-      e.stopPropagation()
-      if (sessionId !== undefined) {
-        settings.set('pinned', pinnedExisting.filter((id) => id !== sessionId))
-        // 关闭的是当前会话：它在对话视图了（未固定），记为「对话」记忆。
-        if (sessionId === current) dialogSession = sessionId
-      }
-      officialView = true
-      applyActive()
-      return
-    }
     // 事件 3：点击当前会话自己的 tab：拦截官方 setView（否则 view 被污染成
     // 'session-<当前>'，内容区渲染占位「当前会话：xxx」）；清残留视图
     // （如轨迹）并借官方「对话」tab 的 setView('chat') 切回对话视图——
@@ -353,16 +338,16 @@ export function apply(ctx: ClientContext): void {
           // 官方视图 tab（0/10/…）之后留足空间：会话 tabs 永远排同一行末尾。
           order: 100 + index,
           // label：会话 tab 显示「编号. 标题」+ 不可见会话标记（区分官方
-          // tab）+ 尾部可见 ×；会话 id 不写入 label（避免可见）。划线由
-          // applyActive 按 DOM 顺序定位（不依赖 label 动态标记——官方只在
-          // roster/locale 变化时重算 label，current 变化不刷新）。
+          // tab），无 ×（取消钉收敛到侧栏置顶区）；会话 id 不写入 label
+          // （避免可见）。划线由 applyActive 按 DOM 顺序定位（不依赖 label
+          // 动态标记——官方只在 roster/locale 变化时重算 label，current 变化不刷新）。
           label: () => {
             const listNow = sessionsOf(ctx).list.getSnapshot()
             const pinnedExisting = [...new Set(pinnedOf())].filter((pid) => listNow.ids.includes(pid as never))
             const idx = pinnedExisting.indexOf(id)
             const title = (listNow.byId as Record<string, { displayTitle: string }>)[id]?.displayTitle ?? id
             const num = idx >= 0 ? `${idx + 1}. ` : ''
-            return `${num}${title}${SESSION_MARK}${CLOSE_CHAR}`
+            return `${num}${title}${SESSION_MARK}`
           },
           inject: (): SessionViewInjected => ({
             targetId: id,
