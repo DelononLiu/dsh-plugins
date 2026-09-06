@@ -1,0 +1,3 @@
+name: 调度模式
+description: 主模型作为编排者：分析需求、拆解任务、派发子代理执行并验收，循环迭代直至完成（orchestrator）。
+order: 5

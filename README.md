@@ -18,8 +18,20 @@ DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**
 packages/   自研家族（发布 npm，dsh-* 前缀）
 vendored/   社区插件清单（npm 安装 + lock 锁版本；dst-* 标记第三方）
 profiles/   发行包 profile 模板（git clone 即用）：web=开发+正式 / web2=单插件测试 / web3=多插件测试，各含 dsh.lock.json 版本锁
+presets/    团队自定义 agent preset 源（orchestrator 等，见下方「Agent preset」）
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
 docs/       架构文档
 ```
+
+## Agent preset
+
+Agent preset 定义 agent 会话的工具/提示词组合，属于内核概念（官方
+`dsh-agent-presets`）。本仓库 `presets/<id>/` 版本化管理团队自定义 preset；
+**安装 = 把目录铺到目标环境的 `$DSH_HOME/.agent-presets/<id>/`**（user root，
+被自动扫描，无需任何配置），删除目录即卸载。现含：
+
+| preset | 中文名 | 说明 |
+| --- | --- | --- |
+| presets/orchestrator/ | 调度模式 | 主模型作为编排者：分析需求、拆解任务、派发子代理执行并验收，循环迭代直至完成（基于官方 standard 派生，见 `.agents/notes/implemented/feature/`） |
 
 详见 [docs/architecture.md](docs/architecture.md)。

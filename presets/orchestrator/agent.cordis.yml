@@ -1,0 +1,254 @@
+# The `orchestrator` agent preset: 调度模式——主模型作为编排者，不亲自下场干活。
+#
+# 基于官方 `standard` preset 派生（user preset，本地创作），唯一本质差异是
+# persona：把 agent 从"亲自实现"改为"分析 → 拆解 → 派发 subagent → 验收 →
+# 迭代"。工具面与 standard 完全一致（shell/fs/web 供编排者自查与验收，delegation
+# 组提供 subagent/ralph/workflow 派发面）。
+#
+# 本文件是 AGENT-PLANE 组合。名单在常驻 scope 下挂载一次；命名本 preset 的会话
+# 通过 scope 认父加入，因此这里注册的工具与提示词段落覆盖每个加入的 agent，而
+# 会话自身状态仍按 Session/Agent 在各插件内键控。宿主组合（base.cordis.yml +
+# web.cordis.yml）保留本 preset 不该拥有的东西：注册表本身、沙箱与审批栈、
+# 持久化、模型路由。
+#
+# 服务行必须放进带 `isolate` realm 的组内。没有 realm 会发布进根 realm
+# （进程全局），另一 preset 发布同名会冲突，宿主读者会为每个会话解析到同一个
+# preset 的实例；`dsh-agent-presets` 在挂载时拒绝这种情况。`true` 表示
+# entry-local realm：本常驻挂载自己的私有实例。组内服务被组外消费者解析时须
+# 同 realm（见 delegation 组注释）。
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+# 编排者 persona：这是与 standard 的唯一本质差异。`{{model}}`/`{{cwd}}` 从
+# agent 自己的路由与工作区解析。
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are an orchestrator (调度模式) powered by the {{model}} model. Your working
+      directory is {{cwd}}.
+
+      你的工作方式是「指挥干活，而不是自己下场」——把用户请求当作项目来管理：
+
+      1. 分析（Analyze）：理解需求与验收标准，把问题拆解为相互独立、可单独验收的
+         任务；为每个任务写明：目标、范围、产出物、验收方式。
+
+      2. 拆解（Decompose）：先自行侦察（读文件、搜索、跑快速只读命令）把任务边界
+         摸清，再形成任务清单（用 todo/goal 工具跟踪），而不是凭空拆。
+
+      3. 派发（Dispatch）：用 subagent 工具把任务派给子代理执行。一次派发给足
+         上下文：目标、边界、验收标准、工作目录、约束；任务是整块可验收的
+         交付物，不是碎片化命令。可并行的任务并行派发。
+
+      4. 验收（Verify）：子代理返回后对照验收标准审查产物——读产出、跑测试或
+         typecheck 验证。不达标要指出具体差距，不要只说"不行"。
+
+      5. 迭代（Iterate）：把差距作为明确修正任务重新派发（或要求同一子代理
+         修正），循环直至验收通过；然后回到第 1 步分析剩余部分或整体收尾。
+
+      纪律：
+      - 大块实现工作一律派发，不要亲自代替子代理写代码/做迁移。
+      - 琐碎自查（读一个文件、跑一条 typecheck）可以亲自动手——编排者需要
+        亲自掌握状态才能正确指挥。
+      - 子代理失败先分析失败原因再决定修正方案，不要盲目重试。
+      - 用 goal/todo 持续记录拆解与验收进度，让长循环不迷失。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+# `shell-env` 留在 HOST 组合：`apps/cli/src/web.ts` 注入它以发布
+# `DSH_WEB_URL`/`DSH_WEB_MODE`；注入服务的主机行是 host-plane 归属判据。两个
+# shell 工具从这里消费宿主注册表；其执行器（bash-sandbox/pwsh-sandbox）也在
+# host-plane。
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+# 两者都注册进宿主 `tools` 注册表且不 provide 任何服务，因此无需 realm。
+# `fs` 服务与其策略留在宿主。
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ────────────────────────────────────────────────────────
+
+# 只有面向模型的控制。任务注册表留在 host-plane：其生产者位于本文件任何
+# realm 之外（`tool-bash` 用 `ctx.get` 解析），entry-local realm 对兄弟行不可见。
+# 注册表按属主 agent 键控，一个宿主实例即可服务所有会话。
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+# skill 注册表在宿主组合且按 scope 分层：这些行注册进本 preset 的层，无需
+# realm。skill-filesystem 为本 preset 上的 agent 贡献本地根发现，tool-skill
+# 给目录与加载器；合并目录也携带部署全局注册的内容。
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── goals ───────────────────────────────────────────────────────────────────
+
+# goal 服务与会话驱动器留在 host-plane；人的命令与面向模型的工具注册进本
+# preset 的 scope 层。
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# ── plan mode ───────────────────────────────────────────────────────────────
+
+# plan 状态天然按 agent，因此 entry-local realm 在此是正确生命周期而非变通。
+# 编排者在长循环里同样需要先交计划再动手的阶段（例如拆解方案需用户确认）。
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+              The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+              Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+              When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+# compaction-basic 经 `ctx.get` 读 toolResultPrune，因此 pruner 必须与其共享
+# realm 而非留在外面。tokenMeter 刻意不在此 realm：meter 留在 HOST-plane，
+# 这里的行解析那一个实例——它不取配置、按 Session 键控每次折叠、拥有浏览器为
+# 每个会话读取的 context-meter projection units。
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── delegation and workflows ────────────────────────────────────────────────
+
+# `subagents` 注册表与 spawn/fork 后端在 HOST 组合：注册表是进程单例，
+# api-proxy 向浏览器提供跨会话查询，provider 名只能注册一次。本 preset 贡献
+# delegation 工具，它们解析那个宿主注册表。
+#
+# `workflows` 不同——agent 之外无人读它——所以够到它的每一行在此共享一个
+# entry-local realm，留在外面的消费者会解析本 preset 未填充的宿主注册表。
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        modelSelectionSettings: true
+        backgroundMode: continuable
+
+    # Fork 省略模型选择，让 provider/model 与父一致，继承的历史可复用
+    # KV Cache。本 preset 保持 fork continuable。
+    - id: tool-subagent-fork
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: fork
+        toolName: subagent_fork
+        backgroundMode: continuable
+
+    # 生产 dsh 不装这些可选 provider。在 Profile 装对应 Bundle 并重启 Host，
+    # 再复制本 preset 并去掉对应工具行的 disabled。仅宿主可用不授工具。
+    - id: tool-subagent-codex
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: codex
+        toolName: subagent_codex
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-claude-code
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: claude-code
+        toolName: subagent_claude_code
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+
+    - id: tool-ralph
+      name: '@deepseek-ai/dsh-tool-ralph'
+      config:
+        subagentProvider: spawn
+        maxRounds: 64
+
+# ── remaining model-facing rows ─────────────────────────────────────────────
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+# `web` 服务与搜索 provider 留在宿主组合；只有面向模型的工具按会话。
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+    searchTimeoutMs: 60000

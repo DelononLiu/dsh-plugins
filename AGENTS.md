@@ -14,6 +14,7 @@ DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**
 packages/   自研家族（packages/<plugin>/：package.json + tsconfig*.json + src/）
 vendored/   社区插件清单（npm 安装 + lock 锁版本；见 Vendoring policy）
 profiles/   发行包 profile 模板：web=开发+正式 / web2=单插件测试（官方基线）/ web3=多插件测试（核心组合），各含 dsh.lock.json 版本锁
+presets/    团队自定义 agent preset 源（<id>/{agent.cordis.yml,preset.yml}），安装=铺到目标环境 $DSH_HOME/.agent-presets/<id>/
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
 docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
 .agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（dsh-code-review / dsh-prose-standard / dsh-trim-cot-leakage / dsh-pre-push-checks / record-browser-gif，vendored 自官方 harness 并适配）
