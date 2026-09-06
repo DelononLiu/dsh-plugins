@@ -1684,12 +1684,24 @@ export class ConsoleService extends TypertRemoteService {
       // v1 简化：maxBytes 512KB 全文 readFileSync（不卡）；按字节窗口读取留 v2。
       const full = readFileSync(path, 'utf8')
       // 每条非空行 = 一条记录（JSON 或 legacy），total = 非空行数（与 shell 一致）。
-      const records = full
-        .split('\n')
-        .filter((l) => l.length > 0)
-        .map((line) => this.parseLogLine(role, line))
+      // 去重：Logger.record（JSONL）与 Logger.append（纯文本镜像）双写同一文件——JSONL
+      // 事件行后紧跟的同 ts/同 msg 纯文本镜像不该在查看器里再显示一遍（同一事件只留结构化那条）。
+      const lines = full.split('\n').filter((l) => l.length > 0)
+      const records: LogRecord[] = []
+      let prevJson: LogRecord | null = null
+      for (const line of lines) {
+        const rec = this.parseLogLine(role, line)
+        const isMirror = prevJson !== null && rec.level === null && rec.ts !== ''
+          && rec.ts === prevJson.ts && rec.msg === prevJson.msg
+        if (isMirror) {
+          prevJson = null // 该行是前一 JSON 事件的纯文本镜像，跳过
+          continue
+        }
+        records.push(rec)
+        prevJson = rec.level !== null ? rec : null
+      }
       const sliced = tail > 0 ? records.slice(-tail) : records
-      return { records: sliced, total: records.length, truncated }
+      return { records: sliced, total: lines.length, truncated }
     } catch {
       return { records: [], total: 0, truncated: false }
     }

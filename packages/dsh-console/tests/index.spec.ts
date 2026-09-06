@@ -1152,6 +1152,25 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
     })
   })
 
+  it('去重：JSONL 事件行后紧跟的同 ts/同 msg 纯文本镜像只保留结构化那条', async () => {
+    await withDshHome(async (home) => {
+      mkdirSync(join(home, 'logs'), { recursive: true })
+      const ts = '2024-01-01T00:00:00.000Z'
+      const msg = '控制 instA start → 失败'
+      const jsonLine = JSON.stringify({ ts, role: 'daemon', level: 'error', scope: 'control', msg })
+      // Logger.record（JSONL）后 Logger.append（[ts] msg 纯文本镜像）双写同文件。
+      writeFileSync(join(home, 'logs', 'web3.log'), `${jsonLine}\n[${ts}] ${msg}\n`)
+      const ctx = await bootDaemon(home)
+      const readLog = daemonReadLog(ctx)
+      const r = readLog({ instanceId: 'web3' }, { tail: 0 })
+      // total = 非空行数（2）；镜像行被去重 → records 只留结构化那条。
+      expect(r.total).toBe(2)
+      expect(r.records).toHaveLength(1)
+      expect(r.records[0]).toMatchObject({ ts, role: 'daemon', level: 'error', scope: 'control', msg })
+      ctx[Symbol.dispose]?.()
+    })
+  })
+
   it('Logger.record → readLog 回读（console 角色，JSONL round-trip，level/scope/role/msg 保留）', async () => {
     await withDshHome(async (home) => {
       // 直接 record（不经 log/append），console.log 应恰为 2 条 JSONL。
