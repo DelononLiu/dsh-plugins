@@ -31,6 +31,17 @@ function portOf(addr: string): string {
   return m?.[1] ?? ''
 }
 
+/** 实例末尾数字（web2→2）用于排序；无数字回退 id 字典序。 */
+function idOrder(id: string): number {
+  const m = /\d+$/.exec(id)
+  return m ? Number(m[0]) : 0
+}
+
+/** 按实例顺序排序（web2/web3/web4… 数字升序）。 */
+function sortByInstanceOrder(list: InstanceLink[]): InstanceLink[] {
+  return [...list].sort((a, b) => idOrder(a.id) - idOrder(b.id) || a.id.localeCompare(b.id))
+}
+
 /**
  * 渲染「快捷导航」入口 + 链接列表浮层（一行一个链接）。
  * @param props - 插槽注入的运行时 props + host（typert 数据源）。
@@ -56,7 +67,7 @@ export function QuickNav(props: QuickNavProps & { host: QuickNavHost }): React.J
     if (!open) return
     let cancelled = false
     host.list()
-      .then((list) => { if (!cancelled) setLinks(list) })
+      .then((list) => { if (!cancelled) setLinks(sortByInstanceOrder(list)) })
       .catch(() => { /* 数据面不可用：浮层保持空 */ })
     return () => { cancelled = true }
   }, [open, host])
@@ -120,20 +131,22 @@ export function QuickNav(props: QuickNavProps & { host: QuickNavHost }): React.J
             const clickable = link.addr && link.status === 'online' && !link.current
             return clickable
               ? (
-                <a
+                <button
                   key={link.id}
-                  href={link.addr}
-                  target="_blank"
-                  rel="noreferrer"
+                  type="button"
+                  onClick={() => window.open(link.addr, '_blank', 'noopener')}
+                  title={`打开 ${link.name}`}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '6px 12px', color: 'inherit', textDecoration: 'none',
+                    padding: '6px 12px', width: '100%', textAlign: 'left',
+                    color: 'inherit', background: 'transparent', border: 'none',
+                    cursor: 'pointer', font: 'inherit',
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--dsw-alias-interactive-bg-hover)' }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                 >
                   {row}
-                </a>
+                </button>
               )
               : (
                 <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', opacity: 0.5 }}>
