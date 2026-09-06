@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { derivePinnedRows, startPinnedStrip, type PinnedList, type PinnedStripDeps } from '../src/client/PinnedStrip.ts'
+import { derivePinnedRows, moveInOrder, startPinnedStrip, type PinnedList, type PinnedStripDeps } from '../src/client/PinnedStrip.ts'
 import type { PendingInteractionKind } from '../src/client/session-status'
 
 /** 官方 SidebarRoot.module.css 的 hash 类前缀（css-modules 形式）。 */
@@ -74,6 +74,11 @@ function makeDeps(h: Harness): PinnedStripDeps {
     subscribeSettings: (fn) => { h.settingCbs.push(fn); return () => {} },
     sessions: list,
     open: (id) => { h.opened.push(id) },
+    setPinned: (ids) => {
+      h.pinned = [...ids]
+      // 模拟真实 settings.set：写回后触发 settings 订阅 → sync 收敛。
+      h.settingCbs.forEach((cb) => cb())
+    },
     pendingKindOf: (id) => h.pending[id],
     subscribePending: (fn) => { h.pendingCbs.push(fn); return () => {} },
   }
@@ -97,9 +102,9 @@ function rowTitles(): string[] {
     .map((row) => row.textContent ?? '')
 }
 
-function rowButtons(): HTMLButtonElement[] {
+function rowEls(): HTMLElement[] {
   const el = stripEl()
-  return el === null ? [] : Array.from(el.querySelectorAll<HTMLButtonElement>('[data-dsh-pinned-row]'))
+  return el === null ? [] : Array.from(el.querySelectorAll<HTMLElement>('[data-dsh-pinned-row]'))
 }
 
 describe('derivePinnedRows', () => {
@@ -163,7 +168,7 @@ describe('startPinnedStrip', () => {
   it('点击置顶行 = 打开对应会话', () => {
     disposers.push(startPinnedStrip(makeDeps(h)))
     const rows = stripEl()?.querySelectorAll('[data-dsh-pinned-row]') ?? []
-    ;(rows[1] as HTMLButtonElement).click()
+    ;(rows[1] as HTMLElement).click()
     expect(h.opened).toEqual(['b'])
   })
 
@@ -231,7 +236,7 @@ describe('startPinnedStrip', () => {
   it('运行中会话 → 状态槽渲染追逐矩阵，tooltip 带「运行中」；空闲行无点、纯标题', () => {
     h.byId.a = { ...h.byId.a, running: true }
     disposers.push(startPinnedStrip(makeDeps(h)))
-    const rows = rowButtons()
+    const rows = rowEls()
     expect(rows[0].querySelector('.dsh-pinned-matrix')).not.toBeNull()
     expect(rows[0].title).toBe('运行中 · 会话甲')
     expect(rows[1].querySelector('.dsh-pinned-dot, .dsh-pinned-matrix')).toBeNull()
@@ -241,7 +246,7 @@ describe('startPinnedStrip', () => {
   it('completed → done 圆点 +「已完成」tooltip', () => {
     h.byId.a = { ...h.byId.a, completed: true }
     disposers.push(startPinnedStrip(makeDeps(h)))
-    const rows = rowButtons()
+    const rows = rowEls()
     const dot = rows[0].querySelector<HTMLElement>('.dsh-pinned-dot')
     expect(dot?.dataset.state).toBe('done')
     expect(rows[0].title).toBe('已完成 · 会话甲')
@@ -250,7 +255,7 @@ describe('startPinnedStrip', () => {
   it('running 子代理（origin=subagent）挂在祖先 → 祖先行 ongoing + 计数 tooltip', () => {
     h.byId.sub1 = { origin: 'subagent', parentId: 'a', running: true }
     disposers.push(startPinnedStrip(makeDeps(h)))
-    const rows = rowButtons()
+    const rows = rowEls()
     expect(rows[0].querySelector('.dsh-pinned-matrix')).not.toBeNull()
     expect(rows[0].title).toBe('1 个子代理运行 · 会话甲')
   })
@@ -259,7 +264,7 @@ describe('startPinnedStrip', () => {
     h.byId.a = { ...h.byId.a, running: true }
     h.pending = { a: 'approval' }
     disposers.push(startPinnedStrip(makeDeps(h)))
-    const rows = rowButtons()
+    const rows = rowEls()
     const dot = rows[0].querySelector<HTMLElement>('.dsh-pinned-dot')
     expect(dot?.dataset.state).toBe('warning')
     expect(rows[0].querySelector('.dsh-pinned-matrix')).toBeNull()
@@ -268,10 +273,10 @@ describe('startPinnedStrip', () => {
 
   it('pending 变更（pending 订阅回调触发）实时更新状态', () => {
     disposers.push(startPinnedStrip(makeDeps(h)))
-    expect(rowButtons()[0].querySelector('.dsh-pinned-dot, .dsh-pinned-matrix')).toBeNull()
+    expect(rowEls()[0].querySelector('.dsh-pinned-dot, .dsh-pinned-matrix')).toBeNull()
     h.pending = { a: 'question' }
     h.pendingCbs.forEach((cb) => cb())
-    const rows = rowButtons()
+    const rows = rowEls()
     const dot = rows[0].querySelector<HTMLElement>('.dsh-pinned-dot')
     expect(dot?.dataset.state).toBe('warning')
     expect(rows[0].title).toBe('等待你回复 · 会话甲')
@@ -280,7 +285,7 @@ describe('startPinnedStrip', () => {
   it('状态点已渲染后，状态不变再次同步零 DOM 变更（防 MutationObserver 自触发死循环）', () => {
     h.byId.a = { ...h.byId.a, running: true }
     disposers.push(startPinnedStrip(makeDeps(h)))
-    expect(rowButtons()[0].querySelector('.dsh-pinned-matrix')).not.toBeNull()
+    expect(rowEls()[0].querySelector('.dsh-pinned-matrix')).not.toBeNull()
     const watcher = new MutationObserver(() => {})
     watcher.observe(document.body, { childList: true, subtree: true })
     // 触发一次不改变任何置顶行状态的变更：仅非钉会话元数据/current 变化。
@@ -303,5 +308,40 @@ describe('startPinnedStrip', () => {
     expect(css).toContain('dsh-tabs-dot-chase')
     expect(css).toContain('var(--dsw-alias-state-warn-primary)')
     expect(css).toContain('var(--dsw-static-deepseek-450)')
+  })
+
+  it('行尾 × 取消钉：写回 settings 并移除该行（不触发打开）', () => {
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    const unpin = rowEls()[0].querySelector<HTMLElement>('[data-dsh-pinned-unpin]')
+    expect(unpin).not.toBeNull()
+    unpin?.click()
+    expect(h.pinned).toEqual(['b']) // a 被取消钉
+    expect(h.opened).toEqual([]) // × 不打开会话
+    expect(rowIds()).toEqual(['b']) // settings 订阅 → sync 收敛
+    expect(rowTitles()).toEqual(['1. b']) // 重编号
+  })
+
+  it('点击行（非 × 区域）打开会话；行元素为 div[role=button]（可拖拽）', () => {
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    const rows = rowEls()
+    expect(rows[0].tagName).toBe('DIV')
+    expect(rows[0].getAttribute('role')).toBe('button')
+    expect(rows[0].draggable).toBe(true)
+    rows[1].click()
+    expect(h.opened).toEqual(['b'])
+  })
+})
+
+describe('moveInOrder（拖拽排序纯函数）', () => {
+  it('moved 移到 over 前/后，其余保序', () => {
+    expect(moveInOrder(['a', 'b', 'c'], 'c', 'a', 'before')).toEqual(['c', 'a', 'b'])
+    expect(moveInOrder(['a', 'b', 'c'], 'a', 'c', 'after')).toEqual(['b', 'c', 'a'])
+    expect(moveInOrder(['a', 'b', 'c'], 'b', 'a', 'before')).toEqual(['b', 'a', 'c'])
+    expect(moveInOrder(['a', 'b', 'c'], 'a', 'b', 'before')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('over 不在列表 → moved 落末尾；moved === over → 原样', () => {
+    expect(moveInOrder(['a', 'b'], 'b', 'ghost', 'before')).toEqual(['a', 'b'])
+    expect(moveInOrder(['a', 'b'], 'b', 'b', 'after')).toEqual(['a', 'b'])
   })
 })

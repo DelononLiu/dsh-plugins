@@ -11,8 +11,10 @@ Status: implemented
 ## Decision
 
 - **钉仍是 session 操作，数据同源**：置顶区显示的是 dsh-tabs settings 命名空间
-  `dsh-tabs-pinned` 的 `pinned` 列表——与会话 tab 行**同一份数据**；钉/取消钉仍由
-  dsh-tabs 的 Alt+P（及 tab ×）负责。置顶区**只读**：无钉/取消钉入口。
+  `dsh-tabs-pinned` 的 `pinned` 列表——与会话 tab 行**同一份数据**；钉由 Alt+P
+  负责。置顶区定位 = 钉子集**管理面**（区别于 tab 行切换器）：行尾 × 取消钉
+  （与 tab × 同语义的第二个入口）、整行拖拽排序写回 settings → tab 行顺序与
+  Alt+1..9 自动跟随（同数据，天然同步）。
 - **落点在 dsh-tabs client**：`packages/dsh-tabs/src/client/PinnedStrip.ts`（dsh-tabs
   已持有钉数据 + `ctx.sessions.open`，无需动 dsh-desk、不新增 UI slot、不另起包）。
 - **挂载 = DOM 注入**（照 dsh-desk 工具入口组装器先例）：MutationObserver 等官方

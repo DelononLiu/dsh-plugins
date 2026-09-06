@@ -397,13 +397,14 @@ export function apply(ctx: ClientContext): void {
     }
   })
 
-  // —— 左侧栏「置顶」区：只读镜像固定会话（数据 = 同一 dsh-tabs-pinned，
-  // 点击打开 = ctx.sessions.open；与 tab 行天然同步，见 PinnedStrip）——
+  // —— 左侧栏「置顶」区：固定会话管理面（数据 = 同一 dsh-tabs-pinned：拖拽排序 /
+  // 行尾 × 取消钉写回 settings，tab 行顺序自动同步；点击打开，见 PinnedStrip）——
   const disposePinnedStrip = startPinnedStrip({
     getPinned: () => pinnedOf(),
     subscribeSettings: (fn) => settings.subscribe(fn),
     sessions: sessionsOf(ctx).list,
     open: (id: string) => { sessionsOf(ctx).open(id as never) },
+    setPinned: (ids) => settings.set('pinned', [...ids]),
     pendingKindOf,
     subscribePending: (fn) => ctx.uiSession.pendingInteractions.subscribe(fn),
   })

@@ -1,16 +1,20 @@
 /**
  * dsh-tabs 左侧栏「置顶」区（client 半区，DOM 注入）——官方左侧栏「会话/
- * 工作区列表」之上的一块只读区，镜像 dsh-tabs 的固定会话列表（同一份
- * `dsh-tabs-pinned` settings 数据，天然两边同步）。
+ * 工作区列表」之上的固定会话区，镜像 dsh-tabs 的固定会话列表（同一份
+ * `dsh-tabs-pinned` settings 数据，天然两边同步）。定位 = 钉子集的**管理面**：
+ * 拖拽排序 + 行尾 × 取消钉都写回 settings → 顶部会话 tab 行只消费同一顺序
+ * （tab 行编号 / Alt+1..9 自动跟随），两处各司其职。
  *
  * 数据/交互契约（与会话 tab 行同源，见 index.ts）：
  * - 固定列表 = settings 命名空间 `dsh-tabs-pinned` 的 `pinned`（Alt+P 钉/取消
- *   钉仍由会话 tab 行负责；本区只读，无钉/取消钉入口）。
+ *   钉由会话 tab 行负责；本区行尾 × 是同语义的第二个取消入口）。
  * - 只显示仍存在的会话（按当前会话快照的 ids 过滤）＋ 标题取 byId.displayTitle。
  * - 行可见文本带 `N.` 编号前缀（钉序第 N，与会话 tab 行编号一致；行增删自动
  *   重编号）；tooltip/aria-label 保持纯标题。
- * - 点击条目 = 打开该会话（ctx.sessions.open，与点击左侧会话同路径——切换后
+ * - 点击行 = 打开该会话（ctx.sessions.open，与点击左侧会话同路径——切换后
  *   dsh-tabs 自己的 current 订阅会更新 tab 行划线等派生状态）。
+ * - 拖拽排序：整行 HTML5 拖拽，drop 时把可见钉序写回 settings（同步触发 tab
+ *   行顺序更新）；行内不实时搬移 DOM（避免与 sync 的重排打架）。
  *
  * 行带官方同款状态圆点（运行/子代理/完成/pending），槽 16px 保位。
  *
@@ -29,6 +33,12 @@ export const PINNED_STRIP_ATTR = 'data-dsh-pinned-strip'
 const PINNED_LABEL = '置顶区'
 /** 行按钮标记。 */
 const PINNED_ROW_ATTR = 'data-dsh-pinned-row'
+/** 行内取消钉按钮标记。 */
+const UNPIN_ATTR = 'data-dsh-pinned-unpin'
+/** 拖拽源行标记（置灰）。 */
+const DRAGGING_ATTR = 'data-dsh-pinned-dragging'
+/** 拖放落点标记（值 before/after）。 */
+const DROP_ATTR = 'data-dsh-pinned-drop'
 /** 当前会话行标记（行内标题着色，对齐会话 tab 的划线色）。 */
 const PINNED_CURRENT_ATTR = 'data-dsh-pinned-current'
 /** 幂等样式标签标记（同 dsh-desk `data-plugin-css` 约定）。 */
@@ -64,6 +74,8 @@ export interface PinnedStripDeps {
   sessions: PinnedList
   /** 打开会话（点击置顶条目 = ctx.sessions.open）。 */
   open(id: string): void
+  /** 写回钉顺序/取消钉（settings.set('pinned', …)；tab 行顺序随之同步）。 */
+  setPinned(ids: readonly string[]): void
   /** 会话 pending 交互 kind（无则 undefined）；入参会话 id 为 string。 */
   pendingKindOf(id: string): PendingInteractionKind | undefined
   /** 订阅 pending 交互变更。 */
@@ -96,6 +108,24 @@ export function derivePinnedRows(pinned: readonly string[], list: PinnedListSnap
   return rows
 }
 
+/**
+ * 把 moved 移到 over 的 before/after（相对当前可见钉序），返回新顺序
+ * （其余保序、moved 已在 over 旁时不重复移动）。纯函数，便于单测。
+ * @param ids - 当前可见钉顺序（置顶区行的会话 id 顺序）。
+ * @param moved - 被拖拽的会话 id。
+ * @param over - 落点会话 id（不在 ids 时移到末尾）。
+ * @param half - 落在 over 的上半（before）/下半（after）。
+ * @returns 新顺序（去重保序）。
+ */
+export function moveInOrder(ids: readonly string[], moved: string, over: string, half: 'before' | 'after'): string[] {
+  if (moved === over) return [...ids]
+  const list = ids.filter((id) => String(id) !== moved)
+  const overIdx = list.findIndex((id) => String(id) === over)
+  const at = overIdx < 0 ? list.length : overIdx + (half === 'after' ? 1 : 0)
+  list.splice(at, 0, moved)
+  return list
+}
+
 /** 置顶区样式（对齐官方侧边栏契约：行 32px/圆角 8/悬停底；标题 14px）。 */
 function pinnedCss(): string {
   return [
@@ -118,6 +148,13 @@ function pinnedCss(): string {
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix{flex:none;width:10px;height:10px;color:var(--dsw-static-deepseek-450)}`,
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix .cell{fill:currentColor;opacity:.15;animation:dsh-tabs-dot-chase 1s infinite}`,
     `@keyframes dsh-tabs-dot-chase{0%,12.4%{opacity:1}12.5%,24.9%{opacity:.6}25%,37.4%{opacity:.35}37.5%,100%{opacity:.15}}`,
+    // 行管理控件：× 取消钉（hover/focus-within 显示）+ 拖拽源置灰 + 落点指示线。
+    `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${DRAGGING_ATTR}]{opacity:.45}`,
+    `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${DROP_ATTR}='before']{box-shadow:inset 0 2px 0 0 var(--dsw-alias-state-business-primary)}`,
+    `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${DROP_ATTR}='after']{box-shadow:inset 0 -2px 0 0 var(--dsw-alias-state-business-primary)}`,
+    `[${PINNED_STRIP_ATTR}] [${UNPIN_ATTR}]{flex:none;display:none;align-items:center;justify-content:center;width:20px;height:20px;margin-left:2px;padding:0;border:none;border-radius:50%;background:transparent;cursor:pointer;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:13px;line-height:13px}`,
+    `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}]:hover [${UNPIN_ATTR}],[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}]:focus-within [${UNPIN_ATTR}]{display:inline-flex}`,
+    `[${PINNED_STRIP_ATTR}] [${UNPIN_ATTR}]:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}`,
     // 官方折叠（rail）：AppFrame 折叠时给 frame 加 data-sidebar-collapsed，整区隐藏。
     `[data-sidebar-collapsed] [${PINNED_STRIP_ATTR}]{display:none}`,
   ].join('')
@@ -166,20 +203,30 @@ function makeStrip(doc: Document): HTMLElement {
   return el
 }
 
-/** 行按钮（首次创建；标题 span 由后续 sync 更新）。 */
-function makeRow(doc: Document, row: PinnedRow, open: (id: string) => void): HTMLButtonElement {
-  const btn = doc.createElement('button')
-  btn.type = 'button'
-  btn.setAttribute(PINNED_ROW_ATTR, '')
-  btn.dataset.sessionId = row.id
+/** 行元素（首次创建；标题/状态/编号由后续 sync 更新；点击/拖拽走 start 里的
+ *  容器级事件委托——行本身不加监听，重建即复用）。行 = div[role=button]：
+ *  整行可拖（HTML5 draggable），行尾 × 是独立 button（不触发打开）。 */
+function makeRow(doc: Document, row: PinnedRow): HTMLElement {
+  const el = doc.createElement('div')
+  el.setAttribute(PINNED_ROW_ATTR, '')
+  el.dataset.sessionId = row.id
+  el.setAttribute('role', 'button')
+  el.setAttribute('tabindex', '0')
+  el.draggable = true
   const statusSlot = doc.createElement('span')
   statusSlot.setAttribute('data-dsh-pinned-status', '')
-  btn.appendChild(statusSlot)
+  el.appendChild(statusSlot)
   const title = doc.createElement('span')
   title.setAttribute('data-dsh-pinned-title', '')
-  btn.appendChild(title)
-  btn.addEventListener('click', () => { open(row.id) })
-  return btn
+  el.appendChild(title)
+  const unpin = doc.createElement('button')
+  unpin.type = 'button'
+  unpin.setAttribute(UNPIN_ATTR, '')
+  unpin.title = '取消置顶'
+  unpin.setAttribute('aria-label', '取消置顶')
+  unpin.textContent = '×'
+  el.appendChild(unpin)
+  return el
 }
 
 /** 幂等同步状态槽：期望点/矩阵与槽内现状一致时**不改 DOM**（零变更收敛），
@@ -252,14 +299,14 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
   }
   const listEl = strip.querySelector<HTMLElement>('[data-dsh-pinned-list]')
   if (listEl === null) return
-  const existing = new Map<string, HTMLButtonElement>()
-  for (const btn of Array.from(listEl.querySelectorAll<HTMLButtonElement>(`button[${PINNED_ROW_ATTR}]`))) {
-    existing.set(btn.dataset.sessionId ?? '', btn)
+  const existing = new Map<string, HTMLElement>()
+  for (const rowEl of Array.from(listEl.querySelectorAll<HTMLElement>(`[${PINNED_ROW_ATTR}]`))) {
+    existing.set(rowEl.dataset.sessionId ?? '', rowEl)
   }
   const wanted = new Set(rows.map((row) => row.id))
-  for (const [id, btn] of existing) {
+  for (const [id, rowEl] of existing) {
     if (wanted.has(id)) continue
-    btn.remove()
+    rowEl.remove()
     existing.delete(id)
   }
   // 状态数据按当前快照统计一次（行循环内不复算）。
@@ -269,23 +316,23 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
   )
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
-    let btn = existing.get(row.id)
-    if (btn === undefined || btn.parentElement !== listEl) {
-      btn = makeRow(doc, row, deps.open)
-      listEl.appendChild(btn)
-      existing.set(row.id, btn)
+    let rowEl = existing.get(row.id)
+    if (rowEl === undefined || rowEl.parentElement !== listEl) {
+      rowEl = makeRow(doc, row)
+      listEl.appendChild(rowEl)
+      existing.set(row.id, rowEl)
     }
-    // 轻量字段同步（标题/当前标记/状态；滚动/悬停不打断——按钮不重建）。
+    // 轻量字段同步（标题/当前标记/状态；滚动/悬停不打断——行不重建）。
     if (row.current) {
-      btn.setAttribute(PINNED_CURRENT_ATTR, '')
-      btn.setAttribute('aria-current', 'true')
+      rowEl.setAttribute(PINNED_CURRENT_ATTR, '')
+      rowEl.setAttribute('aria-current', 'true')
     } else {
-      btn.removeAttribute(PINNED_CURRENT_ATTR)
-      btn.removeAttribute('aria-current')
+      rowEl.removeAttribute(PINNED_CURRENT_ATTR)
+      rowEl.removeAttribute('aria-current')
     }
-    btn.setAttribute('aria-label', row.title)
-    const statusSlot = btn.querySelector<HTMLElement>('[data-dsh-pinned-status]')
-    const titleEl = btn.querySelector<HTMLElement>('[data-dsh-pinned-title]')
+    rowEl.setAttribute('aria-label', row.title)
+    const statusSlot = rowEl.querySelector<HTMLElement>('[data-dsh-pinned-status]')
+    const titleEl = rowEl.querySelector<HTMLElement>('[data-dsh-pinned-title]')
     const summary = byIdNow[row.id]
     const status = resolveRowStatus({
       pendingKind: deps.pendingKindOf(row.id),
@@ -295,7 +342,7 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
     })
     // tooltip：有状态点 → 「状态 · 标题」；空闲 → 纯标题。aria-label 保持纯标题。
     const tip = status.dot === undefined ? row.title : `${status.label} · ${row.title}`
-    if (btn.title !== tip) btn.title = tip
+    if (rowEl.title !== tip) rowEl.title = tip
     // 可见文本带编号前缀（钉序第 N，与会话 tab 行编号一致）；tooltip/aria 保持纯标题。
     const label = `${i + 1}. ${row.title}`
     if (titleEl !== null && titleEl.textContent !== label) titleEl.textContent = label
@@ -333,19 +380,122 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
     // 无他人改动，忽略自身写入不影响 React 重排后的自愈重插。
     for (const record of records) {
       const target = record.target
-      if (!(target instanceof Element) || target.closest(PINNED_STRIP_ATTR) === null) {
+      if (!(target instanceof Element) || target.closest(`[${PINNED_STRIP_ATTR}]`) === null) {
         sync()
         return
       }
     }
   })
   observer.observe(doc.body, { childList: true, subtree: true })
+
+  // —— 行交互（容器/文档级事件委托：行可被 sync 反复重建，委托在文档级一次挂载）——
+  const rowOf = (target: EventTarget | null): HTMLElement | null =>
+    target instanceof Element ? target.closest<HTMLElement>(`[${PINNED_ROW_ATTR}]`) : null
+  const unpinOf = (target: EventTarget | null): HTMLElement | null =>
+    target instanceof Element ? target.closest<HTMLElement>(`[${UNPIN_ATTR}]`) : null
+  const insideStrip = (target: EventTarget | null): boolean =>
+    target instanceof Element && target.closest(`[${PINNED_STRIP_ATTR}]`) !== null
+
+  // 点击：× → 取消钉（写回 settings）；行其它区域 → 打开会话。
+  const onClickDoc = (e: MouseEvent): void => {
+    if (!insideStrip(e.target)) return
+    const row = rowOf(e.target)
+    if (row === null) return
+    const id = row.dataset.sessionId ?? ''
+    if (unpinOf(e.target) !== null) {
+      e.preventDefault()
+      if (id !== '') deps.setPinned([...deps.getPinned()].filter((x) => String(x) !== id))
+      return
+    }
+    if (id !== '') deps.open(id)
+  }
+  // 键盘打开（div[role=button] 无原生激活；× 按钮自身 Enter/Space 走原生 click）。
+  const onKeyDownDoc = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    if (!insideStrip(e.target)) return
+    if (unpinOf(e.target) !== null) return
+    const row = rowOf(e.target)
+    if (row === null) return
+    e.preventDefault()
+    const id = row.dataset.sessionId ?? ''
+    if (id !== '') deps.open(id)
+  }
+
+  // —— 拖拽排序（HTML5 DnD）：拖行到另一行上/下半，drop 一次写回 settings ——
+  // 行内不实时搬 DOM（避免与 sync 的 settings 顺序重排互相打架）；drop 后
+  // settings 订阅触发 sync，DOM 按新序收敛。
+  let dragSource: string | null = null
+  let dropTarget: HTMLElement | null = null
+  const dropHalf = (e: DragEvent, row: HTMLElement): 'before' | 'after' => {
+    const rect = row.getBoundingClientRect()
+    return e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+  }
+  const clearDrop = (): void => {
+    dropTarget?.removeAttribute(DROP_ATTR)
+    dropTarget = null
+  }
+  const onDragStartDoc = (e: DragEvent): void => {
+    const row = rowOf(e.target)
+    const id = row?.dataset.sessionId
+    if (row === null || id === undefined || id === '') return
+    dragSource = id
+    e.dataTransfer?.setData('text/plain', id)
+    if (e.dataTransfer !== null) e.dataTransfer.effectAllowed = 'move'
+    row.setAttribute(DRAGGING_ATTR, '')
+  }
+  const onDragOverDoc = (e: DragEvent): void => {
+    if (dragSource === null) return
+    const row = rowOf(e.target)
+    if (row === null) return
+    e.preventDefault() // 声明可 drop
+    if (dropTarget !== row) {
+      clearDrop()
+      dropTarget = row
+    }
+    dropTarget.setAttribute(DROP_ATTR, dropHalf(e, row))
+  }
+  const onDropDoc = (e: DragEvent): void => {
+    if (dragSource === null) return
+    const row = rowOf(e.target)
+    if (row === null) return
+    e.preventDefault()
+    const over = row.dataset.sessionId
+    const listEl = stripRef.el?.querySelector<HTMLElement>('[data-dsh-pinned-list]')
+    if (over !== undefined && listEl != null) {
+      const visible = Array.from(listEl.querySelectorAll<HTMLElement>(`[${PINNED_ROW_ATTR}]`))
+        .map((r) => r.dataset.sessionId ?? '')
+        .filter((id) => id !== '')
+      deps.setPinned(moveInOrder(visible, dragSource, over, dropHalf(e, row)))
+    }
+    dragSource = null
+    clearDrop()
+    doc.querySelectorAll<HTMLElement>(`[${DRAGGING_ATTR}]`).forEach((el) => el.removeAttribute(DRAGGING_ATTR))
+  }
+  const onDragEndDoc = (): void => {
+    dragSource = null
+    clearDrop()
+    doc.querySelectorAll<HTMLElement>(`[${DRAGGING_ATTR}]`).forEach((el) => el.removeAttribute(DRAGGING_ATTR))
+  }
+  doc.addEventListener('click', onClickDoc)
+  doc.addEventListener('keydown', onKeyDownDoc)
+  doc.addEventListener('dragstart', onDragStartDoc)
+  doc.addEventListener('dragover', onDragOverDoc)
+  doc.addEventListener('drop', onDropDoc)
+  doc.addEventListener('dragend', onDragEndDoc)
+
   sync()
   return () => {
     unsubSettings()
     unsubSessions()
     unsubPending()
     observer.disconnect()
+    doc.removeEventListener('click', onClickDoc)
+    doc.removeEventListener('keydown', onKeyDownDoc)
+    doc.removeEventListener('dragstart', onDragStartDoc)
+    doc.removeEventListener('dragover', onDragOverDoc)
+    doc.removeEventListener('drop', onDropDoc)
+    doc.removeEventListener('dragend', onDragEndDoc)
+    clearDrop()
     stripRef.el?.remove()
     stripRef.el = null
     removeCss()
