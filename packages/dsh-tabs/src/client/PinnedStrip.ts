@@ -7,6 +7,8 @@
  * - 固定列表 = settings 命名空间 `dsh-tabs-pinned` 的 `pinned`（Alt+P 钉/取消
  *   钉仍由会话 tab 行负责；本区只读，无钉/取消钉入口）。
  * - 只显示仍存在的会话（按当前会话快照的 ids 过滤）＋ 标题取 byId.displayTitle。
+ * - 行可见文本带 `N.` 编号前缀（钉序第 N，与会话 tab 行编号一致；行增删自动
+ *   重编号）；tooltip/aria-label 保持纯标题。
  * - 点击条目 = 打开该会话（ctx.sessions.open，与点击左侧会话同路径——切换后
  *   dsh-tabs 自己的 current 订阅会更新 tab 行划线等派生状态）。
  *
@@ -189,7 +191,8 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
     btn.remove()
     existing.delete(id)
   }
-  for (const row of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
     let btn = existing.get(row.id)
     if (btn === undefined || btn.parentElement !== listEl) {
       btn = makeRow(doc, row, deps.open)
@@ -207,7 +210,9 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
     btn.setAttribute('aria-label', row.title)
     btn.title = row.title
     const titleEl = btn.querySelector<HTMLElement>('[data-dsh-pinned-title]')
-    if (titleEl !== null && titleEl.textContent !== row.title) titleEl.textContent = row.title
+    // 可见文本带编号前缀（钉序第 N，与会话 tab 行编号一致）；tooltip/aria 保持纯标题。
+    const label = `${i + 1}. ${row.title}`
+    if (titleEl !== null && titleEl.textContent !== label) titleEl.textContent = label
   }
   // 按派生顺序重排（仅乱序时移动，幂等收敛）。
   for (let i = 0; i < rows.length; i++) {

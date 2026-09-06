@@ -139,7 +139,7 @@ describe('startPinnedStrip', () => {
     expect(root.children[2]).toBe(strip) // logoRow/newSession 之后、regionArea 之前
     expect(strip?.querySelector('[data-dsh-pinned-label]')?.textContent).toBe('置顶')
     expect(rowIds()).toEqual(['a', 'b'])
-    expect(rowTitles()).toEqual(['会话甲', 'b'])
+    expect(rowTitles()).toEqual(['1. 会话甲', '2. b'])
   })
 
   it('无固定会话时不注入（无空置顶区残留）', () => {
@@ -167,6 +167,7 @@ describe('startPinnedStrip', () => {
     h.pinned = ['b']
     h.settingCbs.forEach((cb) => cb())
     expect(rowIds()).toEqual(['b'])
+    expect(rowTitles()).toEqual(['1. b'])
 
     // b 会话被归档消失（list 变更）→ 无钉 → 整区移除
     h.ids = ['c']
