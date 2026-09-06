@@ -101,6 +101,17 @@ const css = `
 .dsh-console-msg{font-size:13px;color:var(--dsw-alias-label-primary);line-height:1.5;flex:1;min-width:0}
 .dsh-console-row-error{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent)}
 .dsh-console-log-hit{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 30%,transparent);color:var(--dsw-alias-brand-primary);font-weight:500}
+/* 紧凑逐行日志（每条一行：时间 级别 正文） */
+.dsh-console-log{font-family:var(--ds-font-family-code);font-size:12px;line-height:1.65}
+.dsh-console-log-line{display:flex;align-items:baseline;gap:8px;padding:0 6px;border-radius:6px;white-space:pre-wrap;word-break:break-word}
+.dsh-console-log-line.err{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 9%,transparent)}
+.dsh-console-log-time{flex:none;color:var(--dsw-alias-label-tertiary)}
+.dsh-console-log-lv{flex:none;min-width:30px;font-weight:600;text-align:left}
+.dsh-console-log-lv.info{color:var(--dsw-alias-state-success-primary)}
+.dsh-console-log-lv.warn{color:var(--dsw-alias-state-warning-primary)}
+.dsh-console-log-lv.error{color:var(--dsw-alias-state-error-primary)}
+.dsh-console-log-body{color:var(--dsw-alias-label-primary)}
+.dsh-console-log-line.err .dsh-console-log-body{color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 80%,var(--dsw-alias-label-primary))}
 `
 
 /** 幂等注入样式（bundle 加载即执行）。 */

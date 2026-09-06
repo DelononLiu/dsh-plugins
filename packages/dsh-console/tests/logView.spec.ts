@@ -181,10 +181,10 @@ describe('logView pure module', () => {
   })
 
   describe('formatRowTime', () => {
-    it('formats ISO (UTC) time to HH:MM:SS.mmm', () => {
-      expect(formatRowTime('2024-01-01T12:34:56.789Z')).toBe('12:34:56.789')
-      expect(formatRowTime('2024-01-01T00:00:00.000Z')).toBe('00:00:00.000')
-      expect(formatRowTime('2024-01-01T23:59:59.999Z')).toBe('23:59:59.999')
+    it('formats ISO time to UTC+8 HH:MM:SS.mmm', () => {
+      expect(formatRowTime('2024-01-01T12:34:56.789Z')).toBe('20:34:56.789')
+      expect(formatRowTime('2024-01-01T00:00:00.000Z')).toBe('08:00:00.000')
+      expect(formatRowTime('2024-01-01T23:59:59.999Z')).toBe('07:59:59.999')
     })
     it('falls back to original string on invalid input', () => {
       expect(formatRowTime('not-a-date')).toBe('not-a-date')
@@ -212,8 +212,8 @@ describe('logView pure module', () => {
         { ts: '2024-01-01T12:00:01.000Z', role: 'instance', level: 'error', scope: 'api', msg: 'error occurred', instanceId: 'web3' },
       ]
       const text = recordsToText(records)
-      expect(text).toContain('[12:00:00.000] [info] daemon · test hello')
-      expect(text).toContain('[12:00:01.000] [error] instance/web3 · api error occurred')
+      expect(text).toContain('[20:00:00.000] [info] daemon · test hello')
+      expect(text).toContain('[20:00:01.000] [error] instance/web3 · api error occurred')
       expect(text.split('\n')).toHaveLength(2)
     })
     it('empty array returns empty string', () => {

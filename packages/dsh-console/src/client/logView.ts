@@ -133,11 +133,12 @@ export function formatRowTime(ts: string): string {
   try {
     const date = new Date(ts);
     if (isNaN(date.getTime())) return ts; // fallback to original if invalid
-    // 用 UTC 取时（记录 ts 为 ISO Z 时间；本地时区会让测试/展示不确定）。
-    const hh = String(date.getUTCHours()).padStart(2, '0');
-    const mm = String(date.getUTCMinutes()).padStart(2, '0');
-    const ss = String(date.getUTCSeconds()).padStart(2, '0');
-    const mmm = String(date.getUTCMilliseconds()).padStart(3, '0');
+    // 展示用东八区墙钟：对任意 ISO 固定 +8h 后取 UTC 字段（与宿主机时区无关、可测）。
+    const cst = new Date(date.getTime() + 8 * 3600 * 1000);
+    const hh = String(cst.getUTCHours()).padStart(2, '0');
+    const mm = String(cst.getUTCMinutes()).padStart(2, '0');
+    const ss = String(cst.getUTCSeconds()).padStart(2, '0');
+    const mmm = String(cst.getUTCMilliseconds()).padStart(3, '0');
     return `${hh}:${mm}:${ss}.${mmm}`;
   } catch {
     return ts; // fallback
