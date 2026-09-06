@@ -167,11 +167,30 @@ export interface LogReadOptions {
   maxBytes?: number
 }
 
+/** 日志级别（结构化日志，降序优先级）。 */
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+/** 单条结构化日志记录（JSONL 落盘 / readLog 返回）。 */
+export interface LogRecord {
+  /** ISO 时间戳。 */
+  ts: string
+  /** 记录来源角色。 */
+  role: 'console' | 'daemon' | 'instance'
+  /** 日志级别（文本日志宽松解析时为 null）。 */
+  level: LogLevel | null
+  /** 日志域/模块（如 'console' / 'daemon' / 实例 id）。 */
+  scope: string
+  /** 来源实例 id（实例 stdout 记录专用；daemon/console 一般为空）。 */
+  instanceId?: string
+  /** 日志正文。 */
+  msg: string
+}
+
 /** 日志读取结果。 */
 export interface LogReadResult {
-  /** 文件内容（已截断/截行后）。 */
-  content: string
-  /** 原始总行数（content 行数 ≤ total）。 */
+  /** 解析后的记录列表（tail 取最后 N 条）。 */
+  records: LogRecord[]
+  /** 文件中非空行总数。 */
   total: number
   /** 是否被 maxBytes 截断（true=内容不全）。 */
   truncated: boolean

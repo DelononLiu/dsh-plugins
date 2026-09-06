@@ -302,7 +302,8 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const fetchLog = useCallback(async (autoScroll: boolean): Promise<void> => {
     try {
       const r = await host.readLog(logTarget, { tail: logTail })
-      setLogContent(r.content)
+      // v1 最小适配：结构化 records 汇成纯文本喂现有渲染（完整查看器 = P2）。
+      setLogContent((r.records ?? []).map((rec) => rec.msg).join('\n'))
       setLogTruncated(r.truncated)
       setLogTotal(r.total)
       setLogError(null)
