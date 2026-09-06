@@ -19,6 +19,10 @@ Status: implemented
   侧边栏渲染后，把置顶区插到 sidebar root 的 `regionArea` **之前**（列表区上方）；
   React 重挂/重排导致丢失时自愈重插；折叠（rail，frame 带 `data-sidebar-collapsed`）
   时整区 CSS `display:none`（不干扰窄列图标）；无钉会话/无座位时整区移除。
+  **同步必须幂等收敛**：observer 只响应置顶区**之外**的 body 变更（本区写入全部自持，
+  被忽略），且每次 sync 在状态/内容未变时**零 DOM 写**——否则「sync 写 DOM →
+  observer → sync」微任务自触发死循环会把渲染主线程饿死（发消息出状态点即整页卡死，
+  曾现网发生，见 [session-pin-status-sync-convergence](../../implemented/feature/2026-09-06-session-pin-status-sync-convergence.md)）。
 - **行派生**：`pinned ∩ 现存会话 ids`（钉序、去重）；标题 = `byId.displayTitle`
   （缺省回退 id）；行可见文本带 `N.` 编号前缀（钉序第 N，与会话 tab 行编号一致；
   行增删自动重编号，tooltip/aria 为纯标题）；当前会话行带标记（标题用会话 tab

@@ -277,6 +277,23 @@ describe('startPinnedStrip', () => {
     expect(rows[0].title).toBe('等待你回复 · 会话甲')
   })
 
+  it('状态点已渲染后，状态不变再次同步零 DOM 变更（防 MutationObserver 自触发死循环）', () => {
+    h.byId.a = { ...h.byId.a, running: true }
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    expect(rowButtons()[0].querySelector('.dsh-pinned-matrix')).not.toBeNull()
+    const watcher = new MutationObserver(() => {})
+    watcher.observe(document.body, { childList: true, subtree: true })
+    // 触发一次不改变任何置顶行状态的变更：仅非钉会话元数据/current 变化。
+    h.byId.c = { displayTitle: '会话丙' }
+    h.current = 'c'
+    h.listCbs.forEach((cb) => cb())
+    // 同步取回未派发记录：修复前每次 sync 都无条件重建状态点 → 必有 childList
+    // 记录；收敛后期望零记录（否则真实浏览器里 observer 微任务自触发死循环）。
+    const records = watcher.takeRecords()
+    watcher.disconnect()
+    expect(records).toEqual([])
+  })
+
   it('状态样式注入：槽几何/圆点 token/矩阵色/动画 keyframes', () => {
     h.byId.a = { ...h.byId.a, running: true }
     disposers.push(startPinnedStrip(makeDeps(h)))

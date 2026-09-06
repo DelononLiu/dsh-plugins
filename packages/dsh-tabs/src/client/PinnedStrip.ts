@@ -21,7 +21,7 @@
  */
 
 import { resolveRowStatus, indexRunningSubagents } from './session-status'
-import type { SummaryRow, PendingInteractionKind } from './session-status'
+import type { SummaryRow, PendingInteractionKind, RowStatusView } from './session-status'
 
 /** 置顶区根标记（幂等定位 + 自愈锚点）。 */
 export const PINNED_STRIP_ATTR = 'data-dsh-pinned-strip'
@@ -182,6 +182,51 @@ function makeRow(doc: Document, row: PinnedRow, open: (id: string) => void): HTM
   return btn
 }
 
+/** 幂等同步状态槽：期望点/矩阵与槽内现状一致时**不改 DOM**（零变更收敛），
+ *  不一致才重建一次。syncRows 由 body 级 MutationObserver 驱动——若每次 sync
+ *  都无条件 replaceChildren+新建，自我写入会再触发 observer，形成微任务自触发
+ *  死循环，渲染主线程被饿死（整页卡死）。本函数是收敛性的唯一保证点。 */
+function syncStatusSlot(slot: HTMLElement, status: RowStatusView, doc: Document): void {
+  const want = status.dot
+  const first = slot.firstElementChild
+  const settled =
+    want === 'done' || want === 'warning'
+      ? first instanceof HTMLSpanElement && first.classList.contains('dsh-pinned-dot') && first.dataset.state === want
+      : want === 'ongoing'
+        ? first instanceof SVGSVGElement && first.classList.contains('dsh-pinned-matrix')
+        : first === null
+  if (settled) return
+  slot.replaceChildren()
+  if (want === 'done' || want === 'warning') {
+    const dot = doc.createElement('span')
+    dot.className = 'dsh-pinned-dot'
+    dot.dataset.state = want
+    slot.appendChild(dot)
+  } else if (want === 'ongoing') {
+    // 追逐动画矩阵（照官方 ui-primitives StateDot：10 网格外缘 8 格 2px，1s chase）。
+    const matrix = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    matrix.classList.add('dsh-pinned-matrix')
+    matrix.setAttribute('viewBox', '0 0 10 10')
+    matrix.setAttribute('shape-rendering', 'crispEdges')
+    const positions = [
+      [0, 0], [4, 0], [8, 0],
+      [0, 4], [8, 4],
+      [0, 8], [4, 8], [8, 8],
+    ]
+    positions.forEach(([x, y], idx) => {
+      const rect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect')
+      rect.classList.add('cell')
+      rect.setAttribute('x', String(x))
+      rect.setAttribute('y', String(y))
+      rect.setAttribute('width', '2')
+      rect.setAttribute('height', '2')
+      rect.style.animationDelay = `${(idx - positions.length) * 125}ms`
+      matrix.appendChild(rect)
+    })
+    slot.appendChild(matrix)
+  }
+}
+
 /** 幂等同步：按派生行补齐/删除/更新/排序置顶区 DOM；无钉或座位缺席时移除。 */
 function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElement | null }): void {
   const snapshot = deps.sessions.getSnapshot()
@@ -247,42 +292,13 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
       completed: summary?.completed,
     })
     // tooltip：有状态点 → 「状态 · 标题」；空闲 → 纯标题。aria-label 保持纯标题。
-    btn.title = status.dot === undefined ? row.title : `${status.label} · ${row.title}`
+    const tip = status.dot === undefined ? row.title : `${status.label} · ${row.title}`
+    if (btn.title !== tip) btn.title = tip
     // 可见文本带编号前缀（钉序第 N，与会话 tab 行编号一致）；tooltip/aria 保持纯标题。
     const label = `${i + 1}. ${row.title}`
     if (titleEl !== null && titleEl.textContent !== label) titleEl.textContent = label
-    // 状态槽：永远存在（16px 保位对齐）；有状态点才渲染，空闲清空。
-    if (statusSlot !== null) {
-      statusSlot.replaceChildren()
-      if (status.dot === 'done' || status.dot === 'warning') {
-        const dot = doc.createElement('span')
-        dot.className = 'dsh-pinned-dot'
-        dot.dataset.state = status.dot
-        statusSlot.appendChild(dot)
-      } else if (status.dot === 'ongoing') {
-        // 追逐动画矩阵（照官方 ui-primitives StateDot：10 网格外缘 8 格 2px，1s chase）。
-        const matrix = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
-        matrix.classList.add('dsh-pinned-matrix')
-        matrix.setAttribute('viewBox', '0 0 10 10')
-        matrix.setAttribute('shape-rendering', 'crispEdges')
-        const positions = [
-          [0, 0], [4, 0], [8, 0],
-          [0, 4], [8, 4],
-          [0, 8], [4, 8], [8, 8],
-        ]
-        positions.forEach(([x, y], idx) => {
-          const rect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect')
-          rect.classList.add('cell')
-          rect.setAttribute('x', String(x))
-          rect.setAttribute('y', String(y))
-          rect.setAttribute('width', '2')
-          rect.setAttribute('height', '2')
-          rect.style.animationDelay = `${(idx - positions.length) * 125}ms`
-          matrix.appendChild(rect)
-        })
-        statusSlot.appendChild(matrix)
-      }
-    }
+    // 状态槽：永远存在（16px 保位对齐）；幂等更新（一致不改 DOM，防 observer 自触发死循环）。
+    if (statusSlot !== null) syncStatusSlot(statusSlot, status, doc)
   }
   // 按派生顺序重排（仅乱序时移动，幂等收敛）。
   for (let i = 0; i < rows.length; i++) {
@@ -308,7 +324,19 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
   const unsubSettings = deps.subscribeSettings(sync)
   const unsubSessions = deps.sessions.subscribe(sync)
   const unsubPending = deps.subscribePending(sync)
-  const observer = new MutationObserver(sync)
+  const observer = new MutationObserver((records) => {
+    // 只响应置顶区之外的变更（React 重排/会话页流式渲染等）——置顶区内的
+    // 写入全是我们自己 sync 产生的，忽略它们。否则「sync 写 DOM → observer
+    // → sync」自触发回环会把渲染主线程饿死（整页卡死）；本区内容完全自持，
+    // 无他人改动，忽略自身写入不影响 React 重排后的自愈重插。
+    for (const record of records) {
+      const target = record.target
+      if (!(target instanceof Element) || target.closest(PINNED_STRIP_ATTR) === null) {
+        sync()
+        return
+      }
+    }
+  })
   observer.observe(doc.body, { childList: true, subtree: true })
   sync()
   return () => {
