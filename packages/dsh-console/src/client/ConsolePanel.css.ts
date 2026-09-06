@@ -88,6 +88,19 @@ const css = `
 .dsh-console-badge.run{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 15%,transparent);color:var(--dsw-alias-brand-primary)}
 .dsh-console-badge.fail{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 15%,transparent);color:var(--dsw-alias-state-error-primary)}
 .dsh-console-select{width:auto;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;padding:7px 10px;outline:none}
+
+/* 结构化日志查看器样式 */
+.dsh-console-time{font-size:11px;color:var(--dsw-alias-label-tertiary);font-family:var(--ds-font-family-code);flex:none}
+.dsh-console-level{font-size:12px;font-weight:500;flex:none;padding:2px 8px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;min-width:48px}
+.dsh-console-level.debug{background:color-mix(in srgb,var(--dsw-alias-label-tertiary) 10%,transparent);color:var(--dsw-alias-label-tertiary);border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary) 30%,transparent)}
+.dsh-console-level.info{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent);color:var(--dsw-alias-state-success-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-success-primary) 30%,transparent)}
+.dsh-console-level.warn{background:color-mix(in srgb,var(--dsw-alias-state-warning-primary) 10%,transparent);color:var(--dsw-alias-state-warning-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-warning-primary) 30%,transparent)}
+.dsh-console-level.error{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 30%,transparent)}
+.dsh-console-level.null{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 10%,transparent);color:var(--dsw-alias-label-secondary);border:1px solid color-mix(in srgb,var(--dsw-alias-label-secondary) 30%,transparent)}
+.dsh-console-caption{font-size:12px;color:var(--dsw-alias-label-secondary);font-family:var(--ds-font-family-code);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-console-msg{font-size:13px;color:var(--dsw-alias-label-primary);line-height:1.5;flex:1;min-width:0}
+.dsh-console-row-error{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent)}
+.dsh-console-log-hit{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 30%,transparent);color:var(--dsw-alias-brand-primary);font-weight:500}
 `
 
 /** 幂等注入样式（bundle 加载即执行）。 */

@@ -8,8 +8,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConsoleHost } from './types'
-import type { ConsoleInstanceViewItem, HostRecord, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget } from 'dsh-console/types'
+import type { ConsoleInstanceViewItem, HostRecord, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget, LogLevel, LogRecord } from 'dsh-console/types'
 import { UpgradeDialog } from './UpgradeDialog'
+import * as logView from './logView'
 
 // ---- 页签定义 ----
 type TabId = 'overview' | 'instances' | 'hosts' | 'logs'
@@ -211,15 +212,21 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [newInstHost, setNewInstHost] = useState('host1')
   const [newInstResult, setNewInstResult] = useState<string | null>(null)
   const [newInstBusy, setNewInstBusy] = useState(false)
-  // 日志页签状态：实例下拉 + tail 配置 + 自动 tail 开关 + 内容缓存
+  // 日志页签状态：实例下拉 + tail 配置 + 内容缓存
   const [logTarget, setLogTarget] = useState<LogTarget>({ kind: 'daemon' })
-  const [logTail, setLogTail] = useState(200)
-  const [logContent, setLogContent] = useState<string>('')
+  const [logTail, setLogTail] = useState(1000)
+  const [logRecords, setLogRecords] = useState<LogRecord[]>([])
   const [logTruncated, setLogTruncated] = useState(false)
   const [logTotal, setLogTotal] = useState(0)
   const [logError, setLogError] = useState<string | null>(null)
   const [logFiles, setLogFiles] = useState<LogFileList>({ daemon: null, instances: [] })
-  const [logAutoTail, setLogAutoTail] = useState(false)
+  // 新增状态：级别过滤、只看错误、搜索、跟随
+  const [logMinLevel, setLogMinLevel] = useState<'all' | 'error' | 'warn' | 'info'>('all')
+  const [logErrorsOnly, setLogErrorsOnly] = useState(false)
+  const [logQuery, setLogQuery] = useState('')
+  const [logFollowing, setLogFollowing] = useState(false)   // true: following (auto fetch and scroll), false: paused
+  // 用于在只看错误 toggle 和 级别 select 之间同步
+  const [prevLogMinLevel, setPrevLogMinLevel] = useState<'all' | 'error' | 'warn' | 'info'>('all')
   const logBoxRef = useRef<HTMLDivElement>(null)
 
 
@@ -298,12 +305,11 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     return () => window.clearTimeout(t)
   }, [toast])
 
-  // 日志读取：拉取 + 自动 tail 周期（3s）+ 滚到底（仅 autoTail 开启时）。
+  // 日志读取：拉取结构化 records；autoScroll=true（跟随）时拉后滚到底。
   const fetchLog = useCallback(async (autoScroll: boolean): Promise<void> => {
     try {
       const r = await host.readLog(logTarget, { tail: logTail })
-      // v1 最小适配：结构化 records 汇成纯文本喂现有渲染（完整查看器 = P2）。
-      setLogContent((r.records ?? []).map((rec) => rec.msg).join('\n'))
+      setLogRecords(r.records ?? [])
       setLogTruncated(r.truncated)
       setLogTotal(r.total)
       setLogError(null)
@@ -325,20 +331,26 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     }
   }, [host])
 
-  // 切换到 logs 页签：拉一次文件列表（决定下拉选项）
-  // 自动 tail：3s 周期 + 滚到底
+  // 切换到 logs 页签：拉一次文件列表（决定下拉选项）；跟随开启时 3s 轮询 + 滚到底。
   useEffect(() => {
     if (tab !== 'logs') return
     void refreshLogFiles()
     void fetchLog(false)
-    if (!logAutoTail) return
+    if (!logFollowing) return
     const timer = window.setInterval(() => { void fetchLog(true) }, 3000)
     return () => window.clearInterval(timer)
-  }, [tab, logTarget, logTail, logAutoTail, fetchLog, refreshLogFiles]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, logTarget, logTail, logFollowing, fetchLog, refreshLogFiles]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const copyLog = useCallback((): void => {
-    void navigator.clipboard?.writeText(logContent)
-  }, [logContent])
+  // 日志查看器可见行（级别/只看错误/搜索过滤后）——渲染与「复制可见」共用。
+  const visibleLogRecords = logView.filterRecords(logRecords, {
+    minLevel: logErrorsOnly ? 'error' : logMinLevel,
+    query: logQuery,
+    errorsOnly: logErrorsOnly,
+  })
+  /** 复制当前可见（已过滤）行。 */
+  const copyLogVisible = useCallback((): void => {
+    void navigator.clipboard?.writeText(logView.recordsToText(visibleLogRecords))
+  }, [visibleLogRecords])
 
   const scrollToBottom = useCallback((): void => {
     if (logBoxRef.current) logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight
@@ -497,9 +509,12 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
           </>
         )
       case 'logs':
+        // 结构化日志查看器（P2）：可见行/复制可见/轮询跟随均已在组件顶层实现
+        // （visibleLogRecords + copyLogVisible + 上方 logs 页 effect），此处只负责渲染。
         return (
           <>
             <div className="dsh-console-toolbar">
+              {/* 来源 select */}
               <span className="hint">来源</span>
               <select
                 className="dsh-console-select"
@@ -517,6 +532,56 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 ))}
                 {!logFiles.daemon && logFiles.instances.length === 0 && <option value="daemon">daemon（无日志）</option>}
               </select>
+
+              {/* 级别 select */}
+              <span className="hint">级别</span>
+              <select
+                className="dsh-console-select"
+                value={logMinLevel}
+                onChange={(e) => {
+                  const val = e.target.value as typeof logMinLevel
+                  if (logErrorsOnly) setPrevLogMinLevel(val) // 只看错误时记住当前级别用于同步
+                  else setLogMinLevel(val)
+                }}
+              >
+                <option value="all">全部</option>
+                <option value="error">仅 error</option>
+                <option value="warn">warn 及以上</option>
+                <option value="info">info 及以上</option>
+              </select>
+
+              {/* 只看错误 toggle */}
+              <label className="hint" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={logErrorsOnly}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                    setLogErrorsOnly(next)
+                    if (next) {
+                      // 开启时，同步级别到 'error'
+                      setLogMinLevel('error')
+                    } else {
+                      // 关闭时，恢复到上次记住的级别（默认为 'all'）
+                      setLogMinLevel(prevLogMinLevel)
+                    }
+                  }}
+                />
+                只看错误
+              </label>
+
+              {/* 搜索 input */}
+              <span className="hint">搜索</span>
+              <input
+                className="dsh-console-input"
+                type="text"
+                placeholder="消息/范围/实例Id 搜索..."
+                value={logQuery}
+                onChange={(e) => setLogQuery(e.target.value)}
+                style={{ width: 180 }}
+              />
+
+              {/* 行数 select + reload button */}
               <span className="hint">行数</span>
               <select className="dsh-console-select" value={logTail} onChange={(e) => setLogTail(Number(e.target.value))}>
                 <option value={100}>100</option>
@@ -525,27 +590,68 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 <option value={1000}>1000</option>
               </select>
               <button type="button" className="dsh-console-btn" onClick={() => { void fetchLog(false) }} title="立即读取">⟳ 重载</button>
+
+              {/* follow/pause toggle */}
               <label className="hint" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <input type="checkbox" checked={logAutoTail} onChange={(e) => setLogAutoTail(e.target.checked)} />
-                自动 tail（3s）
+                <input
+                  type="checkbox"
+                  checked={logFollowing}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                    setLogFollowing(next)
+                    if (next) {
+                      // 启动跟随时，请求一次获取最新日志并滚动到底部
+                      void fetchLog(true)
+                    }
+                  }}
+                />
+                跟随/暂停
               </label>
+
               <div className="grow" />
               <button type="button" className="dsh-console-btn" onClick={scrollToBottom} title="滚到底部">⤓ 滚到底</button>
-              <button type="button" className="dsh-console-btn" onClick={copyLog} disabled={!logContent} title="复制全文">⧉ 复制</button>
+              <button type="button" className="dsh-console-btn" onClick={copyLogVisible} disabled={visibleLogRecords.length === 0} title="复制可见行">⧉ 复制</button>
             </div>
+
+            {/* 状态行 */}
             <div className="dsh-console-toolbar" style={{ background: 'transparent', border: 'none', padding: 0, marginBottom: 8 }}>
               <span className="hint">
                 {logError
                   ? <span style={{ color: 'var(--dsw-alias-state-error-primary)' }}>读取失败：{logError}</span>
-                  : (logTotal > 0 ? `共 ${logTotal} 行，显示最后 ${logTail} 行${logTruncated ? '（已截断，原文件超过 512KB）' : ''}` : '暂无内容')}
+                  : (logTotal > 0
+                      ? `共 ${logTotal} 行，显示 ${visibleLogRecords.length} 行${logTruncated ? '（已截断，原文件超过 512KB）' : ''}`
+                      : '暂无日志')}
               </span>
             </div>
-            <div
-              ref={logBoxRef}
-              className="dsh-console-code"
-              style={{ maxHeight: '50vh', overflow: 'auto', marginTop: 0 }}
-            >
-              {logContent || (logError ? '' : '（日志为空）')}
+
+            {/* 日志列表容器 */}
+            <div ref={logBoxRef} className="dsh-console-code" style={{ maxHeight: '50vh', overflow: 'auto', marginTop: 0 }}>
+              {visibleLogRecords.length > 0 ? (
+                visibleLogRecords.map((rec, idx) => (
+                  <div
+                    key={idx}
+                    className={`dsh-console-row ${rec.level === 'error' ? 'dsh-console-row-error' : ''}`}
+                    style={rec.level === 'error' ? { backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent)' } : {}}
+                  >
+                    <span className="dsh-console-time">{logView.formatRowTime(rec.ts)}</span>
+                    <span className={`dsh-console-level ${rec.level ?? ''}`}>{(rec.level ?? '—')}</span>
+                    <span className="dsh-console-caption">{logView.rowCaption(rec)}</span>
+                    <span className="dsh-console-msg">
+                      {logQuery.trim() !== '' && (
+                        logView.splitByQuery(rec.msg, logQuery).map((seg, i) => (
+                          seg.match
+                            ? <mark key={i} className="dsh-console-log-hit">{seg.text}</mark>
+                            : <span key={i}>{seg.text}</span>
+                        ))
+                      ) || rec.msg}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div style={{ padding: 12, textAlign: 'center', color: 'var(--dsw-alias-label-tertiary)' }}>
+                  {logError ? '' : (logQuery ? '无匹配记录' : '暂无日志')}
+                </div>
+              )}
             </div>
           </>
         )
