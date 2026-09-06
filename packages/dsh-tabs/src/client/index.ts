@@ -313,11 +313,16 @@ export function apply(ctx: ClientContext): void {
   // 布局配置 tabs.visible 实时控制：false → 注销全部 tab，true → 恢复。
   ctx.slots.inject('conversation.view', () => {
     const disposers = new Map<string, () => void>()
+    // 每个会话 tab 已应用到的 order（100+钉序下标）。钉序变化（侧栏拖拽排序写回
+    // settings）时，已存在条目的 order 过期——需注销重注册，否则 tab 行视觉顺序
+    // 不跟随（此前 bug：只编号变、DOM 顺序不变）。
+    const appliedOrder = new Map<string, number>()
 
     /** 注销全部 tab 注册（tabs.visible=false 时）。 */
     const clearAll = (): void => {
       for (const dispose of [...disposers.values()]) dispose()
       disposers.clear()
+      appliedOrder.clear()
     }
 
     const sync = (): void => {
@@ -331,12 +336,24 @@ export function apply(ctx: ClientContext): void {
       const seen = new Set<string>()
       toRegister.forEach((id, index) => {
         seen.add(id)
-        if (disposers.has(id)) return
+        const order = 100 + index
+        const applied = appliedOrder.get(id)
+        if (applied !== undefined && applied !== order && disposers.has(id)) {
+          // 钉序变化：注销旧条目，让本轮按新 order 重注册（tab 行重排）。
+          const stale = disposers.get(id)
+          stale?.()
+          disposers.delete(id)
+          appliedOrder.delete(id)
+        }
+        if (disposers.has(id)) {
+          appliedOrder.set(id, order)
+          return
+        }
         const dispose = ctx.slots.register({
           name: 'conversation.view',
           id: `session-${id}`,
           // 官方视图 tab（0/10/…）之后留足空间：会话 tabs 永远排同一行末尾。
-          order: 100 + index,
+          order,
           // label：会话 tab 显示「编号. 标题」+ 不可见会话标记（区分官方
           // tab），无 ×（取消钉收敛到侧栏置顶区）；会话 id 不写入 label
           // （避免可见）。划线由 applyActive 按 DOM 顺序定位（不依赖 label
@@ -358,11 +375,13 @@ export function apply(ctx: ClientContext): void {
           }),
         }, (props) => createElement(SessionView, props))
         disposers.set(id, dispose)
+        appliedOrder.set(id, order)
       })
       for (const [id, dispose] of [...disposers]) {
         if (!seen.has(id)) {
           dispose()
           disposers.delete(id)
+          appliedOrder.delete(id)
         }
       }
     }
