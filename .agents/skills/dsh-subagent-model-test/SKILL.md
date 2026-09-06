@@ -93,7 +93,7 @@ repo 侧种子同步：仅当该 env 的 profile 模板受控时改 `profiles/<e
 | `cohere/north-mini-code:free` | ✅ 一次成 | ✅ 一次成（7/7） | 稳 | 可用备胎 |
 | `stepfun/step-3.7-flash:free` | ✅ 一次成 | ✅ 一次成（7/7） | 稳 | 可用备胎 |
 | `nvidia/nemotron-3-ultra-550b-a55b:free` | ✅ 重试后成 | ❌ 两次派发均失败 | 差（3 败 1 成） | 网关裸 API 工具调用正常，但 harness 派发间歇失败——要用须配重试 |
-| `dots-studio/dots-3-note-preview:free` | 未测 | — | — | allowlist 就位后需**新会话**补测 |
+| `dots-studio/dots-3-note-preview:free` | ✅ 一次成 | ✅ 一次成（7/7） | 稳（新会话补测 2026-09-06） | 可用备胎 |
 
 ## 边界与禁令
 
