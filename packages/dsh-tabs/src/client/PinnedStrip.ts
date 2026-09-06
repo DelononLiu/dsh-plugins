@@ -12,11 +12,16 @@
  * - 点击条目 = 打开该会话（ctx.sessions.open，与点击左侧会话同路径——切换后
  *   dsh-tabs 自己的 current 订阅会更新 tab 行划线等派生状态）。
  *
+ * 行带官方同款状态圆点（运行/子代理/完成/pending），槽 16px 保位。
+ *
  * 挂载机制（抄 dsh-desk 工具入口组装器先例）：MutationObserver + 直接 DOM
  * 注入——等官方侧边栏渲染后把本区插到 sidebar root 的 regionArea 之前
  * （列表区上方）；React 重挂/重排导致丢失时自愈重插。折叠（rail）态由
  * frame 的 `data-sidebar-collapsed` 属性经 CSS 隐藏，不干扰窄列图标。
  */
+
+import { resolveRowStatus, indexRunningSubagents } from './session-status'
+import type { SummaryRow, PendingInteractionKind } from './session-status'
 
 /** 置顶区根标记（幂等定位 + 自愈锚点）。 */
 export const PINNED_STRIP_ATTR = 'data-dsh-pinned-strip'
@@ -33,7 +38,7 @@ const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-tabs/pinned-strip"]'
 export interface PinnedListSnapshot {
   current?: string | undefined
   ids: readonly string[]
-  byId: Record<string, { displayTitle?: string }>
+  byId: Record<string, SummaryRow>
 }
 
 /** 会话列表最小契约（index.ts TabsSessionsList 的同构子集）。 */
@@ -59,6 +64,10 @@ export interface PinnedStripDeps {
   sessions: PinnedList
   /** 打开会话（点击置顶条目 = ctx.sessions.open）。 */
   open(id: string): void
+  /** 会话 pending 交互 kind（无则 undefined）；入参会话 id 为 string。 */
+  pendingKindOf(id: string): PendingInteractionKind | undefined
+  /** 订阅 pending 交互变更。 */
+  subscribePending(fn: () => void): () => void
 }
 
 /**
@@ -70,7 +79,7 @@ export interface PinnedStripDeps {
  */
 export function derivePinnedRows(pinned: readonly string[], list: PinnedListSnapshot): PinnedRow[] {
   const current = list.current === undefined ? undefined : String(list.current)
-  const byId = list.byId as Record<string, { displayTitle?: string }>
+  const byId = list.byId
   const existing = new Set(list.ids.map((id) => String(id)))
   const seen = new Set<string>()
   const rows: PinnedRow[] = []
@@ -98,6 +107,17 @@ function pinnedCss(): string {
     `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${PINNED_CURRENT_ATTR}]{background:var(--dsw-alias-interactive-bg-hover)}`,
     `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${PINNED_CURRENT_ATTR}] [data-dsh-pinned-title]{color:var(--dsw-alias-state-business-primary)}`,
     `[${PINNED_STRIP_ATTR}] [data-dsh-pinned-title]{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
+    // 状态槽/圆点（照官方 ui-workspace .slot + ui-primitives StateDot 契约：槽 16×20，
+    // dot 10px：currentColor 外晕 10% + 20% inset 实心核；ongoing = 8 格像素追逐）。
+    `[${PINNED_STRIP_ATTR}] [data-dsh-pinned-status]{flex:none;width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot{position:relative;display:inline-block;flex:none;width:10px;height:10px;color:var(--dsw-alias-state-success-primary)}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:currentColor;opacity:.1}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot::after{content:'';position:absolute;inset:20%;border-radius:50%;background:currentColor}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot[data-state='warning']{color:var(--dsw-alias-state-warn-primary)}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot[data-state='done']{color:var(--dsw-alias-state-success-primary)}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix{flex:none;color:var(--dsw-static-deepseek-450)}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix .cell{fill:currentColor;opacity:.15;animation:dsh-tabs-dot-chase 1s infinite}`,
+    `@keyframes dsh-tabs-dot-chase{0%,12.4%{opacity:1}12.5%,24.9%{opacity:.6}25%,37.4%{opacity:.35}37.5%,100%{opacity:.15}}`,
     // 官方折叠（rail）：AppFrame 折叠时给 frame 加 data-sidebar-collapsed，整区隐藏。
     `[data-sidebar-collapsed] [${PINNED_STRIP_ATTR}]{display:none}`,
   ].join('')
@@ -152,6 +172,9 @@ function makeRow(doc: Document, row: PinnedRow, open: (id: string) => void): HTM
   btn.type = 'button'
   btn.setAttribute(PINNED_ROW_ATTR, '')
   btn.dataset.sessionId = row.id
+  const statusSlot = doc.createElement('span')
+  statusSlot.setAttribute('data-dsh-pinned-status', '')
+  btn.appendChild(statusSlot)
   const title = doc.createElement('span')
   title.setAttribute('data-dsh-pinned-title', '')
   btn.appendChild(title)
@@ -161,7 +184,8 @@ function makeRow(doc: Document, row: PinnedRow, open: (id: string) => void): HTM
 
 /** 幂等同步：按派生行补齐/删除/更新/排序置顶区 DOM；无钉或座位缺席时移除。 */
 function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElement | null }): void {
-  const rows = derivePinnedRows(deps.getPinned(), deps.sessions.getSnapshot())
+  const snapshot = deps.sessions.getSnapshot()
+  const rows = derivePinnedRows(deps.getPinned(), snapshot)
   if (rows.length === 0) {
     stripRef.el?.remove()
     stripRef.el = null
@@ -191,6 +215,11 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
     btn.remove()
     existing.delete(id)
   }
+  // 状态数据按当前快照统计一次（行循环内不复算）。
+  const byIdNow = snapshot.byId as Record<string, SummaryRow>
+  const subagentCounts = indexRunningSubagents(
+    Object.entries(byIdNow).map(([id, s]) => ({ id, parentId: s.parentId, origin: s.origin, running: s.running })),
+  )
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
     let btn = existing.get(row.id)
@@ -199,7 +228,7 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
       listEl.appendChild(btn)
       existing.set(row.id, btn)
     }
-    // 轻量字段同步（标题/当前标记；滚动/悬停不打断——按钮不重建）。
+    // 轻量字段同步（标题/当前标记/状态；滚动/悬停不打断——按钮不重建）。
     if (row.current) {
       btn.setAttribute(PINNED_CURRENT_ATTR, '')
       btn.setAttribute('aria-current', 'true')
@@ -208,11 +237,52 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
       btn.removeAttribute('aria-current')
     }
     btn.setAttribute('aria-label', row.title)
-    btn.title = row.title
+    const statusSlot = btn.querySelector<HTMLElement>('[data-dsh-pinned-status]')
     const titleEl = btn.querySelector<HTMLElement>('[data-dsh-pinned-title]')
+    const summary = byIdNow[row.id]
+    const status = resolveRowStatus({
+      pendingKind: deps.pendingKindOf(row.id),
+      running: summary?.running,
+      runningSubagentCount: subagentCounts.get(row.id) ?? 0,
+      completed: summary?.completed,
+    })
+    // tooltip：有状态点 → 「状态 · 标题」；空闲 → 纯标题。aria-label 保持纯标题。
+    btn.title = status.dot === undefined ? row.title : `${status.label} · ${row.title}`
     // 可见文本带编号前缀（钉序第 N，与会话 tab 行编号一致）；tooltip/aria 保持纯标题。
     const label = `${i + 1}. ${row.title}`
     if (titleEl !== null && titleEl.textContent !== label) titleEl.textContent = label
+    // 状态槽：永远存在（16px 保位对齐）；有状态点才渲染，空闲清空。
+    if (statusSlot !== null) {
+      statusSlot.replaceChildren()
+      if (status.dot === 'done' || status.dot === 'warning') {
+        const dot = doc.createElement('span')
+        dot.className = 'dsh-pinned-dot'
+        dot.dataset.state = status.dot
+        statusSlot.appendChild(dot)
+      } else if (status.dot === 'ongoing') {
+        // 追逐动画矩阵（照官方 ui-primitives StateDot：10 网格外缘 8 格 2px，1s chase）。
+        const matrix = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        matrix.classList.add('dsh-pinned-matrix')
+        matrix.setAttribute('viewBox', '0 0 10 10')
+        matrix.setAttribute('shape-rendering', 'crispEdges')
+        const positions = [
+          [0, 0], [4, 0], [8, 0],
+          [0, 4], [8, 4],
+          [0, 8], [4, 8], [8, 8],
+        ]
+        positions.forEach(([x, y], idx) => {
+          const rect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect')
+          rect.classList.add('cell')
+          rect.setAttribute('x', String(x))
+          rect.setAttribute('y', String(y))
+          rect.setAttribute('width', '2')
+          rect.setAttribute('height', '2')
+          rect.style.animationDelay = `${(idx - positions.length) * 125}ms`
+          matrix.appendChild(rect)
+        })
+        statusSlot.appendChild(matrix)
+      }
+    }
   }
   // 按派生顺序重排（仅乱序时移动，幂等收敛）。
   for (let i = 0; i < rows.length; i++) {
@@ -226,7 +296,7 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
 /**
  * 启动左侧栏「置顶」区：订阅固定列表 + 会话列表变更，MutationObserver 自愈
  * 挂载；返回 disposer（退订 + 断开观察器 + 移除 DOM/样式）。
- * @param deps - 数据/打开注入（getPinned/subscribeSettings/sessions/open）。
+ * @param deps - 数据/打开注入（getPinned/subscribeSettings/sessions/open、pendingKindOf/subscribePending）。
  * @returns 卸载函数。
  */
 export function startPinnedStrip(deps: PinnedStripDeps): () => void {
@@ -237,12 +307,14 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
   const sync = (): void => syncRows(deps, doc, stripRef)
   const unsubSettings = deps.subscribeSettings(sync)
   const unsubSessions = deps.sessions.subscribe(sync)
+  const unsubPending = deps.subscribePending(sync)
   const observer = new MutationObserver(sync)
   observer.observe(doc.body, { childList: true, subtree: true })
   sync()
   return () => {
     unsubSettings()
     unsubSessions()
+    unsubPending()
     observer.disconnect()
     stripRef.el?.remove()
     stripRef.el = null

@@ -23,9 +23,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { SessionView, type SessionViewInjected } from './SessionView'
 import { startPinnedStrip } from './PinnedStrip'
+import { normalizePendingKind } from './session-status'
 
-/** 需要的 client 服务：插槽 + sessions + settings。 */
-export const inject = ['slots', 'sessions', 'settingsScope']
+/** 需要的 client 服务：插槽 + sessions + settings + uiSession。 */
+export const inject = ['slots', 'sessions', 'settingsScope', 'uiSession']
 
 /** 会话 tab 标识标记（区分官方「对话/轨迹」tab）。 */
 const SESSION_MARK = '\u200b'
@@ -365,6 +366,11 @@ export function apply(ctx: ClientContext): void {
     subscribeSettings: (fn) => settings.subscribe(fn),
     sessions: sessionsOf(ctx).list,
     open: (id: string) => { sessionsOf(ctx).open(id as never) },
+    pendingKindOf: (id) => {
+      const entry = ctx.uiSession.pendingInteractions.getSnapshot().get(id as never) as { kind?: string } | undefined
+      return normalizePendingKind(entry?.kind)
+    },
+    subscribePending: (fn) => ctx.uiSession.pendingInteractions.subscribe(fn),
   })
   ctx.effect(() => () => disposePinnedStrip(), 'dsh-tabs: sidebar pinned strip')
 }

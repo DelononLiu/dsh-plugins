@@ -24,12 +24,19 @@ Status: implemented
   行增删自动重编号，tooltip/aria 为纯标题）；当前会话行带标记（标题用会话 tab
   划线的品牌色）。点击行 = `ctx.sessions.open(id)`——与点击左侧会话同一路径，
   dsh-tabs 自己的 current 订阅接着更新 tab 划线等派生状态，两边天然同步。
+- **行状态点（对齐官方会话行）**：行首 16px 槽内按官方语义/视觉显示状态点——
+  优先级 pending（approval/plan-review/question→warning 橙）> running（ongoing
+  追逐矩阵）> 子代理运行计数（ongoing + `N 个子代理运行`）> completed（done 绿）
+  > 空闲（无点、槽保位）。数据 = 会话快照 byId 字段（running/completed/blank/
+  parentId/origin，纯函数 `indexRunningSubagents` 算子代理链）+ 新依赖
+  `uiSession.pendingInteractions` 订阅（pending kind）。tooltip = `状态 · 标题`。
 - **视觉**：抄官方侧边栏行契约（Rows.module.css 同款 tokens：行 32px/圆角 8/
   hover `--dsw-alias-interactive-bg-hover`、标题 14px、label 用 `--dsw-alias-label-tertiary`），
-  不自造风格。
+  dot 抄 ui-primitives StateDot（done/warning 圆点 + ongoing 追逐动画），不自造风格。
 - **测试**：dsh-tabs 新增 `vitest.config.ts`（happy-dom；devDep `happy-dom ^20.11.6`，
-  与 dsh-desk/dsh-user 同版本）与 `tests/pinned-strip.spec.ts`（纯派生 + DOM 注入/
-  实时同步/点击打开/自愈/折叠 CSS/disposer，13 用例）。
+  与 dsh-desk/dsh-user 同版本）；`tests/pinned-strip.spec.ts`（DOM 注入/同步/状态点/
+  点击/自愈/折叠/disposer）+ `tests/session-status.spec.ts`（纯状态派生/子代理计数），
+  全绿 36 用例。
 - **明确不做（MVP）**：子树/子 agent 视图；跳右侧 better-sidebar；新快捷键；设置页；
   进 tabs 自动镜像置顶（关 tab ≠ 取消钉，延续旧提案语义）。
 

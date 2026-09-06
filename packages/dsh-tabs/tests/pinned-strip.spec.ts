@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { derivePinnedRows, startPinnedStrip, type PinnedList, type PinnedStripDeps } from '../src/client/PinnedStrip.ts'
+import type { PendingInteractionKind } from '../src/client/session-status'
 
 /** 官方 SidebarRoot.module.css 的 hash 类前缀（css-modules 形式）。 */
 const H = (name: string): string => `_${name}_abc123`
@@ -36,15 +37,17 @@ function buildSidebar(): HTMLElement {
   return root
 }
 
-/** 状态 + 订阅记录 harness（settings/list 两个可手动触发的变更源）。 */
+/** 状态 + 订阅记录 harness（settings/list/pending 三个可手动触发的变更源）。 */
 interface Harness {
   pinned: string[]
   ids: string[]
   current?: string
-  byId: Record<string, { displayTitle?: string }>
+  byId: Record<string, { displayTitle?: string; running?: boolean; completed?: boolean; parentId?: string; origin?: string }>
   opened: string[]
   settingCbs: Array<() => void>
   listCbs: Array<() => void>
+  pendingCbs: Array<() => void>
+  pending: Record<string, PendingInteractionKind>
 }
 
 function makeHarness(): Harness {
@@ -56,12 +59,14 @@ function makeHarness(): Harness {
     opened: [],
     settingCbs: [],
     listCbs: [],
+    pendingCbs: [],
+    pending: {},
   }
 }
 
 function makeDeps(h: Harness): PinnedStripDeps {
   const list: PinnedList = {
-    getSnapshot: () => ({ current: h.current, ids: h.ids, byId: h.byId }),
+    getSnapshot: () => ({ current: h.current, ids: h.ids, byId: h.byId as Record<string, { displayTitle?: string; running?: boolean; completed?: boolean; parentId?: string; origin?: string }> }),
     subscribe: (fn) => { h.listCbs.push(fn); return () => {} },
   }
   return {
@@ -69,6 +74,8 @@ function makeDeps(h: Harness): PinnedStripDeps {
     subscribeSettings: (fn) => { h.settingCbs.push(fn); return () => {} },
     sessions: list,
     open: (id) => { h.opened.push(id) },
+    pendingKindOf: (id) => h.pending[id],
+    subscribePending: (fn) => { h.pendingCbs.push(fn); return () => {} },
   }
 }
 
@@ -88,6 +95,11 @@ function rowTitles(): string[] {
   if (el === null) return []
   return Array.from(el.querySelectorAll('[data-dsh-pinned-title]'))
     .map((row) => row.textContent ?? '')
+}
+
+function rowButtons(): HTMLButtonElement[] {
+  const el = stripEl()
+  return el === null ? [] : Array.from(el.querySelectorAll<HTMLButtonElement>('[data-dsh-pinned-row]'))
 }
 
 describe('derivePinnedRows', () => {
@@ -214,5 +226,65 @@ describe('startPinnedStrip', () => {
     dispose()
     expect(stripEl()).toBeNull()
     expect(document.querySelector('style[data-plugin-css="@dsh-tabs/pinned-strip"]')).toBeNull()
+  })
+
+  it('运行中会话 → 状态槽渲染追逐矩阵，tooltip 带「运行中」；空闲行无点、纯标题', () => {
+    h.byId.a = { ...h.byId.a, running: true }
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    const rows = rowButtons()
+    expect(rows[0].querySelector('.dsh-pinned-matrix')).not.toBeNull()
+    expect(rows[0].title).toBe('运行中 · 会话甲')
+    expect(rows[1].querySelector('.dsh-pinned-dot, .dsh-pinned-matrix')).toBeNull()
+    expect(rows[1].title).toBe('b')
+  })
+
+  it('completed → done 圆点 +「已完成」tooltip', () => {
+    h.byId.a = { ...h.byId.a, completed: true }
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    const rows = rowButtons()
+    const dot = rows[0].querySelector<HTMLElement>('.dsh-pinned-dot')
+    expect(dot?.dataset.state).toBe('done')
+    expect(rows[0].title).toBe('已完成 · 会话甲')
+  })
+
+  it('running 子代理（origin=subagent）挂在祖先 → 祖先行 ongoing + 计数 tooltip', () => {
+    h.byId.sub1 = { origin: 'subagent', parentId: 'a', running: true }
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    const rows = rowButtons()
+    expect(rows[0].querySelector('.dsh-pinned-matrix')).not.toBeNull()
+    expect(rows[0].title).toBe('1 个子代理运行 · 会话甲')
+  })
+
+  it('pending（approval）盖过 running → warning 圆点 +「等待审批」', () => {
+    h.byId.a = { ...h.byId.a, running: true }
+    h.pending = { a: 'approval' }
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    const rows = rowButtons()
+    const dot = rows[0].querySelector<HTMLElement>('.dsh-pinned-dot')
+    expect(dot?.dataset.state).toBe('warning')
+    expect(rows[0].querySelector('.dsh-pinned-matrix')).toBeNull()
+    expect(rows[0].title).toBe('等待审批 · 会话甲')
+  })
+
+  it('pending 变更（pending 订阅回调触发）实时更新状态', () => {
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    expect(rowButtons()[0].querySelector('.dsh-pinned-dot, .dsh-pinned-matrix')).toBeNull()
+    h.pending = { a: 'question' }
+    h.pendingCbs.forEach((cb) => cb())
+    const rows = rowButtons()
+    const dot = rows[0].querySelector<HTMLElement>('.dsh-pinned-dot')
+    expect(dot?.dataset.state).toBe('warning')
+    expect(rows[0].title).toBe('等待你回复 · 会话甲')
+  })
+
+  it('状态样式注入：槽几何/圆点 token/矩阵色/动画 keyframes', () => {
+    h.byId.a = { ...h.byId.a, running: true }
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    const tag = document.querySelector('style[data-plugin-css="@dsh-tabs/pinned-strip"]')
+    const css = (tag as HTMLStyleElement).textContent ?? ''
+    expect(css).toContain('[data-dsh-pinned-status]{flex:none;width:16px;height:20px')
+    expect(css).toContain('dsh-tabs-dot-chase')
+    expect(css).toContain('var(--dsw-alias-state-warn-primary)')
+    expect(css).toContain('var(--dsw-static-deepseek-450)')
   })
 })
