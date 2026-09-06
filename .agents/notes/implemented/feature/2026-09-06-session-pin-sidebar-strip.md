@@ -34,6 +34,10 @@ Status: implemented
   > 空闲（无点、槽保位）。数据 = 会话快照 byId 字段（running/completed/blank/
   parentId/origin，纯函数 `indexRunningSubagents` 算子代理链）+ 新依赖
   `uiSession.pendingInteractions` 订阅（pending kind）。tooltip = `状态 · 标题`。
+- **会话 tab 行同源状态点**：顶部会话 tab 编号前同样前置状态小圆点（6px，颜色
+  同语义），复用 `resolveRowStatus`/`indexRunningSubagents` 与同一 pending 订阅；
+  `tab-status.ts` 渲染幂等（同态零结构变更），避免 applyActive 的 body
+  MutationObserver 自触发。
 - **视觉**：抄官方侧边栏行契约（Rows.module.css 同款 tokens：行 32px/圆角 8/
   hover `--dsw-alias-interactive-bg-hover`、标题 14px、label 用 `--dsw-alias-label-tertiary`），
   dot 抄 ui-primitives StateDot（done/warning 圆点 + ongoing 追逐动画），不自造风格。

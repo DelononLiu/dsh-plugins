@@ -23,7 +23,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { SessionView, type SessionViewInjected } from './SessionView'
 import { startPinnedStrip } from './PinnedStrip'
-import { normalizePendingKind } from './session-status'
+import { normalizePendingKind, resolveRowStatus, indexRunningSubagents, type SummaryRow, type PendingInteractionKind } from './session-status'
+import { renderTabStatusDot, TAB_STATUS_ATTR } from './tab-status'
 
 /** 需要的 client 服务：插槽 + sessions + settings + uiSession。 */
 export const inject = ['slots', 'sessions', 'settingsScope', 'uiSession']
@@ -52,7 +53,7 @@ interface PinnedValue { pinned?: string[] }
 /** 会话标签消费的 ctx.sessions 最小契约（绕开官方 dsh-session 的 host
  *  SessionStore 漂移——会话标签只需 list 快照 + open）。 */
 interface TabsSessionsList {
-  getSnapshot(): { current: string | undefined; ids: readonly string[]; byId: Record<string, { displayTitle?: string }> }
+  getSnapshot(): { current: string | undefined; ids: readonly string[]; byId: Record<string, SummaryRow> }
   subscribe(fn: () => void): () => void
 }
 interface TabsSessions {
@@ -67,6 +68,12 @@ export function apply(ctx: ClientContext): void {
   const settings = ctx.settingsScope.bind<{ pinned: string[] }>({ namespace: PINNED_NS })
   const pinnedOf = (): string[] => (settings.getSnapshot().value as PinnedValue | undefined)?.pinned ?? []
 
+  // 会话 tab/置顶区共用：会话 pending 交互 kind（无则 undefined）。
+  const pendingKindOf = (id: string): PendingInteractionKind | undefined => {
+    const entry = ctx.uiSession.pendingInteractions.getSnapshot().get(id as never) as { kind?: string } | undefined
+    return normalizePendingKind(entry?.kind)
+  }
+
   // 布局配置（dsh-desk my-ui-layout）：tabs.visible=false → 不注册会话 tab
   // （跨插件契约 = 共享 settings 配置，见 dsh-desk LayoutControl）。
   const layoutScope = ctx.settingsScope.bind<{ layout?: { tabs?: { visible?: boolean } } }>({ namespace: 'my-ui-layout' })
@@ -80,6 +87,11 @@ export function apply(ctx: ClientContext): void {
     // 当前会话固定：抑制官方「对话/轨迹」tab 的划线（单一划线；功能不受影响）。
     `body.${PINNED_ACTIVE_CLASS} button[role="tab"][aria-selected="true"] { color: var(--dsw-alias-label-tertiary) !important; }`,
     `body.${PINNED_ACTIVE_CLASS} button[role="tab"][aria-selected="true"]::after { background: transparent !important; }`,
+    // 会话 tab 前置状态小圆点（尺寸更小）。
+    `button[role="tab"] [${TAB_STATUS_ATTR}]{display:inline-block;flex:none;width:6px;height:6px;margin:0 5px 0 0;border-radius:50%;vertical-align:middle;background:currentColor;color:var(--dsw-alias-label-tertiary)}`,
+    `button[role="tab"] [${TAB_STATUS_ATTR}][data-state='warning']{color:var(--dsw-alias-state-warn-primary)}`,
+    `button[role="tab"] [${TAB_STATUS_ATTR}][data-state='done']{color:var(--dsw-alias-state-success-primary)}`,
+    `button[role="tab"] [${TAB_STATUS_ATTR}][data-state='ongoing']{color:var(--dsw-static-deepseek-450)}`,
   ].join('\n')
   document.head.appendChild(style)
 
@@ -102,11 +114,33 @@ export function apply(ctx: ClientContext): void {
     const currentIdx = current === undefined ? -1 : pinnedExisting.indexOf(current)
     const tabMode = !officialView && currentIdx >= 0
     document.body.classList.toggle(PINNED_ACTIVE_CLASS, tabMode)
+
+    // 子代理运行数每轮 applyActive 只算一次（不随按钮循环重复）。
+    const rowsForIndex = Object.entries(list.byId).map(([id, s]) => {
+      const summary = s as SummaryRow
+      return { id, parentId: summary?.parentId, origin: summary?.origin, running: summary?.running }
+    })
+    const runningSubagentCountMap = indexRunningSubagents(rowsForIndex)
+
     let sessionTabIdx = 0
     for (const btn of document.querySelectorAll<HTMLButtonElement>('button[role="tab"]')) {
       const text = btn.textContent ?? ''
       if (!text.includes(SESSION_MARK)) continue
+      // 划线逻辑不变（圆点不参与划线计数/定位）。
       btn.classList.toggle(ACTIVE_CLASS, tabMode && sessionTabIdx === currentIdx)
+
+      // 会话 tab 前置状态小圆点（幂等：同态零结构变更，防 observer 自触发）。
+      const sessionId = pinnedExisting[sessionTabIdx]
+      if (sessionId !== undefined) {
+        const view = resolveRowStatus({
+          pendingKind: pendingKindOf(sessionId),
+          running: list.byId[sessionId]?.running,
+          completed: list.byId[sessionId]?.completed,
+          runningSubagentCount: runningSubagentCountMap.get(sessionId) ?? 0,
+        })
+        renderTabStatusDot(btn, view)
+      }
+
       sessionTabIdx++
     }
   }
@@ -119,6 +153,10 @@ export function apply(ctx: ClientContext): void {
     style.remove()
     document.body.classList.remove(PINNED_ACTIVE_CLASS)
   }, 'dsh-tabs: active-tab observer')
+
+  // 会话 tab 状态圆点：pending 变更（审批/plan/提问）也要实时刷新。
+  const unsubTabPending = ctx.uiSession.pendingInteractions.subscribe(() => applyActive())
+  ctx.effect(() => () => unsubTabPending(), 'dsh-tabs: tab status pending sync')
 
   // —— 会话切换（含左侧点击）：清新当前残留视图（如轨迹）→ 默认对话 ——
   // 需求：点击左侧会话默认在「对话」。列表增删时 current 未变则不误清。
@@ -366,10 +404,7 @@ export function apply(ctx: ClientContext): void {
     subscribeSettings: (fn) => settings.subscribe(fn),
     sessions: sessionsOf(ctx).list,
     open: (id: string) => { sessionsOf(ctx).open(id as never) },
-    pendingKindOf: (id) => {
-      const entry = ctx.uiSession.pendingInteractions.getSnapshot().get(id as never) as { kind?: string } | undefined
-      return normalizePendingKind(entry?.kind)
-    },
+    pendingKindOf,
     subscribePending: (fn) => ctx.uiSession.pendingInteractions.subscribe(fn),
   })
   ctx.effect(() => () => disposePinnedStrip(), 'dsh-tabs: sidebar pinned strip')
