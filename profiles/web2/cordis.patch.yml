@@ -72,3 +72,15 @@
             contextWindow: 512000
           - id: stepfun/step-3.7-flash:free
             contextWindow: 262144
+      zen-free:
+        displayName: OpenCode Zen (Free)
+        api: openai-completions
+        baseURL: https://opencode.ai/zen/v1
+        # zen 免费档只认匿名：裸值 anonymous 头过 pi-ai 闸门且不被 zen 当凭证拒绝
+        headers:
+          authorization: anonymous
+        models:
+          - id: big-pickle
+            contextWindow: 200000
+          - id: ling-3.0-flash-fin-free
+            contextWindow: 262144
