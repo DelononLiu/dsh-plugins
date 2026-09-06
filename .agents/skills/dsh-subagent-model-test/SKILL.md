@@ -95,6 +95,8 @@ repo 侧种子同步：仅当该 env 的 profile 模板受控时改 `profiles/<e
 | `nvidia/nemotron-3-ultra-550b-a55b:free` | ✅ 重试后成 | ❌ 两次派发均失败 | 差（3 败 1 成） | 网关裸 API 工具调用正常，但 harness 派发间歇失败——要用须配重试 |
 | `dots-studio/dots-3-note-preview:free` | ✅ 一次成 | ✅ 一次成（7/7） | 稳（新会话补测 2026-09-06） | 可用备胎 |
 
+2026-09-06 三模型同窗口横向对比（各 1 次派发全成，无重试）：复杂 7 步 **cohere / dots / stepfun 均一次 7/7**。角色定位探针也全过：cohere 编码（写→跑→逐行比对 FizzBuzz 15 行全对）、dots 长文档（700 行全文抽取 3/3 命中且正确排除干扰行）、stepfun 通用数据处理（聚合/筛选/追加重算数值全对，并诚实指出探针规格中 wc 期望值的笔误）。**结论：三者工具链+状态携带无差别，按定位挑选——cohere=编码任务、dots=长文档、stepfun=均衡兜底**；dots 的 512k 上下文优势本次仅验到 700 行量级，未压满。**用户决策（代码型用法）：默认 = cohere/north-mini-code:free**，白名单首位 + settings.yaml 注释标注。
+
 ## 边界与禁令
 
 - **禁碰正式 web（3080）**与 `profiles/web` 配置；测试产物只在 `/tmp`，用完即删（子 agent 第 7 步自清）。
