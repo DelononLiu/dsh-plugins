@@ -115,7 +115,7 @@ function pinnedCss(): string {
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot::after{content:'';position:absolute;inset:20%;border-radius:50%;background:currentColor}`,
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot[data-state='warning']{color:var(--dsw-alias-state-warn-primary)}`,
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot[data-state='done']{color:var(--dsw-alias-state-success-primary)}`,
-    `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix{flex:none;color:var(--dsw-static-deepseek-450)}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix{flex:none;width:10px;height:10px;color:var(--dsw-static-deepseek-450)}`,
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix .cell{fill:currentColor;opacity:.15;animation:dsh-tabs-dot-chase 1s infinite}`,
     `@keyframes dsh-tabs-dot-chase{0%,12.4%{opacity:1}12.5%,24.9%{opacity:.6}25%,37.4%{opacity:.35}37.5%,100%{opacity:.15}}`,
     // 官方折叠（rail）：AppFrame 折叠时给 frame 加 data-sidebar-collapsed，整区隐藏。
@@ -207,6 +207,8 @@ function syncStatusSlot(slot: HTMLElement, status: RowStatusView, doc: Document)
     const matrix = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
     matrix.classList.add('dsh-pinned-matrix')
     matrix.setAttribute('viewBox', '0 0 10 10')
+    matrix.setAttribute('width', '10')
+    matrix.setAttribute('height', '10')
     matrix.setAttribute('shape-rendering', 'crispEdges')
     const positions = [
       [0, 0], [4, 0], [8, 0],
