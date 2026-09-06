@@ -313,16 +313,19 @@ export function apply(ctx: ClientContext): void {
   // 布局配置 tabs.visible 实时控制：false → 注销全部 tab，true → 恢复。
   ctx.slots.inject('conversation.view', () => {
     const disposers = new Map<string, () => void>()
-    // 每个会话 tab 已应用到的 order（100+钉序下标）。钉序变化（侧栏拖拽排序写回
-    // settings）时，已存在条目的 order 过期——需注销重注册，否则 tab 行视觉顺序
-    // 不跟随（此前 bug：只编号变、DOM 顺序不变）。
+    // 每个会话 tab 已应用到的 order（100+钉序下标）与标题。钉序变化（侧栏拖拽
+    // 排序写回 settings）或标题变化（会话重命名）时，已存在条目的 order/label
+    // 已过期——官方只在 roster/locale 变化时重算 label，普通会话更新不触发；
+    // 需注销重注册，否则 tab 行顺序/名字不跟随（此前 bug）。
     const appliedOrder = new Map<string, number>()
+    const appliedTitle = new Map<string, string>()
 
     /** 注销全部 tab 注册（tabs.visible=false 时）。 */
     const clearAll = (): void => {
       for (const dispose of [...disposers.values()]) dispose()
       disposers.clear()
       appliedOrder.clear()
+      appliedTitle.clear()
     }
 
     const sync = (): void => {
@@ -331,22 +334,27 @@ export function apply(ctx: ClientContext): void {
         return
       }
       const list = sessionsOf(ctx).list.getSnapshot()
+      const byId = list.byId as Record<string, { displayTitle?: string }>
       // 只注册固定的会话（且仍存在）；去重保序。
       const toRegister = [...new Set(pinnedOf())].filter((id) => list.ids.includes(id as never))
       const seen = new Set<string>()
       toRegister.forEach((id, index) => {
         seen.add(id)
         const order = 100 + index
-        const applied = appliedOrder.get(id)
-        if (applied !== undefined && applied !== order && disposers.has(id)) {
-          // 钉序变化：注销旧条目，让本轮按新 order 重注册（tab 行重排）。
-          const stale = disposers.get(id)
-          stale?.()
+        const title = byId[id]?.displayTitle ?? id
+        const stale = disposers.has(id)
+          && (appliedOrder.get(id) !== order || appliedTitle.get(id) !== title)
+        if (stale) {
+          // order/标题过期：注销旧条目，让本轮按新值重注册（tab 行重排/改名）。
+          const old = disposers.get(id)
+          old?.()
           disposers.delete(id)
           appliedOrder.delete(id)
+          appliedTitle.delete(id)
         }
         if (disposers.has(id)) {
           appliedOrder.set(id, order)
+          appliedTitle.set(id, title)
           return
         }
         const dispose = ctx.slots.register({
@@ -357,14 +365,15 @@ export function apply(ctx: ClientContext): void {
           // label：会话 tab 显示「编号. 标题」+ 不可见会话标记（区分官方
           // tab），无 ×（取消钉收敛到侧栏置顶区）；会话 id 不写入 label
           // （避免可见）。划线由 applyActive 按 DOM 顺序定位（不依赖 label
-          // 动态标记——官方只在 roster/locale 变化时重算 label，current 变化不刷新）。
+          // 动态标记——官方只在 roster/locale 变化时重算 label，current 变化不刷新，
+          // 标题更新靠本 sync 检测到变化后重注册刷新）。
           label: () => {
             const listNow = sessionsOf(ctx).list.getSnapshot()
             const pinnedExisting = [...new Set(pinnedOf())].filter((pid) => listNow.ids.includes(pid as never))
             const idx = pinnedExisting.indexOf(id)
-            const title = (listNow.byId as Record<string, { displayTitle: string }>)[id]?.displayTitle ?? id
+            const titleNow = (listNow.byId as Record<string, { displayTitle: string }>)[id]?.displayTitle ?? id
             const num = idx >= 0 ? `${idx + 1}. ` : ''
-            return `${num}${title}${SESSION_MARK}`
+            return `${num}${titleNow}${SESSION_MARK}`
           },
           inject: (): SessionViewInjected => ({
             targetId: id,
@@ -376,12 +385,14 @@ export function apply(ctx: ClientContext): void {
         }, (props) => createElement(SessionView, props))
         disposers.set(id, dispose)
         appliedOrder.set(id, order)
+        appliedTitle.set(id, title)
       })
       for (const [id, dispose] of [...disposers]) {
         if (!seen.has(id)) {
           dispose()
           disposers.delete(id)
           appliedOrder.delete(id)
+          appliedTitle.delete(id)
         }
       }
     }
