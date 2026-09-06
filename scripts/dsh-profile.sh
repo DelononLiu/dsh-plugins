@@ -7,6 +7,8 @@
 #   dsh --profile <名> 即 boot $DSH_HOME/profiles/<名>。
 #   port 从该实例自己的 cordis.patch.yml 读（webserver.config.port）；daemon 无
 #   webserver = headless。web2/3/4 内容同源（web 全家桶），目录各归各实例。
+#   例外：web → DSH_HOME = ~/.dsh，profile = web（per-instance 布局：
+#   ~/.dsh/profiles/web）。显式点名才生效（不列入默认扫描）。
 #   传名不在 ~/.dsh-<名> 或布局不合法 → 报错退出（不静默别名/不猜）。
 #   默认（无参数）= 扫描 ~/.dsh-*/ 下全部 per-instance 布局实例。
 #
@@ -50,13 +52,16 @@ read_instance_port() {
 # 返回 0=有效（echo 元数据），1=无效（已打印原因）。
 resolve_instance() {
   local name="$1"
-  local home="$HOME/.dsh-$name"
-  if [[ "$home" == "$OFFICIAL_HOME" ]]; then
+  local home="$HOME/.dsh-$name" prof="$name"
+  if [[ "$name" == "web" ]]; then
+    home="$OFFICIAL_HOME"
+    prof="web"
+  fi
+  if [[ "$home" == "$OFFICIAL_HOME" && "$name" != "web" ]]; then
     echo "[$name] 🔴 拒绝：正式 home（~/.dsh，3080 禁令）" >&2
     return 1
   fi
   [[ -d "$home" ]] || { echo "未知实例: $name（无 $home）" >&2; return 1; }
-  local prof="$name"
   [[ -d "$home/profiles/$prof" ]] || {
     echo "[$name] ✗ 布局无效：无 $home/profiles/$prof（per-instance 布局要求 profile 目录名 = 实例名）" >&2
     return 1
@@ -173,14 +178,18 @@ restart_one() {
 }
 
 # 扫描 ~/.dsh-*/ 下全部 per-instance 布局实例（~/.dsh-<名>/profiles/<名>），按名排序。
+# web 是唯一例外：DSH_HOME=~/.dsh，profile=web。
 list_instances() {
+  local d
   for d in "$HOME"/.dsh-*; do
     [[ -d "$d" ]] || continue
     local name; name="$(basename "$d")"; name="${name#.dsh-}"
     [[ "$name" == "dsh" || -z "$name" ]] && continue
-    # 只认 per-instance 布局；老布局（profiles/web）不列（resolve 时会提示）。
     [[ -d "$d/profiles/$name" ]] && echo "$name"
-  done | sort
+  done
+  if [[ -d "$OFFICIAL_HOME/profiles/web" ]]; then
+    echo "web"
+  fi | sort
 }
 
 status() {
