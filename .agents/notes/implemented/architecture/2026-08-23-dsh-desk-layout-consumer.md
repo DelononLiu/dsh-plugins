@@ -2,6 +2,12 @@
 
 Status: implemented
 
+> 现状（2026-09-06）：本 note 的「布局消费方（LayoutConsumer）折叠官方侧边栏」能力
+> 已随设置「布局」页一起删除（功能聚焦 dsh-console/dsh-tabs），见
+> [remove-layout-settings-page](../../implemented/feature/2026-09-06-remove-layout-settings-page.md)。
+> 组装器开放边界部分仍有效（foot/会话头顶部摆位 + git-graph 显隐，按配置缺省）。
+
+
 ## Problem
 
 §9 两个开放项开始实现：

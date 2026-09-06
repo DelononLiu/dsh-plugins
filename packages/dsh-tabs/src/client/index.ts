@@ -73,7 +73,7 @@ export function apply(ctx: ClientContext): void {
   }
 
   // 布局配置（dsh-desk my-ui-layout）：tabs.visible=false → 不注册会话 tab
-  // （跨插件契约 = 共享 settings 配置，见 dsh-desk LayoutControl）。
+  // （跨插件契约 = 共享 settings 配置；原 dsh-desk「布局」设置页已删，仅实例配置/缺省）。
   const layoutScope = ctx.settingsScope.bind<{ layout?: { tabs?: { visible?: boolean } } }>({ namespace: 'my-ui-layout' })
   const tabsVisible = (): boolean => layoutScope.getSnapshot().value?.layout?.tabs?.visible ?? true
 

@@ -11,7 +11,7 @@
  * 为空，导致快捷导航空白；回退到权威 HTTP 端点。）
  *
  * 布局配置（dsh-desk my-ui-layout）：topbar.visible 实时控制注册/注销
- * 会话头部入口（跨插件契约 = 共享 settings 配置，见 dsh-desk LayoutControl）。
+ * 会话头部入口（跨插件契约 = 共享 settings 配置；原 dsh-desk「布局」设置页已删，仅实例配置/缺省）。
  */
 
 import { createElement } from 'react'
