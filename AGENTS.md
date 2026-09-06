@@ -97,6 +97,14 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
 - **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console（含 console-ui client 半区）→ dsh-quick-nav（type-only 依赖 channel）→ dsh-desk（聚合 nav/tabs）；**dsh-tabs 无内部依赖，独立**。无依赖关系的插件可并行。
 
+## 派发编辑型 subagent（编辑护栏）
+
+派发会**修改文件**的 subagent 时，须把下列护栏写进其提示词，防止空操作与整块误改写：
+
+- **先 read 后 edit**：动手前读目标文件，判断"要做的改动是否已存在/已达成"；已达成则直接报告完成，**禁止为保险/重放重复提交空 edit**。
+- **只提交有真实 diff 的 edit**：old_string 用刚读到的短锚点（几行），不整段几百行重写；发送前自查 old/new 不得相同——相同即空操作，会被报 `Error: old_string and new_string must differ`。
+- **改多处拆多次小 edit**；完成验证用 read/typecheck，不用重复 edit 当"确认"。
+
 ## 提交规则（Commit Rules）
 
 - **一个提交 = 一个逻辑单元**：一个功能 / 修复 / 文档 / 重构。按功能拆分提交，**禁止把无关改动混合进同一提交**；补丁式碎提交（临时修改、调试残留）不得进入 main。
