@@ -137,7 +137,7 @@ describe('startPinnedStrip', () => {
     const strip = stripEl()
     expect(strip).not.toBeNull()
     expect(root.children[2]).toBe(strip) // logoRow/newSession 之后、regionArea 之前
-    expect(strip?.querySelector('[data-dsh-pinned-label]')?.textContent).toBe('置顶')
+    expect(strip?.querySelector('[data-dsh-pinned-label]')?.textContent).toBe('置顶区')
     expect(rowIds()).toEqual(['a', 'b'])
     expect(rowTitles()).toEqual(['1. 会话甲', '2. b'])
   })

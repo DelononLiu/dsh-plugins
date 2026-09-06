@@ -21,7 +21,7 @@
 /** 置顶区根标记（幂等定位 + 自愈锚点）。 */
 export const PINNED_STRIP_ATTR = 'data-dsh-pinned-strip'
 /** 置顶区标题（与会话 tab 同域，中文环境沿用中文文案）。 */
-const PINNED_LABEL = '置顶'
+const PINNED_LABEL = '置顶区'
 /** 行按钮标记。 */
 const PINNED_ROW_ATTR = 'data-dsh-pinned-row'
 /** 当前会话行标记（行内标题着色，对齐会话 tab 的划线色）。 */
