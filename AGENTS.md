@@ -66,12 +66,13 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 
   | 环境 | DSH_HOME | 启动 | 端口 | 角色 |
   | --- | --- | --- | --- | --- |
-  | web2 | `~/.dsh-web2` | `DSH_HOME=~/.dsh-web2 dsh --profile web2 --no-open` | 3082 | 管理端 console（装全家桶 + 组装器验证） |
-  | web3 | `~/.dsh-web3` | `DSH_HOME=~/.dsh-web3 dsh --profile web3 --no-open` | 3083 | instance 角色（`DSH_RELAY_AGENT=web3`） |
+  | web | `~/.dsh` | 官方 CLI（**3080 禁令**：只读不改） | 3080 | **总控**（dsh-console + dsh-channel；主机名 `master`） |
+  | web2 | `~/.dsh-web2` | `DSH_HOME=~/.dsh-web2 dsh --profile web2 --no-open` | 3082 | **开发**（日常开发/组装器验证） |
+  | web3 | `~/.dsh-web3` | `DSH_HOME=~/.dsh-web3 dsh --profile web3 --no-open` | 3083 | **探索/测试**（变动最快；`DSH_RELAY_AGENT=web3`） |
   | web4 | `~/.dsh-web4` | `DSH_HOME=~/.dsh-web4 dsh --profile web4 --no-open` | 3084 | instance 角色（`DSH_RELAY_AGENT=web4`） |
-  | daemon | `~/.dsh-daemon` | `DSH_HOME=~/.dsh-daemon dsh --profile daemon` | 无 web（headless） | 守护 host1（broker `http://127.0.0.1:19121`，出站连） |
+  | daemon | `~/.dsh-daemon` | `DSH_HOME=~/.dsh-daemon dsh --profile daemon` | 无 web（headless） | 总控主机守护 `host-master`（`hostId: 'master'`；broker `http://127.0.0.1:19121`，出站连） |
 
-  实例矩阵权威源 = 管理端 web2 的 `dsh-console.launch` 配置（cordis.patch.yml）；quick-nav/console 从 `DSH_CONSOLE_ADDR`（管理端 3082）拉实例表。启动脚本见 `scripts/dsh-profile.sh`。
+  实例矩阵权威源 = **总控 web** 的 `dsh-console.launch` 配置（cordis.patch.yml）；quick-nav/console 从 `DSH_CONSOLE_ADDR`（总控 3080）拉实例表。启动脚本见 `scripts/dsh-profile.sh`。
   登录入口（rc.1）：官方 `dsh web` 每次启动打印 `?token=`——浏览器访问换 30 天 cookie 会话（官方 client-connection BrowserAuth，无用户/角色）。**dsh-user 多用户登录走认证网关 HTTPS（社区 clarknu/dsh-gateway）**，但官方 BrowserAuth fence 挡 gateway 反代（登录成功也 401）——官方会话桥为 backlog（见 `.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md`）。**网关不随 dsh 实例启动**（2026-09 定：多实例应共享**单一**网关，实例内置会各自抢端口/职责错位）——独立部署为 backlog，就位前实例仅官方 token 登录（见 `.agents/notes/implemented/architecture/2026-09-05-gateway-standalone-deployment.md`）。8080 HTTP 反代已移除（与 3082 重复）。
 - **🔴 硬性禁令：禁止启动/触碰正式 web（3080）**（2026-08 用户强调）：3080 是当前 DSH GUI 常驻端口，**绝不**用 `dsh web` 或 `dsh --profile web` 启动（默认 3080），**绝不**修改 `~/.dsh/profiles/web` 的配置（bundles/cordis.patch.yml/package.json）。测试一律走独立 DSH_HOME + 独立端口（3082/3083/3084）。误操作会占用 3080 导致 GUI 冲突或污染正式环境。
 - **client 构建**：声明 dsh.client 的插件必须产出 `lib/client.js`（官方 ModuleLoader closure 格式）——`scripts/build-client.mjs`（esbuild）生成，4 个 UI 插件 build 已接入。

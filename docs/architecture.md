@@ -225,10 +225,11 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 | 环境 | DSH_HOME | profile | 端口 | 角色 |
 | --- | --- | --- | --- | --- |
-| web2 | `~/.dsh-web2` | web2 | 3082 | 管理端 console（全家桶 + 组装器验证） |
-| web3 | `~/.dsh-web3` | web3 | 3083 | instance（`DSH_RELAY_AGENT=web3`） |
+| web | `~/.dsh` | web | 3080 | **总控**（dsh-console + dsh-channel；主机名 `master`；3080 禁令：只读不改） |
+| web2 | `~/.dsh-web2` | web2 | 3082 | **开发**（日常开发/组装器验证） |
+| web3 | `~/.dsh-web3` | web3 | 3083 | **探索/测试**（变动最快；`DSH_RELAY_AGENT=web3`） |
 | web4 | `~/.dsh-web4` | web4 | 3084 | instance（`DSH_RELAY_AGENT=web4`） |
-| daemon | `~/.dsh-daemon` | daemon | 无 web（headless） | 守护 host1（broker `http://127.0.0.1:19121` 出站连） |
+| daemon | `~/.dsh-daemon` | daemon | 无 web（headless） | 总控主机守护 `host-master`（`hostId: 'master'`；broker `http://127.0.0.1:19121` 出站连） |
 
 profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名>`，`dsh --profile <名>` 即 boot 之）；web2/3/4 内容同源 web 全家桶，目录各归各实例，可逐实例补丁/升级。发行包模板（profiles/web|web2|web3）是另一层命名，勿混。
 
