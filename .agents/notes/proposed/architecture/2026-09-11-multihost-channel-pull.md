@@ -25,7 +25,7 @@ Status: proposed
 ## Decision
 
 1. **唯一入站面 = console**。worker（daemon 与实例）全部只出站：注册/保活、拉取指令、上报结果、上报事件。console 不拨号 worker，也不需要 worker 的地址与端口——纯出站主机可用，防火墙只需放通 console 一个端口。
-2. **控制指令 = daemon 长轮询拉取**：`GET {console}/api/channel/commands?since=<seq>&wait=25s` → 返回定向给该 daemon 的指令批次（commandId、目标实例、动作、载荷）→ daemon 本地执行（复用现成的 `daemonStart/Stop/Restart/Upgrade`）→ `POST {console}/api/channel/result`（commandId、ok、error、观测值）。幂等键 = commandId，daemon 按已执行集合去重。
+2. **控制指令 = daemon 长轮询拉取**：`GET {console}/api/channel/commands?wait=25s` → hub 按目标 worker 出队（pending，或派发后租约到期未回执的条目重新投递）→ daemon 本地执行（复用现成的 `daemonStart/Stop/Restart/Upgrade`）→ `POST {console}/api/channel/result`（commandId、ok、error）。幂等键 = commandId；回执语义 = 已受理，完成态经实例状态/结果文件呈现。租约模型取代游标拉取：断线重连直接重新领取，无需协商游标。
 3. **console 持落盘指令台账**：指令状态 pending/dispatched/done/failed，console 重启后从台账恢复。`sendControl` 契约改为返回入队/路由结果（现状为 void 返回，console 角色下静默）。
 4. **注册与归属**：`POST {console}/api/channel/register`（id、instances[{id, profile, port, dshHome}]、上报时间）周期执行，兼作保活与清单刷新。**默认 deny**：`tokens` 未登记的 id 一律拒绝；注册只能声明归属为空或等于自己的实例，冲突显式拒绝 + 审计。归属唯一权威 = console 实例档案的 `host` 字段（launch 配置降为期望态）；`controlInstance`/`upgradeInstances`/`listInstances` 统一读档案。
 5. **令牌在 v1 内闭环**：console 用 `crypto.randomBytes` 生成实例令牌，经部署回执/注册响应下发，daemon 以 0600 落盘；console 侧 `tokens` 是唯一登记表。所有 channel 端点（register/commands/result/event/events）与 console 现有控制面（`/api/console/instances`、`/api/console/control`）在 v1 内加校验；控制面默认只绑回环，非回环必须显式开关且强制令牌（浏览器会话级鉴权依赖独立网关，见 [alpha5-auth](2026-09-03-alpha5-auth-official-token-vs-user-login.md)，留 P3）。
@@ -56,16 +56,16 @@ Status: proposed
 
 **v1 = P1a + P1b + P2**；P3 为 v1 之后。
 
-### P1a 控制闭环（先把模型立住，不碰真实跨机）
+### P1a 控制闭环（先把模型立住，不碰真实跨机）——**已落地**
 
-1. channel 配置与身份：`Config` 增 `id`/`console`/`token`；`selfId` 解析 `id → relay.agent → DSH_RELAY_AGENT`。
-2. console 侧自建路由（插件 exact 路由，免 fence）：`/api/channel/register`、`/api/channel/commands`、`/api/channel/result`，带实例令牌校验；默认绑回环，非回环需显式开关 + 令牌。
-3. worker 侧出站客户端：周期注册（兼保活）+ 长轮询取指令 + 回传结果；断线退避（指数 + 抖动，间隔与上限可配）。
-4. console 落盘指令台账 + `sendControl` 契约改造，同步改 `controlInstance`/`deployInstance`/`upgradeInstances` 调用点与 UI 结果面。
-5. 归属与默认 deny：未登记 id 拒绝注册；注册声明归属校验（冲突拒绝 + 审计）；控制与列表统一读实例档案。
-6. P1a 指令面只做 `start/stop/restart`；daemon 侧复用现成进程管理，操作进行中回 409。
-7. 契约澄清（实现前必须定）：守护/实例 id 命名规则统一（代码 `^host\d+$`、配置为 `host1`、部分文档写 `host-<id>`）；daemon 侧并发上限与"操作进行中"回执语义；配置迁移对 `DSH_RELAY_*` 的 fail-fast 或显式降级。
-8. 测试：令牌（缺/错/未登记）、注册合并与冲突、指令幂等（重复 commandId）、长轮询超时与重连、console 重启后台账恢复、`sendControl` 静默丢弃路径的回归用例。
+1. channel 配置与身份：`Config` 增 `mode`/`id`/`console`/`token`/`pollWaitMs`/`registerIntervalMs`/`commandLeaseMs`/`ledgerFile`；`selfId` 解析 `id → relay.agent → DSH_RELAY_AGENT`。缺省 local；给出 `console` 地址即 worker；hub 需显式 `mode: 'hub'`（避免任一 web 实例误开控制面）。
+2. hub 路由（插件 exact 路由，免 fence）：`POST /api/channel/register`、`GET /api/channel/commands`、`POST /api/channel/result`；鉴权 `x-instance-id` + `x-instance-token`（缺头 401 / 未登记 403 / 令牌错 401），长轮询本身即保活证据。
+3. worker 出站客户端：周期注册（含本机实例状态）+ 长轮询取指令 + 回执；失败指数退避（上限 60s）。
+4. 指令台账：条目含 seq/租约/回执；`enqueueCommand` 目标未注册即失败、`claimCommands` 租约到期重投、`completeCommand` 重复回执不覆盖首个结果；`ledgerFile` 落盘未完成条目，重启恢复为 pending 重新排队。
+5. 归属与默认 deny：`tokens` 未登记的 id 拒绝注册；注册声明写 `hostIndex`（实例 → worker），归属冲突逐个拒绝（不牵连整次注册）；实例表按上报值 upsert（状态权威 = 注册上报）。console 侧 `handleWorkerRegister` 落档案并投 inbox（`system.host.register`）。
+6. 显式失败：`sendControl` 返回 `ControlDispatchResult`（hub 未注册目标 → ok=false；本机无接收者 → ok=false，不再空转）；console 新增 `dispatchToHost`——hub 走台账，同机 local 模式保留直连（有 addr → `remoteControl` 直连守护控制端口；无 addr → 进程内回环），`deploy`/`upgrade` 在缺 hub 时给出明确错误；`deployInstance` 改为**先派发成功再登记档案**（失败不留无主档案）；hub 模式探测跳过跨机地址与已注册目标（状态权威来自注册）。
+7. 测试：channel 37 项（含真 HTTP 端到端：注册 → 长轮询 → 本地执行 → 回执进台账；鉴权 401/403；归属冲突；租约重投；台账恢复；回执归属校验）+ console 116 项（含 hub 注册落档案与主机上线 inbox、台账派发、未注册显式失败、deploy 失败不留档案、探测跳过跨机/已注册）。
+**P1a 遗留（未做，P1b 内一并处理）**：守护/实例 id 命名规则统一（代码 `^host\d+$`、配置 `host1`、部分文档写 `host-<id>`）；daemon 侧并发上限与"操作进行中"回执语义（现由既有 busy 锁承担，未把 409 语义回给 hub）；`DSH_RELAY_*` 旧配置的 fail-fast 或显式降级提示；daemon 的手写控制端口（`startControlServer`）与同机直连路径仍保留（local 模式使用），P1b 统一切到 pull 后删除。
 
 ### P1b 部署、升级、状态与日志接同一通道
 

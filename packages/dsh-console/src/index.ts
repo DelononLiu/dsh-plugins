@@ -20,7 +20,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
-import { isHostAgent, signRequest, type ControlCommand, type InstanceIdentity } from 'dsh-channel'
+import { isHostAgent, signRequest, type ControlCommand, type InstanceIdentity, type WorkerInstanceReport, type WorkerReport } from 'dsh-channel'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -391,6 +391,11 @@ export class ConsoleService extends TypertRemoteService {
         // 主机守护：处理 start/stop/restart，本地 spawn/kill 清单内实例。
         this.unsubscribeControl = ctx.channel.onControl((command, from) => this.handleDaemonControl(command, from))
         ctx.effect(() => this.unsubscribeControl!)
+        // 多机：向 hub 上报本机实例状态（周期注册即保活；指令经长轮询取回本地执行）。
+        if (ctx.channel.channelMode === 'worker') {
+          const disposeReport = ctx.channel.setWorkerReport(() => this.localInstanceReport())
+          ctx.effect(() => disposeReport)
+        }
         // 本机控制端口（headless 也有 addr）——管理端经 launch 配置的 daemon addr 直连
         // （官方 client-request 信封，与 callRemote 直连路径一致；无 broker 也能管理本机实例）。
         if (config.controlPort) this.startControlServer(config.controlPort)
@@ -401,7 +406,10 @@ export class ConsoleService extends TypertRemoteService {
         ctx.effect(() => this.unsubscribeControl!)
         break
       default: {
-        // console 角色：等 webServer 服务可用后挂 HTTP 端点（ctx.inject 原生等待；
+        // console 角色（多机 hub）：worker 注册落档案（归属 + 状态）并入 inbox。
+        const unsubscribeRegister = ctx.channel.onRegister((report) => this.handleWorkerRegister(report))
+        ctx.effect(() => unsubscribeRegister)
+        // 等 webServer 服务可用后挂 HTTP 端点（ctx.inject 原生等待；
         // daemon/instance 角色部署的无 webserver profile 不会走到这里）。
         // 注意用注入后的 ctx（webServer 只在注入 fiber 的 scope 可见）。
         ctx.inject(['webServer'], (injected) => {
@@ -440,9 +448,11 @@ export class ConsoleService extends TypertRemoteService {
     const now = Date.now()
     // 应用离线覆盖（stop/restart 后即时显示 offline，绕开 broker TTL 滞后）；过期项清除。
     const view = instances.map((inst) => {
-      // 实例访问地址（channel 发现为空 → launch 配置 addr 补充，跳转用）与所属主机名。
+      // 实例访问地址（channel 发现为空 → launch 配置 addr 补充，跳转用）与所属主机：
+      // 归属以注册声明为准（多机），launch 配置回落（期望态/同机部署）。
       const spec = this.config.launch?.[inst.id]
-      const withHost = spec?.host ? { ...inst, host: spec.host } : inst
+      const host = this.ctx.channel.hostOf(inst.id) ?? spec?.host
+      const withHost = host ? { ...inst, host } : inst
       const launchAddr = spec?.addr
       const withAddr = launchAddr ? { ...withHost, addr: launchAddr } : withHost
       // 标记当前实例（管理端自己）：UI 跳转时排除。
@@ -474,15 +484,19 @@ export class ConsoleService extends TypertRemoteService {
 
   /** 直连状态探测：对管理端 launch / daemon 本机 instances 的 addr 发轻量请求，
    * 可达 → 心跳续期（保持 online）；不可达 → 不续期（sweep 会标离线）。
-   * 探测带 5s 超时（目标 hang 时不积累挂起请求）。 */
+   * 探测带 5s 超时（目标 hang 时不积累挂起请求）。
+   * hub 模式下跳过已注册目标（worker 与其上报实例的存活证据来自注册/长轮询，
+   * 探测会与之抢状态）与非回环地址（跨机探测不是本进程的职责）。 */
   private probeLaunch(): void {
     const specs = this.config.launch ?? this.config.instances ?? {}
+    const hub = this.ctx.channel.channelMode === 'hub'
     for (const [id, spec] of Object.entries(specs)) {
       // 管理端用配置 addr；daemon 本机实例用 127.0.0.1:port（与注册一致）。
       const addr = this.config.launch
         ? spec.addr
         : (typeof spec.port === 'number' ? `http://127.0.0.1:${spec.port}` : undefined)
       if (!addr) continue
+      if (hub && (!isLoopbackAddr(addr) || this.ctx.channel.hostOf(id) !== undefined)) continue
       fetch(addr, { signal: AbortSignal.timeout(ConsoleService.PROBE_TIMEOUT_MS) })
         .then(() => {
           try { this.ctx.channel.heartbeat(id, '') } catch { /* 未注册 */ }
@@ -493,6 +507,54 @@ export class ConsoleService extends TypertRemoteService {
           try { this.ctx.channel.setStatus(id, 'offline') } catch { /* 未注册 */ }
         })
     }
+  }
+
+  /**
+   * daemon 角色：本机实例状态上报（多机 worker 的注册载荷）。状态取本进程
+   * channel 实例表（daemon 构造时已 declare 清单并周期探测本机端口），
+   * 运行时 deploy 出来的实例同样纳入。
+   */
+  private localInstanceReport(): WorkerInstanceReport[] {
+    const ids = [...Object.keys(this.config.instances ?? {}), ...this.runtimeInstances.keys()]
+    return [...new Set(ids)].map((id) => ({
+      id,
+      status: this.ctx.channel.get(id)?.status === 'online' ? 'online' : 'offline',
+    }))
+  }
+
+  /**
+   * console 角色：处理 worker 注册（多机 hub）——把上报实例的归属与状态写进档案，
+   * 并向 inbox 投一条系统消息（新主机上线可见）。归属冲突由 channel 侧拒绝，
+   * 这里只消费被受理的部分。
+   */
+  private handleWorkerRegister(report: WorkerReport): void {
+    const host = report.id
+    for (const inst of report.instances) {
+      const record = this.getInstanceRecord(inst.id)
+      if (record !== undefined) {
+        this.setInstanceRecord({ ...record, host, status: inst.status })
+        continue
+      }
+      this.setInstanceRecord({
+        id: inst.id,
+        name: inst.id,
+        addr: '',
+        status: inst.status,
+        owner: 'admin',
+        type: 'normal',
+        host,
+        version: '',
+      })
+    }
+    const hostRecord = this.getInstanceRecord(host)
+    if (hostRecord !== undefined) this.setInstanceRecord({ ...hostRecord, status: 'online' })
+    this.postSystemMessage('system.host.register', {
+      owner: 'admin',
+      sender: host,
+      title: `主机 ${host} 已注册`,
+      body: `主机 ${host} 上报实例：${report.instances.map((i) => `${i.id}(${i.status})`).join('、') || '（无）'}`,
+    })
+    this.log(`[dsh-console] worker ${host} 注册：实例 ${report.instances.map((i) => i.id).join(',') || '（无）'}`, { scope: 'control' })
   }
 
   /** GET /api/console/instances：实例列表 + 守护 peers（host-* 前缀，UI 分别呈现）。 */
@@ -1312,28 +1374,35 @@ export class ConsoleService extends TypertRemoteService {
       return { ok: true }
     }
     if (command === 'upgrade') {
-      this.ctx.channel.sendControl(instanceId, { type: command, payload })
-      return { ok: true }
+      const upgradeHost = this.ctx.channel.hostOf(instanceId) ?? this.config.launch?.[instanceId]?.host
+      const target = upgradeHost ?? (this.ctx.channel.channelMode === 'hub' ? undefined : instanceId)
+      if (target === undefined) {
+        return { ok: false, error: `实例 ${instanceId} 无守护宿主（无法派发升级）` }
+      }
+      return this.dispatchToHost(target, { type: command, payload: { instanceId, ...payload } })
     }
     const online = this.isInstanceOnline(instanceId)
-    const daemonAgent = this.config.launch?.[instanceId]?.host
+    const daemonAgent = this.ctx.channel.hostOf(instanceId) ?? this.config.launch?.[instanceId]?.host
     const route = resolveControlRoute(command, online, daemonAgent)
     switch (route.action) {
       case 'noop':
         this.log(`[dsh-console] 控制 ${instanceId} ${command} → noop 忽略（${online ? '已在线' : '已离线'}）`, { scope: 'control' })
         return { ok: true }
       case 'daemon': {
-        // 守护从未注册（launch.host 拼错）→ 显式失败。
-        if (this.ctx.channel.get(route.daemonAgent) === undefined) {
+        // 守护从未注册（launch.host 拼错，多机下也含"守护未上线"）→ 显式失败。
+        if (this.ctx.channel.channelMode !== 'hub' && this.ctx.channel.get(route.daemonAgent) === undefined) {
           this.log(`[dsh-console] 控制 ${instanceId} ${command} → 失败：目标守护 ${route.daemonAgent} 未注册（launch 配置 host 疑错）`, { scope: 'control' })
           return { ok: false, error: `目标守护 ${route.daemonAgent} 未注册（检查 launch 配置 host）` }
         }
-        // 跨实例 RPC：daemon 的 console.controlInstance 本地执行（拿到回执）。
         this.log(`[dsh-console] 控制 ${instanceId} ${command} → 下发守护 ${route.daemonAgent}`, { scope: 'control' })
-        return this.remoteControl(route.daemonAgent, { instanceId, command: route.command })
+        return this.dispatchToHost(route.daemonAgent, { type: route.command, payload: { instanceId } })
       }
       case 'instance':
-        // 跨实例 RPC：instance 的 console.controlInstance 自退处理。
+        // 无守护宿主的在线实例：多机下实例不开控制面（生命周期全经本机 daemon），
+        // 显式失败；同机 local 模式保留直连自退（原行为）。
+        if (this.ctx.channel.channelMode === 'hub') {
+          return { ok: false, error: `实例 ${instanceId} 无守护宿主：多机模式下实例不暴露控制面` }
+        }
         this.log(`[dsh-console] 控制 ${instanceId} ${command} → 下发实例自退（无守护兜底）`, { scope: 'control' })
         return this.remoteControl(instanceId, { instanceId, command: route.command })
       case 'error':
@@ -1363,20 +1432,61 @@ export class ConsoleService extends TypertRemoteService {
       }
       if (version === '') return { instanceId, ok: false, error: '目标版本为空' }
       const record = this.getInstanceRecord(instanceId)
-      const daemonAgent = this.config.launch?.[instanceId]?.host ?? record?.host
+      const daemonAgent = this.ctx.channel.hostOf(instanceId) ?? this.config.launch?.[instanceId]?.host ?? record?.host
       if (daemonAgent === undefined || daemonAgent === '') {
         return { instanceId, ok: false, error: '无守护宿主（launch/档案未配 host）' }
       }
       if (daemonAgent === instanceId) {
         return { instanceId, ok: false, error: '守护不能升级自身（launch 配置 host 指向自己）' }
       }
-      if (this.ctx.channel.get(daemonAgent) === undefined) {
+      // 同机 local 模式：守护必须先被声明（launch 声明或注册）；否则无从直连。
+      if (this.ctx.channel.channelMode !== 'hub' && this.ctx.channel.get(daemonAgent) === undefined) {
         return { instanceId, ok: false, error: `目标守护 ${daemonAgent} 未注册` }
       }
-      this.ctx.channel.sendControl(daemonAgent, { type: 'upgrade', payload: { instanceId, version } })
-      return { instanceId, ok: true }
+      const dispatched = this.dispatchToHost(daemonAgent, { type: 'upgrade', payload: { instanceId, version } })
+      return dispatched.ok
+        ? { instanceId, ok: true }
+        : { instanceId, ok: false, error: dispatched.error ?? '派发失败' }
     })
     return { results }
+  }
+
+  /**
+   * 派发控制指令给守护宿主：多机 hub 模式经 channel 落盘台账（worker 长轮询取走，
+   * 未注册目标显式失败）；同机 local 模式走直连 RPC（守护控制端口，原行为）。
+   * @param hostId - 目标守护 id。
+   * @param command - 指令（不含 id/ts）。
+   * @returns 派发结果（ok 仅代表已受理/已下发）。
+   */
+  private dispatchToHost(hostId: string, command: Omit<ControlCommand, 'id' | 'ts'>): ControlResult {
+    if (this.ctx.channel.channelMode === 'hub') {
+      const dispatched = this.ctx.channel.sendControl(hostId, command)
+      this.log(
+        dispatched.ok
+          ? `[dsh-console] 指令 ${command.type} 已入队守护 ${hostId}（commandId=${dispatched.commandId ?? ''}）`
+          : `[dsh-console] 指令 ${command.type} 派发守护 ${hostId} 失败：${dispatched.error ?? ''}`,
+        { scope: 'control' },
+      )
+      return dispatched.ok
+        ? { ok: true, ...(dispatched.commandId !== undefined ? { commandId: dispatched.commandId } : {}) }
+        : { ok: false, error: dispatched.error }
+    }
+    const payload = command.payload as { instanceId?: string } | undefined
+    const instanceId = payload?.instanceId
+    // 同机 local 模式：有 addr → 直连守护控制端口；无 addr → 进程内回环（本机守护/
+    // 单进程模拟）；两种都能给出生死结论，不留"已下发"的假成功。
+    const addr = this.ctx.channel.get(hostId)?.addr
+    if (addr === undefined || addr === '') {
+      const loopback = this.ctx.channel.sendControl(hostId, command)
+      return loopback.ok
+        ? { ok: true, ...(loopback.commandId !== undefined ? { commandId: loopback.commandId } : {}) }
+        : { ok: false, error: loopback.error }
+    }
+    if (instanceId === undefined) return { ok: false, error: `${command.type} 缺少 instanceId` }
+    if (command.type !== 'stop' && command.type !== 'start' && command.type !== 'restart') {
+      return { ok: false, error: `${command.type} 需要 hub 模式（多机台账派发）；同机 local 模式只直连 stop/start/restart` }
+    }
+    return this.remoteControl(hostId, { instanceId, command: command.type })
   }
 
   /**
@@ -1480,7 +1590,10 @@ export class ConsoleService extends TypertRemoteService {
   deployInstance(request: DeployInstanceRequest): ControlResult {
     const { host, instanceId, name, version, addr } = request
     if (!host || !instanceId || !version) return { ok: false, error: '部署请求缺 host/instanceId/version' }
-    // 登记档案（管理端视角可查；status=offline 等 daemon 拉起后 channel 置 online）。
+    // 先派发再登记：登记 = 已受理（派发失败时不留下"有档案无人执行"的假成功）。
+    const dispatched = this.dispatchToHost(host, { type: 'deploy', payload: request })
+    if (!dispatched.ok) return dispatched
+    // 登记档案（管理端视角可查；status=offline 等 daemon 拉起后由注册上报置 online）。
     this.setInstanceRecord({
       id: instanceId,
       name: name ?? instanceId,
@@ -1491,9 +1604,7 @@ export class ConsoleService extends TypertRemoteService {
       host,
       version,
     })
-    // 下发完整 deploy 请求（daemon 动态加入清单并落地）。
-    this.ctx.channel.sendControl(host, { type: 'deploy', payload: request })
-    return { ok: true }
+    return dispatched
   }
 
 
@@ -1774,6 +1885,16 @@ export class ConsoleService extends TypertRemoteService {
     const title = typeof payload.title === 'string' ? payload.title : type
     const body = typeof payload.body === 'string' ? payload.body : JSON.stringify(payload)
     this.postMessage(owner, sender, type, title, body)
+  }
+}
+
+/** 是否回环地址（hub 模式下跨机地址不由本进程探测）。 */
+function isLoopbackAddr(addr: string): boolean {
+  try {
+    const host = new URL(addr).hostname
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]'
+  } catch {
+    return false
   }
 }
 
