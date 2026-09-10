@@ -136,25 +136,57 @@ launch_instance() {
   # 否则从 agent shell 里执行 start/restart 时，**调用方自己的** DSH_SESSION_ID /
   # DSH_SESSION_JSONL / DSH_SHELL / DSH_WEB_URL 会随 env 传进实例（与旧进程继承是
   # 两条独立泄漏路径）。
+  # web 实例带 --no-open：否则每次启动都会在主机上尝试打开浏览器（headless profile
+  # 不认该旗标，故仅在读到 webserver port 时传）。
+  local -a launch_args=(--profile "$profile")
+  [[ -n "$port" ]] && launch_args+=(--no-open)
   env -u DSH_SESSION_ID -u DSH_SESSION_JSONL -u DSH_SHELL -u DSH_WEB_URL -u DSH_WEB_MODE \
     DSH_HOME="$home" \
     "DSH_RELAY_AGENT=$relay" \
     "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL" \
     "DSH_RELAY_SECRET=$RELAY_SECRET" \
     "$@" \
-    nohup "$DSH_BIN" --profile "$profile" > "$log" 2>&1 &
-  local deadline=$((SECONDS + READY_TIMEOUT)) pid
+    nohup "$DSH_BIN" "${launch_args[@]}" > "$log" 2>&1 &
+  local deadline=$((SECONDS + READY_TIMEOUT)) pid http_code=""
   while (( SECONDS < deadline )); do
     pid="$(is_running "$home" || true)"
-    if [[ -n "$pid" ]] && { [[ -z "$port" ]] || port_listening "$port"; }; then
-      echo "[$name] 就绪 pid=$pid${port:+ port=$port（监听）}"
-      return 0
+    if [[ -n "$pid" ]]; then
+      if [[ -z "$port" ]]; then
+        echo "[$name] 就绪 pid=$pid（headless）"
+        return 0
+      fi
+      # 端口监听 ≠ 应用就绪：实测启动窗口期内端口已监听，但应用仍返回 404。
+      # 因此再探一次 HTTP：200/303/401 都说明应用在服务（401 = 未登录的正常应答），
+      # 404/000 视为未就绪，继续等。
+      if port_listening "$port"; then
+        if command -v curl >/dev/null 2>&1; then
+          http_code="$(curl -s -o /dev/null -m 2 -w '%{http_code}' "http://127.0.0.1:$port/" || true)"
+          if [[ "$http_code" == "200" || "$http_code" == "303" || "$http_code" == "401" ]]; then
+            echo "[$name] 就绪 pid=$pid port=$port（HTTP $http_code）"
+            print_login_url "$name"
+            return 0
+          fi
+        else
+          echo "[$name] 就绪 pid=$pid port=$port（监听；无 curl，未做 HTTP 探测）"
+          print_login_url "$name"
+          return 0
+        fi
+      fi
     fi
     sleep 0.5
   done
-  echo "[$name] ✗ 未就绪（${READY_TIMEOUT}s 内${port:+ 端口 $port 未进入监听}）——日志尾部 $log：" >&2
+  echo "[$name] ✗ 未就绪（${READY_TIMEOUT}s 内${port:+ 端口 $port 已监听但应用未应答，最后 HTTP ${http_code:-000}}）——日志尾部 $log：" >&2
   tail -n 10 "$log" 2>/dev/null | sed 's/^/    /' >&2 || true
   return 1
+}
+
+# 打印该实例的登录链接（dsh web 每次启动打印新 token；重启会让旧标签页过期，
+# 这里直接把新链接给出来，省得用户去翻日志）。
+print_login_url() {
+  local name="$1" log="/tmp/dsh-$name.log" url
+  url="$(grep -oE 'http://[^[:space:]]+/\?token=[A-Za-z0-9_-]+' "$log" 2>/dev/null | tail -1 || true)"
+  [[ -n "$url" ]] && echo "[$name] 登录链接（旧标签页需重新打开）：$url"
+  return 0
 }
 
 is_running() {
