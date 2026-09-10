@@ -20,7 +20,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
-import { isHostAgent, signRequest, type ControlCommand, type InstanceIdentity, type WorkerInstanceReport, type WorkerReport } from 'dsh-channel'
+import { isHostAgent, signRequest, type ControlCommand, type ControlOutcome, type InstanceIdentity, type WorkerInstanceReport, type WorkerReport } from 'dsh-channel'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -28,7 +28,7 @@ import { createServer } from 'node:http'
 import { spawn, exec, type ChildProcess } from 'node:child_process'
 import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import { join } from 'node:path'
 import { connect } from 'node:net'
 
@@ -293,10 +293,13 @@ export class ConsoleService extends TypertRemoteService {
   private readonly children = new Map<string, ChildProcess>()
   /**
    * daemon 角色：运行时实例清单（deploy 动态加入；初始 = config.instances 静态）。
-   * 只读处经 {@link instanceSpec} 查询（静态 + 动态合并）；v1 不持久化——
-   * daemon 重启后由 console 重新下发（期望状态声明，reconcile 语义）。
+   * 只读处经 {@link instanceSpec} 查询（静态 + 动态合并）。deploy 出来的实例
+   * 落盘 `<daemon root>/instances.json`，daemon 重启时经 {@link loadDeployedInstances}
+   * 恢复；启动对账结果见 {@link reconcileResult}。
    */
   private readonly runtimeInstances = new Map<string, LaunchSpec>()
+  /** daemon 角色：启动对账结果（{@link reconcileInstances} 写入）。 */
+  private reconcileReport: Array<{ id: string; state: 'online' | 'offline' | 'orphan'; detail: string }> = []
   /** per-instance 操作锁（start/restart 进行中；防积压指令交错 spawn）。 */
   private readonly ops = new Map<string, InstanceOp>()
   /** UI 离线覆盖（stop/restart 发出后即时显示 offline，绕开 broker TTL 滞后）。 */
@@ -337,8 +340,11 @@ export class ConsoleService extends TypertRemoteService {
     // channel 实例表为空（去 broker 发现后无 peers），在线判定恒 false，
     // restart 走"离线直接拉起"不杀旧进程 → 端口冲突。
     // 有 addr → callRemote 直连优先；无 addr（守护/NAT 后）→ 注册留空 addr，
+    // daemon 角色：先恢复部署清单（deploy 出来的实例落盘 instances.json）——
+    // 恢复后与静态清单一起 declare/探测，重启不再是"清单丢、进程变孤儿"。
+    if (config.role === 'daemon') this.loadDeployedInstances()
     // callRemote 自动走 broker 兜底（若无 broker 则不可达，属预期）。
-    const specs = config.launch ?? config.instances
+    const specs = config.launch ?? (config.role === 'daemon' ? this.allInstanceSpecs() : config.instances)
     if (specs) {
       for (const [id, spec] of Object.entries(specs)) {
         // 管理端用配置 addr；daemon 本机实例用 127.0.0.1:port 构造 addr（同机直连）。
@@ -356,12 +362,14 @@ export class ConsoleService extends TypertRemoteService {
     // 续期 online；**不可达 → setStatus(offline) 立即离线**（不等 sweep 超时——
     // 否则声明即 online 后，实例挂了要 heartbeatTimeoutMs 才转灰，UI 假绿）。
     // declare 后立即首轮 probe（不等 setInterval 首拍 15s），重启瞬间即反映真实状态。
-    if (config.launch || config.instances) {
+    if (config.launch || config.instances !== undefined || (config.role === 'daemon' && this.runtimeInstances.size > 0)) {
       this.probeLaunch()
       const probeTimer = setInterval(() => this.probeLaunch(), ConsoleService.PROBE_INTERVAL_MS)
       probeTimer.unref?.()
       ctx.effect(() => () => clearInterval(probeTimer))
     }
+    // daemon 启动对账（异步；报告端口占用与疑似孤儿，不阻塞启动）。
+    if (config.role === 'daemon') void this.reconcileInstances()
     // 系统事件消息：订阅 channel task 平面，落入各 owner 的 inbox。
     this.unsubscribe = ctx.channel.subscribe('task', (event) => {
       if (event.type.startsWith('system.')) {
@@ -393,7 +401,7 @@ export class ConsoleService extends TypertRemoteService {
         ctx.effect(() => this.unsubscribeControl!)
         // 多机：向 hub 上报本机实例状态（周期注册即保活；指令经长轮询取回本地执行）。
         if (ctx.channel.channelMode === 'worker') {
-          const disposeReport = ctx.channel.setWorkerReport(() => this.localInstanceReport())
+          const disposeReport = ctx.channel.setWorkerReport(() => this.workerReport())
           ctx.effect(() => disposeReport)
         }
         // 本机控制端口（headless 也有 addr）——管理端经 launch 配置的 daemon addr 直连
@@ -488,7 +496,7 @@ export class ConsoleService extends TypertRemoteService {
    * hub 模式下跳过已注册目标（worker 与其上报实例的存活证据来自注册/长轮询，
    * 探测会与之抢状态）与非回环地址（跨机探测不是本进程的职责）。 */
   private probeLaunch(): void {
-    const specs = this.config.launch ?? this.config.instances ?? {}
+    const specs = this.config.launch ?? this.allInstanceSpecs()
     const hub = this.ctx.channel.channelMode === 'hub'
     for (const [id, spec] of Object.entries(specs)) {
       // 管理端用配置 addr；daemon 本机实例用 127.0.0.1:port（与注册一致）。
@@ -515,11 +523,26 @@ export class ConsoleService extends TypertRemoteService {
    * 运行时 deploy 出来的实例同样纳入。
    */
   private localInstanceReport(): WorkerInstanceReport[] {
-    const ids = [...Object.keys(this.config.instances ?? {}), ...this.runtimeInstances.keys()]
-    return [...new Set(ids)].map((id) => ({
+    const specs = this.allInstanceSpecs()
+    return Object.keys(specs).map((id) => {
+      const version = this.readInstanceVersion(specs[id])
+      return {
+        id,
+        status: this.ctx.channel.get(id)?.status === 'online' ? 'online' : 'offline',
+        ...(version !== undefined ? { version } : {}),
+      }
+    })
+  }
+
+  /** daemon 角色：本机实例上报（含守护自身发行包版本）。 */
+  private workerReport(): WorkerReport {
+    const id = this.ctx.channel.instanceId ?? this.config.hostId ?? 'daemon'
+    const version = this.readDaemonPackageVersion()
+    return {
       id,
-      status: this.ctx.channel.get(id)?.status === 'online' ? 'online' : 'offline',
-    }))
+      ...(version !== undefined ? { version } : {}),
+      instances: this.localInstanceReport(),
+    }
   }
 
   /**
@@ -532,7 +555,12 @@ export class ConsoleService extends TypertRemoteService {
     for (const inst of report.instances) {
       const record = this.getInstanceRecord(inst.id)
       if (record !== undefined) {
-        this.setInstanceRecord({ ...record, host, status: inst.status })
+        this.setInstanceRecord({
+          ...record,
+          host,
+          status: inst.status,
+          ...(inst.version !== undefined ? { version: inst.version } : {}),
+        })
         continue
       }
       this.setInstanceRecord({
@@ -543,18 +571,38 @@ export class ConsoleService extends TypertRemoteService {
         owner: 'admin',
         type: 'normal',
         host,
-        version: '',
+        version: inst.version ?? '',
       })
     }
     const hostRecord = this.getInstanceRecord(host)
-    if (hostRecord !== undefined) this.setInstanceRecord({ ...hostRecord, status: 'online' })
+    if (hostRecord !== undefined) {
+      this.setInstanceRecord({
+        ...hostRecord,
+        status: 'online',
+        ...(report.version !== undefined ? { version: report.version } : {}),
+      })
+    }
     this.postSystemMessage('system.host.register', {
       owner: 'admin',
       sender: host,
       title: `主机 ${host} 已注册`,
-      body: `主机 ${host} 上报实例：${report.instances.map((i) => `${i.id}(${i.status})`).join('、') || '（无）'}`,
+      body: `主机 ${host}${report.version !== undefined ? `（发行包 ${report.version}）` : ''} 上报实例：${report.instances.map((i) => `${i.id}(${i.status}${i.version !== undefined ? `/${i.version}` : ''})`).join('、') || '（无）'}`,
     })
     this.log(`[dsh-console] worker ${host} 注册：实例 ${report.instances.map((i) => i.id).join(',') || '（无）'}`, { scope: 'control' })
+  }
+
+  /**
+   * 解析请求发起者（审计用）：dsh-user 可得则取用户 id（网关注入头/cookie/静态
+   * 配置），否则 `system`。控制指令的 actor 随台账条目落盘。
+   */
+  private resolveActor(req: IncomingMessage): string {
+    const user = this.ctx.get('user') as { current(headers?: Record<string, string | undefined>): { id: string } } | undefined
+    if (user === undefined) return 'system'
+    try {
+      return user.current(req.headers as Record<string, string | undefined>).id
+    } catch {
+      return 'system'
+    }
   }
 
   /** GET /api/console/instances：实例列表 + 守护 peers（host-* 前缀，UI 分别呈现）。 */
@@ -573,7 +621,7 @@ export class ConsoleService extends TypertRemoteService {
         const { instanceId, command } = JSON.parse(body || '{}') as { instanceId?: string; command?: 'stop' | 'start' | 'upgrade' | 'restart' }
         if (typeof instanceId !== 'string' || !instanceId) throw new Error('instanceId required')
         if (!command || !['stop', 'start', 'upgrade', 'restart'].includes(command)) throw new Error(`unsupported command: ${String(command)}`)
-        const result = this.controlInstance(instanceId, command, {})
+        const result = this.controlInstanceAs(instanceId, command, {}, this.resolveActor(req))
         res.writeHead(result.ok ? 200 : 400, { 'content-type': 'application/json' })
         res.end(JSON.stringify(result.ok ? { ok: true, instanceId, command } : { ok: false, instanceId, command, error: result.error }))
       } catch (error) {
@@ -682,56 +730,169 @@ export class ConsoleService extends TypertRemoteService {
   }
 
   /** daemon 角色：处理控制指令（只认本机清单内的实例；指令载荷携带 instanceId）。 */
-  private handleDaemonControl(command: ControlCommand, from: string): void {
+  private handleDaemonControl(command: ControlCommand, from: string): ControlOutcome {
     const payload = (command.payload ?? {}) as Record<string, unknown>
     // deploy：新实例部署（payload 是完整 DeployInstanceRequest，不走本机清单检查）。
     if (command.type === 'deploy') {
-      this.daemonDeploy(payload as unknown as DeployInstanceRequest)
-      return
+      return this.daemonDeploy(payload as unknown as DeployInstanceRequest)
     }
     const instanceId = typeof payload.instanceId === 'string' ? payload.instanceId : ''
     const spec = this.instanceSpec(instanceId)
     if (spec === undefined) {
       this.log(`[dsh-console/daemon] 收到 ${from} 的 ${command.type} 指令，但 ${instanceId || '(空)'} 不在本机清单（拒绝）`, { scope: 'control' })
-      return
+      return { ok: false, error: `实例 ${instanceId || '(空)'} 不在本机清单` }
     }
     switch (command.type) {
       case 'start':
-        // busy 锁：操作进行中（如重启等待窗口）忽略，防并发 spawn 端口冲突。
+        // busy 锁：操作进行中（如重启等待窗口）拒绝，防并发 spawn 端口冲突。
         if (!this.opBegin(instanceId, 'starting')) {
           this.log(`[dsh-console/daemon] ${instanceId} 有操作进行中，忽略 start`, { scope: 'control' })
-          return
+          return { ok: false, error: `${instanceId} 有操作进行中（busy）` }
         }
         try {
           this.daemonStart(instanceId, spec)
         } finally {
           this.opEnd(instanceId)
         }
-        break
+        return { ok: true, detail: '已拉起' }
       case 'stop':
         this.daemonStop(instanceId)
-        break
+        return { ok: true, detail: '已发停止' }
       case 'restart':
         if (!this.opBegin(instanceId, 'restarting')) {
           this.log(`[dsh-console/daemon] ${instanceId} 有操作进行中，忽略 restart`, { scope: 'control' })
-          return
+          return { ok: false, error: `${instanceId} 有操作进行中（busy）` }
         }
         this.daemonRestart(instanceId, spec)
-        break
+        return { ok: true, detail: '已发重启' }
       case 'upgrade': {
         // 统一升级：daemon 事务执行（快照→对齐发行包源→滚动重启→健康探测→失败回滚）。
         const version = typeof payload.version === 'string' ? payload.version : ''
         void this.daemonUpgrade(instanceId, spec, version)
-        break
+        // 事务异步：回执 = 已受理；完成态经在线状态 + .dsh-upgrade-result.json。
+        return { ok: true, detail: `升级已受理（目标 ${version || '当前发行包源'}，异步事务）` }
       }
       default:
         console.log(`[dsh-console/daemon] 收到 ${from} 的 ${command.type} 指令（v1 占位）`)
+        return { ok: false, error: `未知指令 ${command.type}` }
     }
   }
 
   /** 查询实例启动规格：静态 config.instances 优先，其次运行时清单（deploy 动态加的）。 */
   private instanceSpec(instanceId: string): LaunchSpec | undefined {
     return this.config.instances?.[instanceId] ?? this.runtimeInstances.get(instanceId)
+  }
+
+  /**
+   * 本机全部实例清单（静态 config.instances + 运行时 deploy 出来的，后者已落盘
+   * `instances.json`）。daemon 的探测/日志白名单/端口定位统一读这里，避免
+   * "静态清单之外看不见"（部署出的实例曾因此无状态、停不掉）。
+   */
+  private allInstanceSpecs(): Record<string, LaunchSpec> {
+    const merged: Record<string, LaunchSpec> = {}
+    for (const [id, spec] of Object.entries(this.config.instances ?? {})) merged[id] = spec
+    for (const [id, spec] of this.runtimeInstances) merged[id] = spec
+    return merged
+  }
+
+  /** 部署清单文件（daemon 角色；记录 deploy 出来的实例，重启后据此恢复）。 */
+  private deployedInstancesFile(): string {
+    return join(roleDataRoot('daemon'), 'instances.json')
+  }
+
+  /** 读部署清单到运行时清单（daemon 启动时调用；文件缺失/损坏即空）。 */
+  private loadDeployedInstances(): void {
+    try {
+      const file = this.deployedInstancesFile()
+      if (!existsSync(file)) return
+      const saved = JSON.parse(readFileSync(file, 'utf8')) as { instances?: Record<string, LaunchSpec> }
+      for (const [id, spec] of Object.entries(saved.instances ?? {})) {
+        if (spec !== null && typeof spec === 'object') this.runtimeInstances.set(id, spec)
+      }
+      this.log(`[dsh-console/daemon] 部署清单恢复 ${this.runtimeInstances.size} 个实例（${file}）`, { scope: 'deploy' })
+    } catch (error) {
+      this.log(`[dsh-console/daemon] 部署清单读取失败（按空清单继续）：${error instanceof Error ? error.message : String(error)}`, { scope: 'deploy' })
+    }
+  }
+
+  /** 落盘部署清单（deploy 成功后调用；失败不致命，仅丢失重启恢复能力）。 */
+  private persistDeployedInstances(): void {
+    try {
+      const file = this.deployedInstancesFile()
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, JSON.stringify({ version: 1, instances: Object.fromEntries(this.runtimeInstances) }, null, 2))
+    } catch (error) {
+      this.log(`[dsh-console/daemon] 部署清单落盘失败：${error instanceof Error ? error.message : String(error)}`, { scope: 'deploy' })
+    }
+  }
+
+  /**
+   * daemon 启动对账（reconcile）：报告清单内实例的端口占用情况，以及"日志存在但
+   * 不在清单"的疑似孤儿（清单丢失/手工起的实例），让半完成状态可见而不是静默。
+   * 结果同时供注册上报与 `getReconcileReport()` 查询。
+   */
+  private async reconcileInstances(): Promise<void> {
+    const report: Array<{ id: string; state: 'online' | 'offline' | 'orphan'; detail: string }> = []
+    for (const [id, spec] of Object.entries(this.allInstanceSpecs())) {
+      const port = typeof spec.port === 'number' ? spec.port : undefined
+      if (port === undefined) {
+        report.push({ id, state: 'offline', detail: '无端口信息（无法探测）' })
+        continue
+      }
+      const free = await isPortFree(port)
+      report.push({ id, state: free ? 'offline' : 'online', detail: free ? `端口 ${port} 空闲` : `端口 ${port} 被占用` })
+    }
+    // 疑似孤儿：日志目录里有 <id>.log，但既不在静态清单也不在部署清单。
+    try {
+      const logDir = join(roleDataRoot('daemon'), 'logs')
+      if (existsSync(logDir)) {
+        const known = new Set(Object.keys(this.allInstanceSpecs()))
+        for (const file of readdirSync(logDir)) {
+          if (!file.endsWith('.log')) continue
+          const id = file.slice(0, -4)
+          if (known.has(id)) continue
+          report.push({ id, state: 'orphan', detail: '有实例日志但不在清单（清单丢失或手工启动）' })
+        }
+      }
+    } catch {
+      // 日志目录不可读：跳过孤儿检查（不影响主流程）。
+    }
+    this.reconcileReport = report
+    for (const item of report) {
+      this.log(`[dsh-console/daemon] reconcile ${item.id}: ${item.state}（${item.detail}）`, { scope: 'daemon' })
+    }
+  }
+
+  /** 启动对账结果（reconcile 完成后可查；未跑过为空数组）。 */
+  reconcileResult(): Array<{ id: string; state: 'online' | 'offline' | 'orphan'; detail: string }> {
+    return [...this.reconcileReport]
+  }
+
+  /** 读实例发行包版本（instance home 的 profile package.json；不可读返回 undefined）。 */
+  private readInstanceVersion(spec: LaunchSpec): string | undefined {
+    const candidate = resolve(spec.dshHome, 'profiles', spec.profile, 'package.json')
+    try {
+      const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as { version?: unknown }
+      return typeof parsed.version === 'string' ? parsed.version : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** 守护本地发行包版本（templateHome 的 profile package.json；不可读返回 undefined）。 */
+  private readDaemonPackageVersion(): string | undefined {
+    const template = this.config.templateHome
+    if (template === undefined || template === '') return undefined
+    const profilesDir = resolve(template, 'profiles')
+    try {
+      for (const name of readdirSync(profilesDir)) {
+        const version = this.readInstanceVersion({ dshHome: template, profile: name })
+        if (version !== undefined) return version
+      }
+    } catch {
+      return undefined
+    }
+    return undefined
   }
 
   /**
@@ -742,16 +903,16 @@ export class ConsoleService extends TypertRemoteService {
    * node_modules 复用 daemon 本地发行包（pnpm workspace 同 tree/link）——
    * 与测试环境 web2/3/4（同一发行包不同 DSH_HOME）同模式。
    */
-  private daemonDeploy(req: DeployInstanceRequest): void {
+  private daemonDeploy(req: DeployInstanceRequest): ControlOutcome {
     const { instanceId, profile, dshHome, port, token, env, version } = req
     if (this.config.role !== 'daemon') {
       this.log(`[dsh-console] deploy ${instanceId} 目标非 daemon（role=${this.config.role}），忽略`, { scope: 'deploy' })
-      return
+      return { ok: false, error: `目标非 daemon（role=${this.config.role}）` }
     }
     // 已存在（静态清单或已在跑）→ 幂等忽略。
     if (this.instanceSpec(instanceId) !== undefined) {
       this.log(`[dsh-console/daemon] ${instanceId} 已在清单，忽略重复 deploy`, { scope: 'deploy' })
-      return
+      return { ok: true, detail: `${instanceId} 已在清单（幂等忽略）` }
     }
     const spec: LaunchSpec = {
       dshHome,
@@ -768,19 +929,22 @@ export class ConsoleService extends TypertRemoteService {
     } catch (error) {
       this.runtimeInstances.delete(instanceId)
       this.log(`[dsh-console/daemon] ${instanceId} 建 dshHome 失败: ${error instanceof Error ? error.message : String(error)}`, { scope: 'deploy' })
-      return
+      return { ok: false, error: `建 dshHome 失败：${error instanceof Error ? error.message : String(error)}` }
     }
+    // 清单落盘：daemon 重启后据此恢复（否则进程在跑却不在清单 = 孤儿）。
+    this.persistDeployedInstances()
     this.log(`[dsh-console/daemon] 部署 ${instanceId}（DSH_HOME=${dshHome}，port=${String(port)}）`, { scope: 'deploy' })
     // 拉起（busy 锁；拉起后 channel 注册 → console 列表 online）。
     if (!this.opBegin(instanceId, 'starting')) {
       this.log(`[dsh-console/daemon] ${instanceId} 有操作进行中，部署后稍后拉起`, { scope: 'deploy' })
-      return
+      return { ok: false, error: `${instanceId} 有操作进行中（busy），已入清单未拉起` }
     }
     try {
       this.daemonStart(instanceId, spec)
     } finally {
       this.opEnd(instanceId)
     }
+    return { ok: true, detail: `${instanceId} 已部署并拉起` }
   }
 
   /**
@@ -1244,7 +1408,7 @@ export class ConsoleService extends TypertRemoteService {
 
   /** 本机端口定位 kill（无 broker 时停非守护拉起实例）：lsof 找占用端口的进程发 SIGTERM。 */
   private killPortProcess(instanceId: string): void {
-    const port = this.config.instances?.[instanceId]?.port
+    const port = this.allInstanceSpecs()[instanceId]?.port
     if (port === undefined) {
       this.log(`[dsh-console/daemon] ${instanceId} 无端口信息，无法本机定位停止`, { scope: 'daemon' })
       return
@@ -1269,7 +1433,7 @@ export class ConsoleService extends TypertRemoteService {
   }
 
   /** instance 角色：实例自退执行器（收到 stop/restart 退出进程，重启由守护拉起）。 */
-  private handleInstanceControl(command: ControlCommand, from: string): void {
+  private handleInstanceControl(command: ControlCommand, from: string): ControlOutcome {
     const action = resolveControlAction(command)
     switch (action) {
       case 'exit':
@@ -1278,17 +1442,17 @@ export class ConsoleService extends TypertRemoteService {
         // 照常执行——ts 精确区分，不误伤刚启动就要重启的合法指令。
         if (command.ts < this.startedAt) {
           console.log(`[dsh-console/instance] 忽略积压旧指令 ${from} 的 ${command.type}（ts=${command.ts} < 启动=${this.startedAt}）`)
-          return
+          return { ok: true, detail: '积压旧指令已忽略' }
         }
         this.log(`[dsh-console/instance] 收到 ${from} 的 ${command.type} 指令，执行重启/停止（进程退出，守护拉起）`, { scope: 'instance' })
         setTimeout(() => process.exit(0), 300)
-        break
+        return { ok: true, detail: '进程退出（守护拉起）' }
       case 'running':
         console.log(`[dsh-console/instance] 收到 ${from} 的 start 指令（已在运行）`)
-        break
+        return { ok: true, detail: '已在运行' }
       case 'pending':
         console.log(`[dsh-console/instance] 收到 ${from} 的 ${command.type} 指令（v1 占位）`)
-        break
+        return { ok: true, detail: 'v1 占位' }
     }
   }
 
@@ -1344,6 +1508,19 @@ export class ConsoleService extends TypertRemoteService {
    */
   @Remote
   controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart', payload: { version?: string }): ControlResult {
+    return this.controlInstanceAs(instanceId, command, payload, 'system')
+  }
+
+  /**
+   * 控制指令实体（审计身份显式传入）：HTTP 面从请求解析用户身份，@Remote 面
+   * 暂无身份可得 → `system`。指令经台账派发时 actor 随条目落盘（审计留痕）。
+   */
+  private controlInstanceAs(
+    instanceId: string,
+    command: 'stop' | 'start' | 'upgrade' | 'restart',
+    payload: { version?: string },
+    actor: string,
+  ): ControlResult {
     // 目标侧短路（本机即目标实例）：跨实例 RPC 到达这里时直接执行自退，
     // 不再 remoteControl 递归（否则管理端→实例→再调自己→死循环）。
     // instance 角色用部署 env 的本机 agent id（无 relay 也设 DSH_RELAY_AGENT，
@@ -1370,8 +1547,10 @@ export class ConsoleService extends TypertRemoteService {
     // 不落入 console 决策路由（否则无 launch 配置 → route=instance → 转发回实例）。
     if (this.config.role === 'daemon' && this.config.instances?.[instanceId] !== undefined) {
       // 转发完整 payload（RPC/HTTP 面到达时保留 version 等载荷——勿只留 instanceId）。
-      this.handleDaemonControl({ id: 'rpc', type: command, payload: { instanceId, ...payload }, ts: Date.now() }, 'rpc')
-      return { ok: true }
+      const outcome = this.handleDaemonControl({ id: 'rpc', type: command, payload: { instanceId, ...payload }, ts: Date.now() }, 'rpc')
+      return outcome.ok
+        ? { ok: true, ...(outcome.detail !== undefined ? { health: outcome.detail } : {}) }
+        : { ok: false, error: outcome.error }
     }
     if (command === 'upgrade') {
       const upgradeHost = this.ctx.channel.hostOf(instanceId) ?? this.config.launch?.[instanceId]?.host
@@ -1379,7 +1558,7 @@ export class ConsoleService extends TypertRemoteService {
       if (target === undefined) {
         return { ok: false, error: `实例 ${instanceId} 无守护宿主（无法派发升级）` }
       }
-      return this.dispatchToHost(target, { type: command, payload: { instanceId, ...payload } })
+      return this.dispatchToHost(target, { type: command, payload: { instanceId, ...payload } }, actor)
     }
     const online = this.isInstanceOnline(instanceId)
     const daemonAgent = this.ctx.channel.hostOf(instanceId) ?? this.config.launch?.[instanceId]?.host
@@ -1395,7 +1574,7 @@ export class ConsoleService extends TypertRemoteService {
           return { ok: false, error: `目标守护 ${route.daemonAgent} 未注册（检查 launch 配置 host）` }
         }
         this.log(`[dsh-console] 控制 ${instanceId} ${command} → 下发守护 ${route.daemonAgent}`, { scope: 'control' })
-        return this.dispatchToHost(route.daemonAgent, { type: route.command, payload: { instanceId } })
+        return this.dispatchToHost(route.daemonAgent, { type: route.command, payload: { instanceId } }, actor)
       }
       case 'instance':
         // 无守护宿主的在线实例：多机下实例不开控制面（生命周期全经本机 daemon），
@@ -1443,7 +1622,7 @@ export class ConsoleService extends TypertRemoteService {
       if (this.ctx.channel.channelMode !== 'hub' && this.ctx.channel.get(daemonAgent) === undefined) {
         return { instanceId, ok: false, error: `目标守护 ${daemonAgent} 未注册` }
       }
-      const dispatched = this.dispatchToHost(daemonAgent, { type: 'upgrade', payload: { instanceId, version } })
+      const dispatched = this.dispatchToHost(daemonAgent, { type: 'upgrade', payload: { instanceId, version } }, 'system')
       return dispatched.ok
         ? { instanceId, ok: true }
         : { instanceId, ok: false, error: dispatched.error ?? '派发失败' }
@@ -1458,12 +1637,12 @@ export class ConsoleService extends TypertRemoteService {
    * @param command - 指令（不含 id/ts）。
    * @returns 派发结果（ok 仅代表已受理/已下发）。
    */
-  private dispatchToHost(hostId: string, command: Omit<ControlCommand, 'id' | 'ts'>): ControlResult {
+  private dispatchToHost(hostId: string, command: Omit<ControlCommand, 'id' | 'ts'>, actor: string): ControlResult {
     if (this.ctx.channel.channelMode === 'hub') {
-      const dispatched = this.ctx.channel.sendControl(hostId, command)
+      const dispatched = this.ctx.channel.sendControl(hostId, command, actor)
       this.log(
         dispatched.ok
-          ? `[dsh-console] 指令 ${command.type} 已入队守护 ${hostId}（commandId=${dispatched.commandId ?? ''}）`
+          ? `[dsh-console] 指令 ${command.type} 已入队守护 ${hostId}（actor=${actor}，commandId=${dispatched.commandId ?? ''}）`
           : `[dsh-console] 指令 ${command.type} 派发守护 ${hostId} 失败：${dispatched.error ?? ''}`,
         { scope: 'control' },
       )
@@ -1591,7 +1770,7 @@ export class ConsoleService extends TypertRemoteService {
     const { host, instanceId, name, version, addr } = request
     if (!host || !instanceId || !version) return { ok: false, error: '部署请求缺 host/instanceId/version' }
     // 先派发再登记：登记 = 已受理（派发失败时不留下"有档案无人执行"的假成功）。
-    const dispatched = this.dispatchToHost(host, { type: 'deploy', payload: request })
+    const dispatched = this.dispatchToHost(host, { type: 'deploy', payload: request }, 'system')
     if (!dispatched.ok) return dispatched
     // 登记档案（管理端视角可查；status=offline 等 daemon 拉起后由注册上报置 online）。
     this.setInstanceRecord({
@@ -1615,8 +1794,8 @@ export class ConsoleService extends TypertRemoteService {
   private logPathFor(target: LogTarget): string | null {
     if (this.config.role === 'daemon') {
       if (target.kind === 'daemon') return join(roleDataRoot('daemon'), 'daemon.log')
-      // 实例：必须在本机清单内（白名单防任意文件读）
-      const spec = this.config.instances?.[target.instanceId]
+      // 实例：必须在本机清单内（白名单防任意文件读；含 deploy 出来的实例）
+      const spec = this.allInstanceSpecs()[target.instanceId]
       if (spec === undefined) return null
       return join(roleDataRoot('daemon'), 'logs', `${target.instanceId}.log`)
     }
@@ -1658,7 +1837,7 @@ export class ConsoleService extends TypertRemoteService {
       const daemon = this.logStat(join(roleDataRoot('daemon'), 'daemon.log'))
       const logDir = join(roleDataRoot('daemon'), 'logs')
       const instances: LogFileMeta[] = []
-      const specs = this.config.instances ?? {}
+      const specs = this.allInstanceSpecs()
       for (const id of Object.keys(specs)) {
         const m = this.logStat(join(logDir, `${id}.log`))
         if (m !== null) instances.push(m)

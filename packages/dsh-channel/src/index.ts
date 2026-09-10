@@ -104,6 +104,8 @@ export interface CommandLedgerEntry {
   id: string
   /** 目标 worker id（守护 agent 名）。 */
   targetId: string
+  /** 发起者（用户 id；不可得时 system）——审计留痕。 */
+  actor?: string
   /** 指令本体。 */
   command: ControlCommand
   /** 单调序号（入队顺序）。 */
@@ -117,8 +119,26 @@ export interface CommandLedgerEntry {
   /** 租约截止（超过即视为投递失败，可重新派发）。 */
   leaseUntil?: number
   /** worker 回执。 */
-  result?: { ok: boolean; error?: string }
+  result?: { ok: boolean; error?: string; detail?: string }
 }
+
+/**
+ * 控制指令处理结果（worker 侧 handler 返回；hub 台账据此记 done/failed）。
+ * 不返回（void）视为"已受理"。
+ */
+export interface ControlOutcome {
+  ok: boolean
+  /** 失败原因（ok=false 时）。 */
+  error?: string
+  /** 附加说明（如"已受理（异步事务）"）。 */
+  detail?: string
+}
+
+/** 控制指令处理者：可同步或异步返回结果；抛错视为失败。 */
+export type ControlHandler = (
+  command: ControlCommand,
+  instanceId: string,
+) => void | ControlOutcome | Promise<void | ControlOutcome>
 
 /** 指令派发结果（sendControl 契约：入队/回环是否成立）。 */
 export interface ControlDispatchResult {
@@ -134,12 +154,16 @@ export interface WorkerInstanceReport {
   id: string
   /** 本机探测状态。 */
   status: 'online' | 'offline'
+  /** 实例发行包版本（可读则上报；档案展示与升级编排校验用）。 */
+  version?: string
 }
 
 /** worker 注册载荷（上行）。 */
 export interface WorkerReport {
   /** worker（守护）id。 */
   id: string
+  /** worker 自身的发行包版本（守护本地发行包源版本；可读则上报）。 */
+  version?: string
   /** 本机管理的实例及其状态。 */
   instances: WorkerInstanceReport[]
 }
@@ -223,7 +247,7 @@ export class ChannelService extends TypertRemoteService {
   /** 事件订阅者：plane → handler 集合。 */
   private readonly subscribers = new Map<EventPlane, Set<(event: ChannelEvent) => void>>()
   /** 控制指令接收者。 */
-  private readonly controlHandlers = new Set<(command: ControlCommand, instanceId: string) => void>()
+  private readonly controlHandlers = new Set<ControlHandler>()
   /** 事件 id → 产生时间（幂等去重 + TTL 清理）。 */
   private readonly eventTimes = new Map<string, number>()
   /** 已确认事件 id（幂等回执）。 */
@@ -250,8 +274,8 @@ export class ChannelService extends TypertRemoteService {
   private readonly registerHandlers = new Set<(report: WorkerReport) => void>()
   /** hub：指令可派发时唤醒长轮询。 */
   private readonly dispatchWaiters = new Set<() => void>()
-  /** worker：本机实例状态提供者（console 守护角色注入）。 */
-  private reportProvider: (() => WorkerInstanceReport[]) | undefined
+  /** worker：本机上报提供者（console 守护角色注入；数组 = 仅实例，对象 = 含守护版本）。 */
+  private reportProvider: (() => WorkerInstanceReport[] | WorkerReport) | undefined
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'channel')
     // 心跳超时扫描：setInterval + ctx.effect（fiber 卸载时清理）。
@@ -600,7 +624,7 @@ export class ChannelService extends TypertRemoteService {
    * @param command - 指令（不含 id，自动生成幂等 id）。
    * @returns 派发结果（ok=false 时 error 说明原因）。
    */
-  sendControl<P = unknown>(instanceId: string, command: Omit<ControlCommand<P>, 'id' | 'ts'>): ControlDispatchResult {
+  sendControl<P = unknown>(instanceId: string, command: Omit<ControlCommand<P>, 'id' | 'ts'>, actor: string = 'system'): ControlDispatchResult {
     if (this.mode !== 'hub' || instanceId === this.selfId) {
       const full: ControlCommand<P> = { ...command, id: randomUUID(), ts: Date.now() }
       // 无 hub 的进程内/同机场景：relay 兜底（原行为）或本地回环。
@@ -616,11 +640,16 @@ export class ChannelService extends TypertRemoteService {
       }
       return { ok: true, commandId: full.id }
     }
-    return this.enqueueCommand(instanceId, command as Omit<ControlCommand, 'id' | 'ts'>)
+    return this.enqueueCommand(instanceId, command as Omit<ControlCommand, 'id' | 'ts'>, actor)
   }
 
-  /** 注册控制指令接收者（agent 侧消费）。返回 disposer。 */
-  onControl(handler: (command: ControlCommand, instanceId: string) => void): () => void {
+  /**
+   * 注册控制指令接收者（agent 侧消费）。handler 可返回 {@link ControlOutcome}
+   * 表示真实执行结果（异步亦支持）——经 worker 回执写入 hub 台账；不返回视为已受理。
+   * @param handler - 处理函数。
+   * @returns disposer。
+   */
+  onControl(handler: ControlHandler): () => void {
     this.controlHandlers.add(handler)
     return () => this.controlHandlers.delete(handler)
   }
@@ -657,7 +686,7 @@ export class ChannelService extends TypertRemoteService {
    * 时上报。返回 disposer。
    * @param provider - 返回本机实例 id 与探测状态。
    */
-  setWorkerReport(provider: () => WorkerInstanceReport[]): () => void {
+  setWorkerReport(provider: () => WorkerInstanceReport[] | WorkerReport): () => void {
     this.reportProvider = provider
     return () => { if (this.reportProvider === provider) this.reportProvider = undefined }
   }
@@ -693,16 +722,24 @@ export class ChannelService extends TypertRemoteService {
         continue
       }
       this.hostIndex.set(inst.id, report.id)
-      accepted.push({ id: inst.id, status: inst.status === 'online' ? 'online' : 'offline' })
+      accepted.push({
+        id: inst.id,
+        status: inst.status === 'online' ? 'online' : 'offline',
+        ...(inst.version !== undefined ? { version: inst.version } : {}),
+      })
     }
     if (report.instances.length > MAX_WORKER_INSTANCES) {
       rejected.push({ id: '(truncated)', reason: `超过单机上报上限 ${MAX_WORKER_INSTANCES}` })
     }
     this.workerSeen.set(report.id, { lastSeen: now, instances: accepted })
-    // 注册即身份事实：worker 自身与其上报实例全部 upsert 进实例表（状态按上报值）。
-    this.upsert(report.id, 'online', now)
-    for (const inst of accepted) this.upsert(inst.id, inst.status, now)
-    const full: WorkerReport = { id: report.id, instances: accepted }
+    // 注册即身份事实：worker 自身与其上报实例全部 upsert 进实例表（状态/版本按上报值）。
+    this.upsert(report.id, 'online', now, report.version)
+    for (const inst of accepted) this.upsert(inst.id, inst.status, now, inst.version)
+    const full: WorkerReport = {
+      id: report.id,
+      ...(report.version !== undefined ? { version: report.version } : {}),
+      instances: accepted,
+    }
     for (const handler of this.registerHandlers) handler(full)
     return {
       ok: true,
@@ -722,7 +759,7 @@ export class ChannelService extends TypertRemoteService {
    * @param command - 指令（不含 id/ts）。
    * @returns 派发结果（含 commandId）。
    */
-  enqueueCommand(targetId: string, command: Omit<ControlCommand, 'id' | 'ts'>): ControlDispatchResult {
+  enqueueCommand(targetId: string, command: Omit<ControlCommand, 'id' | 'ts'>, actor: string = 'system'): ControlDispatchResult {
     if (this.mode !== 'hub') return { ok: false, error: 'channel 非 hub 模式：无跨机派发面' }
     if (!this.workerSeen.has(targetId)) {
       return { ok: false, error: `目标 ${targetId} 未注册（守护未上线或 id 不符）` }
@@ -735,6 +772,7 @@ export class ChannelService extends TypertRemoteService {
       seq: ++this.seq,
       status: 'pending',
       createdAt: Date.now(),
+      actor,
     }
     this.ledger.set(entry.id, entry)
     const queue = this.commandQueue.get(targetId) ?? []
@@ -762,12 +800,14 @@ export class ChannelService extends TypertRemoteService {
    * @param result - worker 结果（ok=false 时 error 说明原因）。
    * @returns 是否命中台账条目。
    */
-  completeCommand(commandId: string, result: { ok: boolean; error?: string }): boolean {
+  completeCommand(commandId: string, result: { ok: boolean; error?: string; detail?: string }): boolean {
     const entry = this.ledger.get(commandId)
     if (entry === undefined) return false
     if (entry.status === 'done' || entry.status === 'failed') return true
     entry.status = result.ok ? 'done' : 'failed'
-    entry.result = result.ok ? { ok: true } : { ok: false, error: result.error ?? 'worker 报告失败' }
+    entry.result = result.ok
+      ? { ok: true, ...(result.detail !== undefined ? { detail: result.detail } : {}) }
+      : { ok: false, error: result.error ?? 'worker 报告失败' }
     this.dropFromQueue(entry)
     this.persistLedger()
     return true
@@ -952,7 +992,7 @@ export class ChannelService extends TypertRemoteService {
   private async handleHubResult(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const auth = this.authenticatePeer(req)
     if (!auth.ok) return sendJson(res, auth.status, { ok: false, error: auth.error })
-    const body = await readJsonBody(req) as { commandId?: unknown; ok?: unknown; error?: unknown }
+    const body = await readJsonBody(req) as { commandId?: unknown; ok?: unknown; error?: unknown; detail?: unknown }
     if (typeof body?.commandId !== 'string' || typeof body.ok !== 'boolean') {
       return sendJson(res, 400, { ok: false, error: 'result 需要 commandId 与 ok' })
     }
@@ -962,6 +1002,7 @@ export class ChannelService extends TypertRemoteService {
     this.completeCommand(body.commandId, {
       ok: body.ok,
       ...(typeof body.error === 'string' ? { error: body.error } : {}),
+      ...(typeof body.detail === 'string' ? { detail: body.detail } : {}),
     })
     sendJson(res, 200, { ok: true })
   }
@@ -1016,14 +1057,15 @@ export class ChannelService extends TypertRemoteService {
   }
 
   /** 实例表 upsert（保留既有 addr/name；注册上报只更新状态与心跳时间）。 */
-  private upsert(id: string, status: 'online' | 'offline', lastSeen: number): void {
+  private upsert(id: string, status: 'online' | 'offline', lastSeen: number, version?: string): void {
     const entry = this.instances.get(id)
     if (entry === undefined) {
-      this.instances.set(id, { id, name: id, addr: '', status, lastSeen })
+      this.instances.set(id, { id, name: id, addr: '', status, lastSeen, ...(version !== undefined ? { version } : {}) })
       return
     }
     entry.status = status
     entry.lastSeen = lastSeen
+    if (version !== undefined) entry.version = version
   }
 
   /** 读台账文件（未完成条目重新排队；损坏即从空台账开始）。 */
@@ -1109,12 +1151,15 @@ export class ChannelService extends TypertRemoteService {
     const id = this.selfId
     const hubAddr = this.config.console
     if (id === undefined || hubAddr === undefined) return false
-    const instances = this.reportProvider?.() ?? []
+    const provided = this.reportProvider?.()
+    const report: WorkerReport = Array.isArray(provided)
+      ? { id, instances: provided }
+      : provided ?? { id, instances: [] }
     try {
       const res = await fetch(`${trimSlash(hubAddr)}/api/channel/register`, {
         method: 'POST',
         headers: this.peerHeaders(id),
-        body: JSON.stringify({ id, instances }),
+        body: JSON.stringify({ ...report, id }),
       })
       const ack = await res.json().catch(() => null) as RegisterAck | null
       if (!res.ok || ack?.ok !== true) {
@@ -1144,12 +1189,7 @@ export class ChannelService extends TypertRemoteService {
       if (!res.ok) return
       const data = await res.json() as { commands?: CommandLedgerEntry[] }
       for (const entry of data.commands ?? []) {
-        let result: { ok: boolean; error?: string } = { ok: true }
-        try {
-          for (const handler of this.controlHandlers) handler(entry.command, HUB_SENDER)
-        } catch (error) {
-          result = { ok: false, error: error instanceof Error ? error.message : String(error) }
-        }
+        const result = await this.dispatchControl(entry.command)
         await this.workerResult(id, entry.id, result)
       }
     } catch {
@@ -1157,15 +1197,37 @@ export class ChannelService extends TypertRemoteService {
     }
   }
 
+  /**
+   * 本地执行一条控制指令（worker 侧）：依次调用 handler，取第一个非 void 结果作为
+   * 真实执行结果；handler 抛错即失败。无 handler = 无人处理 → 失败（不假报成功）。
+   */
+  private async dispatchControl(command: ControlCommand): Promise<ControlOutcome> {
+    if (this.controlHandlers.size === 0) {
+      return { ok: false, error: `本实例无控制指令接收者（${command.type} 无人处理）` }
+    }
+    for (const handler of this.controlHandlers) {
+      try {
+        const outcome = await handler(command, HUB_SENDER)
+        // 只认显式结果（{ok: boolean}）；handler 顺手的返回值（如 Array.push 的
+        // 长度）不是结果，忽略——否则会把"已受理"误报成失败。
+        if (isControlOutcome(outcome)) return outcome
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+    // 全部 handler 未给出结果：视为已受理（如 instance 角色自退）。
+    return { ok: true, detail: '已受理' }
+  }
+
   /** 回执一次指令结果。 */
-  private async workerResult(id: string, commandId: string, result: { ok: boolean; error?: string }): Promise<void> {
+  private async workerResult(id: string, commandId: string, result: ControlOutcome): Promise<void> {
     const hubAddr = this.config.console
     if (hubAddr === undefined) return
     try {
       await fetch(`${trimSlash(hubAddr)}/api/channel/result`, {
         method: 'POST',
         headers: this.peerHeaders(id),
-        body: JSON.stringify({ id, commandId, ...result }),
+        body: JSON.stringify({ id, commandId, ok: result.ok === true, ...(result.error !== undefined ? { error: result.error } : {}), ...(result.detail !== undefined ? { detail: result.detail } : {}) }),
       })
     } catch {
       // 回执失败：hub 侧租约到期后重新投递（at-least-once）。
@@ -1323,11 +1385,19 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body))
 }
 
+/** 校验 handler 返回值是否为显式控制结果（只认 {ok: boolean}）。 */
+function isControlOutcome(value: unknown): value is ControlOutcome {
+  if (typeof value !== 'object' || value === null) return false
+  return typeof (value as { ok?: unknown }).ok === 'boolean'
+}
+
 /** 校验 worker 上报的实例条目形状。 */
 function isWorkerInstanceReport(value: unknown): value is WorkerInstanceReport {
   if (typeof value !== 'object' || value === null) return false
-  const candidate = value as { id?: unknown; status?: unknown }
-  return typeof candidate.id === 'string' && (candidate.status === 'online' || candidate.status === 'offline')
+  const candidate = value as { id?: unknown; status?: unknown; version?: unknown }
+  if (typeof candidate.id !== 'string') return false
+  if (candidate.status !== 'online' && candidate.status !== 'offline') return false
+  return candidate.version === undefined || typeof candidate.version === 'string'
 }
 
 /** 类插件入口：cordis 实例化时自动注册 `ctx.channel`（构造即注册，勿再 provide）。 */

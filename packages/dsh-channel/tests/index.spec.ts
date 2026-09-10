@@ -557,3 +557,88 @@ describe('多机：worker 出站回路（真 HTTP 端到端）', () => {
     }
   })
 })
+
+describe('多机：worker 回执真实结果（handler 结果 → 台账）', () => {
+  it('handler 返回 ok=false → 台账 failed 且带原因', async () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' }, pollWaitMs: 300 })
+    const server = await startHubServer(hub)
+    const worker = new ChannelService(new Context(), {
+      tokens: {}, heartbeatTimeoutMs: 30_000, mode: 'worker', id: 'host1', token: 'tok-1',
+      console: server.url, pollWaitMs: 300, registerIntervalMs: 200,
+    })
+    worker.onControl(() => ({ ok: false, error: '实例有操作进行中（busy）' }))
+    try {
+      await until(() => hub.registeredWorkers().some((w) => w.id === 'host1'), 3000, 'worker 注册')
+      const r = hub.enqueueCommand('host1', { type: 'start', payload: { instanceId: 'web3' } })
+      await until(() => hub.commandStatus(r.commandId!)?.status === 'failed', 3000, '失败回执')
+      expect(hub.commandStatus(r.commandId!)?.result).toEqual({ ok: false, error: '实例有操作进行中（busy）' })
+    } finally {
+      worker[Symbol.dispose]?.()
+      await server.close()
+    }
+  })
+
+  it('handler 抛错 → 台账 failed（消息为抛错原因）', async () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' }, pollWaitMs: 300 })
+    const server = await startHubServer(hub)
+    const worker = new ChannelService(new Context(), {
+      tokens: {}, heartbeatTimeoutMs: 30_000, mode: 'worker', id: 'host1', token: 'tok-1',
+      console: server.url, pollWaitMs: 300, registerIntervalMs: 200,
+    })
+    worker.onControl(() => { throw new Error('磁盘满') })
+    try {
+      await until(() => hub.registeredWorkers().some((w) => w.id === 'host1'), 3000, 'worker 注册')
+      const r = hub.enqueueCommand('host1', { type: 'stop', payload: { instanceId: 'web3' } })
+      await until(() => hub.commandStatus(r.commandId!)?.status === 'failed', 3000, '抛错回执')
+      expect(hub.commandStatus(r.commandId!)?.result?.error).toContain('磁盘满')
+    } finally {
+      worker[Symbol.dispose]?.()
+      await server.close()
+    }
+  })
+
+  it('handler 返回非结果值（如 Array.push 的长度）→ 视为已受理', async () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' }, pollWaitMs: 300 })
+    const server = await startHubServer(hub)
+    const worker = new ChannelService(new Context(), {
+      tokens: {}, heartbeatTimeoutMs: 30_000, mode: 'worker', id: 'host1', token: 'tok-1',
+      console: server.url, pollWaitMs: 300, registerIntervalMs: 200,
+    })
+    const seen: string[] = []
+    worker.onControl((cmd) => seen.push(cmd.type))
+    try {
+      await until(() => hub.registeredWorkers().some((w) => w.id === 'host1'), 3000, 'worker 注册')
+      const r = hub.enqueueCommand('host1', { type: 'restart', payload: { instanceId: 'web3' } })
+      await until(() => hub.commandStatus(r.commandId!)?.status === 'done', 3000, '已受理回执')
+      expect(seen).toEqual(['restart'])
+      expect(hub.commandStatus(r.commandId!)?.result).toEqual({ ok: true, detail: '已受理' })
+    } finally {
+      worker[Symbol.dispose]?.()
+      await server.close()
+    }
+  })
+
+  it('审计：入队记录 actor，落盘后仍可查', () => {
+    const file = join(tmpdir(), `dsh-channel-ledger-actor-${Date.now()}.json`)
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' }, ledgerFile: file })
+    hub.registerWorker({ id: 'host1', instances: [] }, 'tok-1')
+    const r = hub.enqueueCommand('host1', { type: 'restart', payload: {} }, 'alice')
+    expect(hub.commandStatus(r.commandId!)?.actor).toBe('alice')
+    const restored = new ChannelService(new Context(), {
+      tokens: { host1: 'tok-1' }, heartbeatTimeoutMs: 30_000, mode: 'hub', ledgerFile: file,
+    })
+    expect(restored.commandStatus(r.commandId!)?.actor).toBe('alice')
+    rmSync(file, { force: true })
+  })
+
+  it('版本上报：注册载荷的 version 进实例表', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' } })
+    hub.registerWorker({
+      id: 'host1',
+      version: '0.1.2-rc.1',
+      instances: [{ id: 'web3', status: 'online', version: '0.1.2-rc.1' }],
+    }, 'tok-1')
+    expect(hub.get('host1')?.version).toBe('0.1.2-rc.1')
+    expect(hub.get('web3')?.version).toBe('0.1.2-rc.1')
+  })
+})
