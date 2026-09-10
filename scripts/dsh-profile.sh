@@ -14,6 +14,11 @@
 #
 # 🔴 自操作防护：当前 shell 的 DSH_HOME 就是目标实例时 stop/restart 拒绝
 #   （自己杀自己）；在实例环境外（无 DSH_HOME）执行。
+# 🔴 会话变量清洗：启动环境剔除 DSH_SESSION_ID/DSH_SESSION_JSONL/DSH_SHELL/
+#   DSH_WEB_URL/DSH_WEB_MODE（调用方 env 与旧进程继承两条路径都过滤）——这类变量
+#   由 DSH 在 agent 会话内注入，带进别的实例会让它指向别的实例的会话与 home，
+#   破坏「测试环境目录隔离」。
+# ✅ restart 等待就绪：进程在 + 端口监听（headless 只看进程），超时打印日志尾部并非零退出。
 # 🔴 永不触碰正式 ~/.dsh（3080 禁令，见 AGENTS.md）。
 #
 # 用法：
@@ -28,6 +33,9 @@ DSH_BIN="${DSH_BIN:-/home/long2015/dsh-alpha5-cli/node_modules/.bin/dsh}"
 # broker 共享配置（daemon 与实例 patch 的 test-secret-relay-2026 一致；仅 relay 部署用）。
 RELAY_BROKER_URL="http://127.0.0.1:19121"
 RELAY_SECRET="test-secret-relay-2026"
+
+# 启动后就绪等待上限（秒）：轮询「进程在 + 端口监听」；超时打印日志尾部并非零退出。
+READY_TIMEOUT="${READY_TIMEOUT:-20}"
 
 # 禁止触碰的正式 home（3080 禁令）。
 OFFICIAL_HOME="$HOME/.dsh"
@@ -89,6 +97,66 @@ guard_no_self_operate() {
   return 0
 }
 
+# —— 旧进程 env 继承（restart 用）——
+# 只继承「实例作用域配置 + provider 凭证」（GUI 模型路由依赖凭证，脚本不硬编码），
+# 一律**不继承会话/宿主作用域**变量：DSH_SESSION_ID / DSH_SESSION_JSONL / DSH_SHELL /
+# DSH_WEB_URL 由 DSH 在 agent 会话内注入，带进另一个实例会让它把别的实例的会话当成
+# 自己的（实测：web3 带着 web2 的 DSH_SESSION_JSONL → 它派生的 shell 指向
+# ~/.dsh-web2/sessions/…，破坏「测试环境目录隔离」）；CLAUDE_/VSCODE_/WSL/XDG_/DBUS_
+# 等宿主噪声同理。
+# 注意：前缀项必须写成 `PREFIX.*`——锚定的 `^PREFIX=` 只匹配完全同名变量
+#（旧过滤器写成 `^(…|CLAUDE_|XDG_|DBUS_)='`，于是 CLAUDE_CODE_XXX / XDG_RUNTIME_DIR
+# 全部漏过，连 DSH_SESSION_* 也被继承）。
+ENV_DENY_EXACT_RE='^(DSH_HOME|DSH_RELAY_AGENT|DSH_RELAY_BROKER_URL|DSH_RELAY_SECRET|DSH_SESSION_ID|DSH_SESSION_JSONL|DSH_SHELL|DSH_WEB_URL|DSH_WEB_MODE|PWD|OLDPWD|SHLVL|_|PATH|HOME|USER|LOGNAME|SHELL|LANG|LC_ALL|TERM|HOSTNAME|NAME|MAIL|HOSTTYPE|MACHTYPE|OSTYPE|PAGER|GIT_PAGER|NO_COLOR|COLORTERM|COLUMNS|LINES|HISTFILE|HISTCONTROL|HISTSIZE|LS_COLORS|TMPDIR|GOPROXY|VIPSHOME|WSLENV|WSL_DISTRO_NAME|WSL_INTEROP|PULSE_SERVER|WAYLAND_DISPLAY|DISPLAY)='
+ENV_DENY_PREFIX_RE='^(DSH_SESSION_|CLAUDE|VSCODE|COPILOT|OPENWIKI|WSL|XDG_|DBUS_|GIT_|SSH_|PULSE_|WAYLAND_)'
+
+# 收集可继承的 env（stdout：`VAR=value` 行）。
+collect_inherit_env() {
+  local pid="$1"
+  tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
+    | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' \
+    | grep -vE "$ENV_DENY_EXACT_RE" \
+    | grep -vE "$ENV_DENY_PREFIX_RE" \
+    || true
+}
+
+# 端口是否在监听（与 status 同一判据）。
+port_listening() {
+  ss -tln 2>/dev/null | grep -q ":$1 "
+}
+
+# 启动实例并等待就绪（port 监听；headless 只看进程存活），超时打印日志尾部。
+# 参数：<name> <home> <profile> <port|空=headless> <relay> [额外 env VAR=value ...]
+# 返回 0=就绪，1=超时未就绪。
+launch_instance() {
+  local name="$1" home="$2" profile="$3" port="$4" relay="$5"; shift 5
+  local log="/tmp/dsh-$name.log"
+  echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
+  # 启动环境 = 调用方 env（`env` 只叠加、不清除）→ 必须先踢掉会话/宿主作用域变量，
+  # 否则从 agent shell 里执行 start/restart 时，**调用方自己的** DSH_SESSION_ID /
+  # DSH_SESSION_JSONL / DSH_SHELL / DSH_WEB_URL 会随 env 传进实例（与旧进程继承是
+  # 两条独立泄漏路径）。
+  env -u DSH_SESSION_ID -u DSH_SESSION_JSONL -u DSH_SHELL -u DSH_WEB_URL -u DSH_WEB_MODE \
+    DSH_HOME="$home" \
+    "DSH_RELAY_AGENT=$relay" \
+    "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL" \
+    "DSH_RELAY_SECRET=$RELAY_SECRET" \
+    "$@" \
+    nohup "$DSH_BIN" --profile "$profile" > "$log" 2>&1 &
+  local deadline=$((SECONDS + READY_TIMEOUT)) pid
+  while (( SECONDS < deadline )); do
+    pid="$(is_running "$home" || true)"
+    if [[ -n "$pid" ]] && { [[ -z "$port" ]] || port_listening "$port"; }; then
+      echo "[$name] 就绪 pid=$pid${port:+ port=$port（监听）}"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "[$name] ✗ 未就绪（${READY_TIMEOUT}s 内${port:+ 端口 $port 未进入监听}）——日志尾部 $log：" >&2
+  tail -n 10 "$log" 2>/dev/null | sed 's/^/    /' >&2 || true
+  return 1
+}
+
 is_running() {
   local home="$1"
   for pid in $(pgrep -f 'dsh --profile' 2>/dev/null || true); do
@@ -116,16 +184,9 @@ start_one() {
     echo "[$name] 已在运行 pid=$pid（$home）"
     return 0
   fi
-  echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
-  local env_args=()
-  # relay 三件套：仅通信插件部署（web2/3/4/daemon 经 broker 联调）；作传输兜底
-  # （实例发现权威源是管理端 launch 配置，不依赖 broker）。
-  env_args+=(
-    "DSH_RELAY_AGENT=$relay"
-    "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL"
-    "DSH_RELAY_SECRET=$RELAY_SECRET"
-  )
-  env DSH_HOME="$home" "${env_args[@]}" nohup "$DSH_BIN" --profile "$profile" > "/tmp/dsh-$name.log" 2>&1 &
+  # relay 三件套由 launch_instance 注入（仅通信插件部署：web2/3/4/daemon 经 broker 联调；
+  # 作传输兜底——实例发现权威源是管理端 launch 配置，不依赖 broker）。
+  launch_instance "$name" "$home" "$profile" "$port" "$relay"
 }
 
 stop_one() {
@@ -147,8 +208,9 @@ stop_one() {
   fi
 }
 
-# 重启：保留旧进程的关键 env（KILO_API_KEY 等——GUI LLM provider 依赖，脚本不硬编码），
-# stop 后以继承的 env 重启。避免 restart 后 GUI 模型失效（早期手动带 key 启动的原因）。
+# 重启：保留旧进程的**实例作用域** env（KILO_API_KEY 等 provider 凭证——GUI LLM provider
+# 依赖，脚本不硬编码），过滤掉会话/宿主作用域变量（见 ENV_DENY_*），stop 后以继承的 env
+# 重启并等待就绪。避免 restart 后 GUI 模型失效（早期手动带 key 启动的原因）。
 restart_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
@@ -156,25 +218,16 @@ restart_one() {
   local pid; pid="$(is_running "$home" || true)"
   local -a inherit=()
   if [[ -n "$pid" ]]; then
-    # 收集旧进程自定义 env（DSH_HOME/relay 三件套除外——脚本自己管理），
-    # 以 VAR=value 形式继承。只挑显式赋值项，避开 PATH/HOME 等自动变量噪音。
-    while IFS= read -r kv; do
-      inherit+=("$kv")
-    done < <(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
-      | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' \
-      | grep -vE '^(DSH_HOME|DSH_RELAY_AGENT|DSH_RELAY_BROKER_URL|DSH_RELAY_SECRET|PWD|SHLVL|_|PATH|HOME|USER|SHELL|LANG|LOGNAME|TERM|SSH_|DISPLAY|XDG_|DBUS_|CLAUDE_)=' \
-      || true)
-    echo "[$name] 继承旧进程 env: ${inherit[*]:-（无额外）}"
+    local total kv
+    total="$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' || true)"
+    while IFS= read -r kv; do inherit+=("$kv"); done < <(collect_inherit_env "$pid")
+    # 只打印变量名：值可能含 provider 凭证（KILO_API_KEY 等），不进终端回滚缓冲。
+    local names=""
+    for kv in ${inherit[@]+"${inherit[@]}"}; do names+="${names:+,}${kv%%=*}"; done
+    echo "[$name] 继承旧进程 env：${names:-（无）}（${#inherit[@]} 项；已过滤 $(( ${total:-0} - ${#inherit[@]} )) 项会话/宿主变量）"
   fi
   stop_one "$name"
-  local env_args=()
-  env_args+=(
-    "DSH_RELAY_AGENT=$relay"
-    "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL"
-    "DSH_RELAY_SECRET=$RELAY_SECRET"
-  )
-  echo "[$name] 重启：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
-  env DSH_HOME="$home" "${inherit[@]}" "${env_args[@]}" nohup "$DSH_BIN" --profile "$profile" > "/tmp/dsh-$name.log" 2>&1 &
+  launch_instance "$name" "$home" "$profile" "$port" "$relay" ${inherit[@]+"${inherit[@]}"}
 }
 
 # 扫描 ~/.dsh-*/ 下全部 per-instance 布局实例（~/.dsh-<名>/profiles/<名>），按名排序。

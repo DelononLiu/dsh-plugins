@@ -21,6 +21,15 @@ dsh-profile.sh 原以 ENVS 硬编码四实例（web2/3/4/daemon + 各自 port/re
 - 未知名/布局非法 → 报错退出（延续：不设别名、不静默操作）。
 - status 动态扫描 `~/.dsh-<名>/profiles/<名>` 全量。
 - 自操作防护保留：目标 home == 当前 shell DSH_HOME 时 stop/restart 拒绝。
+- **启动环境清洗**：`env` 只叠加、不清除，因此启动前显式剔除会话/宿主作用域变量
+  （`DSH_SESSION_ID`/`DSH_SESSION_JSONL`/`DSH_SHELL`/`DSH_WEB_URL`/`DSH_WEB_MODE`）——
+  否则从 agent shell 里执行 start/restart，**调用方自己的**会话变量会进实例。
+- **restart 的 env 继承只取实例作用域**：保留 provider 凭证（`*_API_KEY` 等）与 relay
+  配置；会话/宿主变量与 shell 噪声（PATH/HOME/TERM/VSCODE_/WSL/XDG_/CLAUDE_ 等）剔除。
+  前缀项必须写成 `PREFIX.*`——锚定的 `^PREFIX=` 只匹配完全同名变量（这正是旧过滤器的坑）。
+  摘要只打印**变量名**：值可能含凭证，不进终端回滚缓冲。
+- **启动后等待就绪**（`READY_TIMEOUT`，默认 20s）：轮询「进程在 + 端口监听」（headless
+  只看进程），就绪打印 `就绪 pid=… port=…（监听）`；超时打印日志尾部并以非零退出。
 
 ## Alternatives
 
@@ -35,3 +44,8 @@ dsh-profile.sh 原以 ENVS 硬编码四实例（web2/3/4/daemon + 各自 port/re
 - awk 读 port 必须整体单引号（双引号内 `$0` 会被外层 shell 展开成空 → 语法错，
   已踩坑修正）。
 - 默认无参数仍操作已知四实例（daemon web2 web3 web4）；其余需显式点名。
+- 曾现网缺陷（2026-09 修）：旧过滤器写成 `^(…|CLAUDE_|XDG_|DBUS_)='`（精确匹配而非前缀），
+  `DSH_SESSION_*`/`DSH_WEB_URL`/`DSH_SHELL` 全部漏进新实例——实测 web3 进程带着 web2 的
+  `DSH_SESSION_JSONL`（指向 `~/.dsh-web2/sessions/…`），它派生的 shell 会把别的实例的会话
+  当成自己的，破坏「测试环境目录隔离」。两条泄漏路径（旧进程继承、调用方 env）都已堵住。
+- restart 不再「一下就过去」：成功与失败都有明确结果行，失败附日志尾部。
