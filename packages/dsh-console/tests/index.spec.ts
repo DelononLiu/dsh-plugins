@@ -1264,3 +1264,98 @@ describe('升级状态（daemon 落盘 + @Remote getUpgradeStatus）', () => {
     }
   })
 })
+
+describe('多机 hub（worker 注册 → 归属/状态/台账派发）', () => {
+  /** hub 模式：console 收注册（channel 侧 registerWorker 即路由处理内核）。 */
+  async function bootHub(launch?: Record<string, { host?: string; addr?: string }>): Promise<Context> {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, {
+      tokens: { host2: 'tok-2' }, heartbeatTimeoutMs: 30_000, mode: 'hub', pollWaitMs: 200,
+    })
+    await ctx.plugin(ConsoleService, { ...(launch !== undefined ? { launch } : {}) })
+    return ctx
+  }
+
+  it('worker 注册：实例归属与状态落档案，主机上线并入 inbox', async () => {
+    const ctx = await bootHub()
+    const ack = ctx.channel.registerWorker({ id: 'host2', instances: [
+      { id: 'web3', status: 'online' },
+      { id: 'web4', status: 'offline' },
+    ] }, 'tok-2')
+    expect(ack.ok).toBe(true)
+    const view = ctx.console.listInstances()
+    const web3 = view.instances.find((i) => i.id === 'web3')
+    expect(web3?.host).toBe('host2')
+    expect(web3?.status).toBe('online')
+    expect(view.instances.find((i) => i.id === 'web4')?.status).toBe('offline')
+    // 守护（host2）作为主机条目呈现，且归属指向自己
+    expect(view.hosts.find((h) => h.id === 'host2')?.status).toBe('online')
+    // inbox：注册事件可见
+    expect(ctx.console.listInbox('admin').some((m) => m.type === 'system.host.register')).toBe(true)
+    // 档案持久：注册实例写入 InstanceRecord（host 归档）
+    expect(ctx.console.getInstanceRecord('web3')?.host).toBe('host2')
+  })
+
+  it('注册后再注册（保活）刷新状态且不重复投 inbox 之外的副作用', async () => {
+    const ctx = await bootHub()
+    ctx.channel.registerWorker({ id: 'host2', instances: [{ id: 'web3', status: 'online' }] }, 'tok-2')
+    ctx.channel.registerWorker({ id: 'host2', instances: [{ id: 'web3', status: 'offline' }] }, 'tok-2')
+    expect(ctx.console.getInstanceRecord('web3')?.status).toBe('offline')
+  })
+
+  it('controlInstance 经台账派发（ok + commandId，状态 pending）', async () => {
+    const ctx = await bootHub({ webA: { host: 'host2' } })
+    await ctx.channel.registerWorker({ id: 'host2', instances: [{ id: 'webA', status: 'online' }] }, 'tok-2')
+    const r = ctx.console.controlInstance('webA', 'restart')
+    expect(r.ok).toBe(true)
+    expect(r.commandId).toBeTruthy()
+    expect(ctx.channel.commandStatus(r.commandId!)?.status).toBe('pending')
+    expect(ctx.channel.commandStatus(r.commandId!)?.targetId).toBe('host2')
+  })
+
+  it('controlInstance 守护未注册 → 显式失败（不回环、不静默）', async () => {
+    const ctx = await bootHub({ webB: { host: 'host9' } })
+    const r = ctx.console.controlInstance('webB', 'start')
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('host9')
+  })
+
+  it('upgradeInstances 按注册归属派发；未注册守护逐条失败', async () => {
+    const ctx = await bootHub({ webA: { host: 'host2' }, webB: { host: 'host9' } })
+    await ctx.channel.registerWorker({ id: 'host2', instances: [{ id: 'webA', status: 'online' }] }, 'tok-2')
+    const r = ctx.console.upgradeInstances(['webA', 'webB'], '0.1.2-rc.1')
+    expect(r.results[0].ok).toBe(true)
+    expect(r.results[1].ok).toBe(false)
+    expect(r.results[1].error).toContain('host9')
+    const pending = ctx.channel.ledgerSnapshot()
+    expect(pending).toHaveLength(1)
+    expect(pending[0].command.type).toBe('upgrade')
+  })
+
+  it('deployInstance 派发失败即失败，且不留下无主的档案', async () => {
+    const ctx = await bootHub()
+    const r = ctx.console.deployInstance({
+      host: 'host9', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
+      dshHome: '/tmp/.dsh-web6-hub', port: 3086, token: 'tok-web6',
+    })
+    expect(r.ok).toBe(false)
+    expect(ctx.console.getInstanceRecord('web6')).toBeUndefined()
+    // 注册守护后同一请求成功
+    ctx.channel.registerWorker({ id: 'host2', instances: [] }, 'tok-2')
+    const ok = ctx.console.deployInstance({
+      host: 'host2', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
+      dshHome: '/tmp/.dsh-web6-hub', port: 3086, token: 'tok-web6',
+    })
+    expect(ok.ok).toBe(true)
+    expect(ctx.console.getInstanceRecord('web6')?.host).toBe('host2')
+  })
+
+  it('hub 模式探测跳过跨机与已注册目标（状态权威来自注册上报）', async () => {
+    const ctx = await bootHub({ webA: { host: 'host2', addr: 'http://10.0.0.12:3083' }, webLocal: { addr: 'http://127.0.0.1:3088' } })
+    await ctx.channel.registerWorker({ id: 'host2', instances: [{ id: 'webA', status: 'online' }] }, 'tok-2')
+    const svc = ctx.console as unknown as { probeLaunch(): void }
+    svc.probeLaunch() // 不应把已注册实例标离线（跨机地址不由本进程判定）
+    await new Promise((r) => setTimeout(r, 30))
+    expect(ctx.channel.get('webA')?.status).toBe('online')
+  })
+})

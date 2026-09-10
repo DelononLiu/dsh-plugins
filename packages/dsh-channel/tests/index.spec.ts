@@ -1,14 +1,16 @@
 /**
  * dsh-channel 行为测试：实例注册/心跳/发现、事件总线（幂等/TTL/三平面）、
- * 实例令牌校验、控制指令回环。
+ * 实例令牌校验、控制指令回环、多机（hub 注册/台账派发/worker 出站回路）。
  */
 
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { ChannelService, EVENT_TTL_MS, isHostAgent, type Config } from '../src/index.ts'
+import { ChannelService, EVENT_TTL_MS, MAX_WORKER_INSTANCES, isHostAgent, type Config } from '../src/index.ts'
 
 function boot(config: Partial<Config> = {}): ChannelService {
   return new ChannelService(new Context(), {
@@ -361,5 +363,197 @@ describe('callRemote 直连（请求-响应，broker 仅兜底）', () => {
     await expect(ch.callRemote('web3', { namespace: 'console', method: 'listInstances', args: {} }, 500))
       .rejects.toThrow('relay 未配置')
     vi.unstubAllGlobals()
+  })
+})
+
+/** 轮询等待条件成立（真实计时，超时抛错）。 */
+async function until(cond: () => boolean, timeoutMs = 3000, label = 'condition'): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (cond()) return
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  throw new Error(`until: ${label} 未在 ${timeoutMs}ms 内成立`)
+}
+
+/** 把 hub 的三条路由挂到真实 http server 上（绕开官方 webServer 注入）。 */
+async function startHubServer(hub: ChannelService): Promise<{ url: string; close: () => Promise<void> }> {
+  const svc = hub as unknown as {
+    handleHubRegister(req: IncomingMessage, res: ServerResponse): Promise<void>
+    handleHubCommands(req: IncomingMessage, res: ServerResponse): Promise<void>
+    handleHubResult(req: IncomingMessage, res: ServerResponse): Promise<void>
+  }
+  const server = createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://localhost').pathname
+    if (path === '/api/channel/register') return void svc.handleHubRegister(req, res)
+    if (path === '/api/channel/commands') return void svc.handleHubCommands(req, res)
+    if (path === '/api/channel/result') return void svc.handleHubResult(req, res)
+    res.writeHead(404, { 'content-type': 'application/json' })
+    res.end('{"ok":false}')
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as AddressInfo).port
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  }
+}
+
+describe('多机：hub 注册（默认 deny / 归属冲突）', () => {
+  it('未登记的 id 拒绝注册（默认 deny）', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' } })
+    const ack = hub.registerWorker({ id: 'host2', instances: [] }, 'tok-2')
+    expect(ack.ok).toBe(false)
+    expect(ack.error).toContain('not registered')
+    expect(hub.registeredWorkers()).toEqual([])
+  })
+
+  it('令牌不匹配拒绝注册', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' } })
+    expect(hub.registerWorker({ id: 'host1', instances: [] }, 'wrong').error).toBe('token mismatch')
+  })
+
+  it('注册写入实例表与归属，状态按上报值', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' } })
+    const ack = hub.registerWorker({ id: 'host1', instances: [
+      { id: 'web3', status: 'online' },
+      { id: 'web4', status: 'offline' },
+    ] }, 'tok-1')
+    expect(ack.ok).toBe(true)
+    expect(hub.get('host1')?.status).toBe('online')
+    expect(hub.get('web3')?.status).toBe('online')
+    expect(hub.get('web4')?.status).toBe('offline')
+    expect(hub.hostOf('web3')).toBe('host1')
+  })
+
+  it('归属冲突：他机声明已归属实例被逐个拒绝，其余照常受理', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1', host2: 'tok-2' } })
+    hub.registerWorker({ id: 'host1', instances: [{ id: 'web3', status: 'online' }] }, 'tok-1')
+    const ack = hub.registerWorker({ id: 'host2', instances: [
+      { id: 'web3', status: 'online' },
+      { id: 'web5', status: 'online' },
+    ] }, 'tok-2')
+    expect(ack.ok).toBe(true)
+    expect(ack.rejected).toEqual([{ id: 'web3', reason: 'already hosted by host1' }])
+    expect(hub.hostOf('web3')).toBe('host1')
+    expect(hub.hostOf('web5')).toBe('host2')
+  })
+
+  it('非法 id 与超量上报被拒', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' } })
+    const many = Array.from({ length: MAX_WORKER_INSTANCES + 1 }, (_, i) => ({ id: `web${i}`, status: 'online' as const }))
+    const ack = hub.registerWorker({ id: 'host1', instances: [{ id: '../etc/passwd', status: 'online' }, ...many] }, 'tok-1')
+    expect(ack.rejected?.some((r) => r.id === '../etc/passwd')).toBe(true)
+    expect(ack.rejected?.some((r) => r.id === '(truncated)')).toBe(true)
+  })
+})
+
+describe('多机：指令台账与派发契约', () => {
+  it('sendControl 在 hub 模式下对未注册目标显式失败（不静默丢弃）', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' } })
+    const r = hub.sendControl('host1', { type: 'restart', payload: {} })
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('未注册')
+  })
+
+  it('入队后进入台账；回执落 done（幂等重复回执不覆盖）', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' } })
+    hub.registerWorker({ id: 'host1', instances: [] }, 'tok-1')
+    const r = hub.enqueueCommand('host1', { type: 'start', payload: { instanceId: 'web3' } })
+    expect(r.ok).toBe(true)
+    expect(hub.commandStatus(r.commandId!)?.status).toBe('pending')
+    expect(hub.completeCommand(r.commandId!, { ok: true })).toBe(true)
+    expect(hub.commandStatus(r.commandId!)?.status).toBe('done')
+    // 重复回执：返回命中但不覆盖首个结果
+    expect(hub.completeCommand(r.commandId!, { ok: false, error: 'late' })).toBe(true)
+    expect(hub.commandStatus(r.commandId!)?.result).toEqual({ ok: true })
+    // 未知 id
+    expect(hub.completeCommand('nope', { ok: true })).toBe(false)
+  })
+
+  it('租约到期后同一指令重新可派发（at-least-once）', () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' }, commandLeaseMs: 20 })
+    hub.registerWorker({ id: 'host1', instances: [] }, 'tok-1')
+    hub.enqueueCommand('host1', { type: 'stop', payload: {} })
+    const claim = hub as unknown as { claimCommands(id: string): Array<{ id: string }> }
+    expect(claim.claimCommands('host1')).toHaveLength(1)
+    // 租约内不重复派发
+    expect(claim.claimCommands('host1')).toHaveLength(0)
+    return new Promise<void>((resolve) => setTimeout(() => {
+      expect(claim.claimCommands('host1')).toHaveLength(1)
+      resolve()
+    }, 30))
+  })
+
+  it('台账落盘后新实例可恢复未完成指令（重启不丢）', () => {
+    const file = join(tmpdir(), `dsh-channel-ledger-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
+    const hub1 = boot({ mode: 'hub', tokens: { host1: 'tok-1' }, ledgerFile: file })
+    hub1.registerWorker({ id: 'host1', instances: [] }, 'tok-1')
+    const r = hub1.enqueueCommand('host1', { type: 'restart', payload: { instanceId: 'web3' } })
+    const hub2 = new ChannelService(new Context(), {
+      tokens: { host1: 'tok-1' }, heartbeatTimeoutMs: 30_000, mode: 'hub', ledgerFile: file,
+    })
+    expect(hub2.commandStatus(r.commandId!)?.status).toBe('pending')
+    expect(hub2.commandStatus(r.commandId!)?.command.type).toBe('restart')
+    rmSync(file, { force: true })
+  })
+})
+
+describe('多机：worker 出站回路（真 HTTP 端到端）', () => {
+  it('注册 → 长轮询取指令 → 本地执行 → 回执进台账', async () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' }, pollWaitMs: 500, heartbeatTimeoutMs: 30_000 })
+    const server = await startHubServer(hub)
+    const worker = new ChannelService(new Context(), {
+      tokens: {}, heartbeatTimeoutMs: 30_000, mode: 'worker', id: 'host1', token: 'tok-1',
+      console: server.url, pollWaitMs: 500, registerIntervalMs: 200,
+    })
+    worker.setWorkerReport(() => [{ id: 'web3', status: 'online' }])
+    const received: string[] = []
+    worker.onControl((cmd) => received.push(cmd.type))
+    try {
+      await until(() => hub.registeredWorkers().some((w) => w.id === 'host1'), 3000, 'worker 注册')
+      await until(() => hub.hostOf('web3') === 'host1', 3000, '实例归属上报')
+      const r = hub.enqueueCommand('host1', { type: 'restart', payload: { instanceId: 'web3' } })
+      expect(r.ok).toBe(true)
+      await until(() => received.includes('restart'), 3000, '指令送达 worker')
+      await until(() => hub.commandStatus(r.commandId!)?.status === 'done', 3000, '回执进台账')
+    } finally {
+      worker[Symbol.dispose]?.()
+      await server.close()
+    }
+  })
+
+  it('路由鉴权：缺头 401、未登记 403、令牌错 401', async () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1' } })
+    const server = await startHubServer(hub)
+    try {
+      const post = (headers: Record<string, string>): Promise<Response> =>
+        fetch(`${server.url}/api/channel/register`, { method: 'POST', headers, body: JSON.stringify({ id: 'host1', instances: [] }) })
+      expect((await post({ 'content-type': 'application/json' })).status).toBe(401)
+      expect((await post({ 'content-type': 'application/json', 'x-instance-id': 'host9', 'x-instance-token': 'x' })).status).toBe(403)
+      expect((await post({ 'content-type': 'application/json', 'x-instance-id': 'host1', 'x-instance-token': 'wrong' })).status).toBe(401)
+      expect((await post({ 'content-type': 'application/json', 'x-instance-id': 'host1', 'x-instance-token': 'tok-1' })).status).toBe(200)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('回执归属校验：他机指令 id 被拒 403', async () => {
+    const hub = boot({ mode: 'hub', tokens: { host1: 'tok-1', host2: 'tok-2' } })
+    hub.registerWorker({ id: 'host1', instances: [] }, 'tok-1')
+    hub.registerWorker({ id: 'host2', instances: [] }, 'tok-2')
+    const r = hub.enqueueCommand('host1', { type: 'stop', payload: {} })
+    const server = await startHubServer(hub)
+    try {
+      const res = await fetch(`${server.url}/api/channel/result`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-instance-id': 'host2', 'x-instance-token': 'tok-2' },
+        body: JSON.stringify({ commandId: r.commandId, ok: true }),
+      })
+      expect(res.status).toBe(403)
+      expect(hub.commandStatus(r.commandId!)?.status).not.toBe('done')
+    } finally {
+      await server.close()
+    }
   })
 })
