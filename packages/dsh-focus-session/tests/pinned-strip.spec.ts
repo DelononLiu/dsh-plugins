@@ -1,5 +1,5 @@
 /**
- * dsh-tabs 左侧栏「置顶」区测试：只读镜像固定会话并注入官方侧边栏
+ * dsh-focus-session 左侧栏「置顶」区测试：只读镜像固定会话并注入官方侧边栏
  * （regionArea 之前），订阅 settings/会话列表变更实时同步，点击打开会话，
  * React 重排/重挂自愈，折叠态经 CSS 隐藏。
  */
@@ -7,6 +7,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { derivePinnedRows, moveInOrder, startPinnedStrip, type PinnedList, type PinnedStripDeps } from '../src/client/PinnedStrip.ts'
 import type { PendingInteractionKind } from '../src/client/session-status'
+import { closeRowMenu } from '../src/client/menu.ts'
+import { closeTagEditor } from '../src/client/tags.ts'
 
 /** 官方 SidebarRoot.module.css 的 hash 类前缀（css-modules 形式）。 */
 const H = (name: string): string => `_${name}_abc123`
@@ -47,6 +49,8 @@ interface Harness {
   settingCbs: Array<() => void>
   listCbs: Array<() => void>
   pendingCbs: Array<() => void>
+  tags: Record<string, { text: string; tone?: string }[]>
+  tagCbs: Array<() => void>
   pending: Record<string, PendingInteractionKind>
 }
 
@@ -60,6 +64,8 @@ function makeHarness(): Harness {
     settingCbs: [],
     listCbs: [],
     pendingCbs: [],
+    tags: {},
+    tagCbs: [],
     pending: {},
   }
 }
@@ -79,6 +85,13 @@ function makeDeps(h: Harness): PinnedStripDeps {
       // 模拟真实 settings.set：写回后触发 settings 订阅 → sync 收敛。
       h.settingCbs.forEach((cb) => cb())
     },
+    getTags: (id) => h.tags[id] ?? [],
+    setTags: (id, tags) => {
+      if (tags.length === 0) delete h.tags[id]
+      else h.tags[id] = tags.map((t) => ({ ...t }))
+      h.tagCbs.forEach((cb) => cb())
+    },
+    subscribeTags: (fn) => { h.tagCbs.push(fn); return () => {} },
     pendingKindOf: (id) => h.pending[id],
     subscribePending: (fn) => { h.pendingCbs.push(fn); return () => {} },
   }
@@ -207,7 +220,7 @@ describe('startPinnedStrip', () => {
 
   it('注入样式含官方折叠（rail）隐藏规则', () => {
     disposers.push(startPinnedStrip(makeDeps(h)))
-    const tag = document.querySelector('style[data-plugin-css="@dsh-tabs/pinned-strip"]')
+    const tag = document.querySelector('style[data-plugin-css="@dsh-focus-session/pinned-strip"]')
     expect(tag).not.toBeNull()
     const css = (tag as HTMLStyleElement).textContent ?? ''
     expect(css).toContain('[data-sidebar-collapsed] [data-dsh-pinned-strip]{display:none}')
@@ -230,7 +243,7 @@ describe('startPinnedStrip', () => {
     expect(strip).not.toBeNull()
     dispose()
     expect(stripEl()).toBeNull()
-    expect(document.querySelector('style[data-plugin-css="@dsh-tabs/pinned-strip"]')).toBeNull()
+    expect(document.querySelector('style[data-plugin-css="@dsh-focus-session/pinned-strip"]')).toBeNull()
   })
 
   it('运行中会话 → 状态槽渲染追逐矩阵，tooltip 带「运行中」；空闲行无点、纯标题', () => {
@@ -302,26 +315,51 @@ describe('startPinnedStrip', () => {
   it('状态样式注入：槽几何/圆点 token/矩阵色/动画 keyframes', () => {
     h.byId.a = { ...h.byId.a, running: true }
     disposers.push(startPinnedStrip(makeDeps(h)))
-    const tag = document.querySelector('style[data-plugin-css="@dsh-tabs/pinned-strip"]')
+    const tag = document.querySelector('style[data-plugin-css="@dsh-focus-session/pinned-strip"]')
     const css = (tag as HTMLStyleElement).textContent ?? ''
     expect(css).toContain('[data-dsh-pinned-status]{flex:none;width:16px;height:20px')
-    expect(css).toContain('dsh-tabs-dot-chase')
+    expect(css).toContain('dsh-focus-dot-chase')
     expect(css).toContain('var(--dsw-alias-state-warn-primary)')
     expect(css).toContain('var(--dsw-static-deepseek-450)')
   })
 
-  it('行尾 × 取消钉：写回 settings 并移除该行（不触发打开）', () => {
-    disposers.push(startPinnedStrip(makeDeps(h)))
-    const unpin = rowEls()[0].querySelector<HTMLElement>('[data-dsh-pinned-unpin]')
-    expect(unpin).not.toBeNull()
-    unpin?.click()
-    expect(h.pinned).toEqual(['b']) // a 被取消钉
-    expect(h.opened).toEqual([]) // × 不打开会话
-    expect(rowIds()).toEqual(['b']) // settings 订阅 → sync 收敛
-    expect(rowTitles()).toEqual(['1. b']) // 重编号
+  it('行尾 ⋯ 菜单「从置顶区移除」：写回 settings 并移除该行（不触发打开）', () => {
+    buildSidebar()
+    h.pinned = ['a']
+    h.ids = ['a']
+    h.byId = { a: { displayTitle: 'A' } }
+    const dispose = startPinnedStrip(makeDeps(h))
+    const button = rowEls()[0].querySelector<HTMLElement>('[data-dsh-row-menu-button]')
+    expect(button).not.toBeNull()
+    button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[data-dsh-row-menu-item]'))
+    expect(items.map((el) => el.dataset.menuItem)).toEqual(['edit-tags', 'unpin'])
+    items.find((el) => el.dataset.menuItem === 'unpin')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(h.pinned).toEqual([])
+    expect(h.opened).toEqual([])
+    closeRowMenu()
+    dispose()
   })
 
-  it('点击行（非 × 区域）打开会话；行元素为 div[role=button]（可拖拽）', () => {
+  it('行尾 ⋯ 菜单「编辑标签…」：打开标签面板（不切换会话）', () => {
+    buildSidebar()
+    h.pinned = ['a']
+    h.ids = ['a']
+    h.byId = { a: { displayTitle: 'A' } }
+    const dispose = startPinnedStrip(makeDeps(h))
+    rowEls()[0].querySelector<HTMLElement>('[data-dsh-row-menu-button]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    Array.from(document.querySelectorAll<HTMLElement>('[data-dsh-row-menu-item]'))
+      .find((el) => el.dataset.menuItem === 'edit-tags')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector('[data-dsh-tag-editor]')).not.toBeNull()
+    expect(h.opened).toEqual([])
+    closeTagEditor()
+    dispose()
+  })
+
+  it('点击行（非菜单按钮区域）打开会话；行元素为 div[role=button]（可拖拽）', () => {
     disposers.push(startPinnedStrip(makeDeps(h)))
     const rows = rowEls()
     expect(rows[0].tagName).toBe('DIV')

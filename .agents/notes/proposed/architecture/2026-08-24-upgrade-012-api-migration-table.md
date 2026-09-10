@@ -8,7 +8,7 @@
 |---|---|---|
 | `dsh-client-runtime`（client 全部 ctx） | **移除**；client 插件 `ClientContext = Context`(cordis) | 5 个 client 插件 import 已改 cordis |
 | ctx.slots 来自 client-runtime | ctx.slots 来自 **ui-renderer**（SlotRegistry） | inject/devDeps 换 ui-renderer |
-| ctx.sessions/workspaces 来自 client-runtime | 来自 **api/session-controller、api/workspace-controller**（Host+Client 成对） | 用 sessions 的插件（dsh-tabs）适配 |
+| ctx.sessions/workspaces 来自 client-runtime | 来自 **api/session-controller、api/workspace-controller**（Host+Client 成对） | 用 sessions 的插件（dsh-focus-tabs）适配 |
 | ctx.settingsScope 来自 client-runtime | 来自 **ui-settings**（`inject=['remote','remote.settings']`） | devDeps + inject 换 ui-settings |
 | ctx.remote 来自 client-runtime | 来自 **api-remotes** | inject + devDeps 换 api-remotes |
 | cordis ^4.0.1 | cordis **^4.0.2** | peer/devDeps bump |

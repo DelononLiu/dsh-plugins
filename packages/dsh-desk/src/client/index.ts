@@ -4,7 +4,7 @@
  * 绑定 my-ui-layout 命名空间（host Config/settings，实例配置），启动工具入口
  * 组装器（把全家桶 data-dsh-*-entry 入口摆到侧栏 foot/会话头顶部）与 slots
  * 型插件显隐（git-graph）。原「布局」设置页（settings.section，含 topbar/
- * tabs/sidebar 显隐与工具开关）已删除（2026-09，功能聚焦 dsh-console/dsh-tabs）
+ * tabs/sidebar 显隐与工具开关）已删除（2026-09，功能聚焦 dsh-console/dsh-focus-tabs）
  * ——区域显隐不再有设置入口，组装器/显隐控制器按配置缺省（全部可见/默认摆位）
  * 工作；官方侧边栏折叠走官方自身 toggle。
  */

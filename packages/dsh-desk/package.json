@@ -39,8 +39,9 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.0.0",
-    "dsh-quick-nav": "workspace:*",
-    "dsh-tabs": "workspace:*"
+    "dsh-focus-session": "workspace:*",
+    "dsh-focus-tabs": "workspace:*",
+    "dsh-quick-nav": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"

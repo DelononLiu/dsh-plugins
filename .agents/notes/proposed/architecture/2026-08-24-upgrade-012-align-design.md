@@ -46,7 +46,7 @@ Host BFF            api-remotes    —— 事件转发 allowlist（应用级唯�
 
 ### B. 官方有 → 迁移/复用官方
 
-**dsh-tabs → 迁移官方会话模型**
+**dsh-focus-tabs → 迁移官方会话模型**
 - 现状：深用 rc.2 ctx.sessions（list.getSnapshot/open）
 - 对齐：改用 alpha.5 api/session-controller 的 ctx.sessions（ClientSessions 新模型）；固定标签（Alt+P）是差异化保留（官方无"固定标签"）
 - 关键：确认新 ctx.sessions API 形态（list/subscribe/open 是否保留）→ 迁移
@@ -70,7 +70,7 @@ Host BFF            api-remotes    —— 事件转发 allowlist（应用级唯�
 2. **dsh-user**（改动小先做，验证管线）
 3. **dsh-channel 拆 controller**（传输保留 + 面规范化）
 4. **dsh-console 拆 controller**（最大）
-5. **dsh-tabs/quick-nav/desk** client 迁移官方装配
+5. **dsh-focus-tabs/quick-nav/desk** client 迁移官方装配
 6. typecheck 全绿 → web5 验证 → 铺开 → skill
 
 ## 风险与注意

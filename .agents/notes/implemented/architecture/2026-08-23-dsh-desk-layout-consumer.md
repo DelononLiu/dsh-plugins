@@ -3,7 +3,7 @@
 Status: implemented
 
 > 现状（2026-09-06）：本 note 的「布局消费方（LayoutConsumer）折叠官方侧边栏」能力
-> 已随设置「布局」页一起删除（功能聚焦 dsh-console/dsh-tabs），见
+> 已随设置「布局」页一起删除（功能聚焦 dsh-console/dsh-focus-tabs），见
 > [remove-layout-settings-page](../../implemented/feature/2026-09-06-remove-layout-settings-page.md)。
 > 组装器开放边界部分仍有效（foot/会话头顶部摆位 + git-graph 显隐，按配置缺省）。
 
@@ -18,7 +18,7 @@ Status: implemented
 
 - 官方 sidebar = `slots.register('sidebar', SidebarRoot)`（single 占位，注册即替换官方整列）；官方 `ctx.layout` 仅 `toggleSidebar()/openDetails()/closeDetails()`（翻转，无 getter）；AppFrame 在折叠时给容器加 `data-sidebar-collapsed` 属性（可读当前状态）。
 - 官方**无 topbar 区域**：quick-nav 实际注册在 `conversation.session.header.actions`（会话头部），tabs 注册在 `conversation.view`（会话视图）。
-- dsh-tabs / dsh-quick-nav 均已 inject `settingsScope`——**settings 本身就是跨插件共享配置**（同 namespace 各自 bind 即可读同一份）。
+- dsh-focus-tabs / dsh-quick-nav 均已 inject `settingsScope`——**settings 本身就是跨插件共享配置**（同 namespace 各自 bind 即可读同一份）。
 
 ## Decision
 
@@ -27,7 +27,7 @@ Status: implemented
 **核心机制：各插件读同一 `my-ui-layout` 配置决定是否注册**，不需要 dsh-desk 提供服务（settingsScope 天然共享）。
 
 - **sidebar 显隐**（dsh-desk client）：订阅 `my-ui-layout`，`sidebar.visible=false` 且当前未折叠（读 `data-sidebar-collapsed`）→ `ctx.layout.toggleSidebar()` 折叠一次；`visible=true` 且已折叠 → 展开。用 DOM 属性对齐翻转语义，避免状态错乱。
-- **tabs 显隐**（dsh-tabs client）：订阅 `my-ui-layout`，`tabs.visible=false` → 注销全部 `conversation.view` 注册；恢复 → 重新注册（实时）。
+- **tabs 显隐**（dsh-focus-tabs client）：订阅 `my-ui-layout`，`tabs.visible=false` → 注销全部 `conversation.view` 注册；恢复 → 重新注册（实时）。
 - **topbar 显隐**（dsh-quick-nav client）：订阅 `my-ui-layout`，`topbar.visible=false` → 注销 `conversation.session.header.actions` 注册；恢复 → 重新注册（实时）。
 - **生效边界**：sidebar/tabs/topbar 均**实时生效**（各插件订阅 settings 变更，注册/注销/折叠即时切换）。
 
@@ -47,9 +47,9 @@ Status: implemented
 
 ## Consequences
 
-- 改动范围：dsh-desk（client：消费方 + 组装器配置化 + 通用性）、dsh-tabs / dsh-quick-nav（读配置决定注册）、dsh-desk 设置 schema 扩展。
+- 改动范围：dsh-desk（client：消费方 + 组装器配置化 + 通用性）、dsh-focus-tabs / dsh-quick-nav（读配置决定注册）、dsh-desk 设置 schema 扩展。
 - 跨插件契约 = `my-ui-layout` 配置 schema（文档同步 §5/§9）。
-- worktree 分支 feat/dsh-desk-layout（依赖链：dsh-tabs/quick-nav 无下层依赖，可并行；dsh-desk 聚合）。
+- worktree 分支 feat/dsh-desk-layout（依赖链：dsh-focus-tabs/quick-nav 无下层依赖，可并行；dsh-desk 聚合）。
 - 测试：dsh-desk 布局消费方（mock settings + DOM 属性）、组装器通用性/配置化、tabs/quick-nav 注册跳过。
 
 ## Implementation（2026-08-23 落地）
@@ -58,6 +58,6 @@ Status: implemented
 - `dsh-desk/src/client/LayoutConsumer.ts`：`startLayoutConsumer`——订阅 `my-ui-layout`，`sidebar.visible=false` 且未折叠（读 `data-sidebar-collapsed`）→ `ctx.layout.toggleSidebar()`；true 且已折叠 → 展开；`applied` 记录防重复翻转。
 - `dsh-desk/src/client/ToolAssembler.ts`：**通用性**——运行时发现全部 `[data-dsh-part="sidebar-entry"]`（不限三家）；**配置化**——`footSpacing` 参数化注入 CSS、`tools.<id>.visible=false` 跳过摆位；CSS 回退静默（失败保持插件原位置，不抛错）。
 - `dsh-desk/src/client/LayoutControl.tsx`：新增工具显隐 + foot 间距配置区；面板样式对齐官方设计语言（bg-layer-2/shadow-lv2/圆角 8/border-l2，修掉原 #1e1e1e 硬编码）。
-- `dsh-tabs` / `dsh-quick-nav` client：bind `my-ui-layout`，`tabs.visible`/`topbar.visible=false` → 跳过 slots 注册（quick-nav 加 settingsScope inject + peerDeps）。
+- `dsh-focus-tabs` / `dsh-quick-nav` client：bind `my-ui-layout`，`tabs.visible`/`topbar.visible=false` → 跳过 slots 注册（quick-nav 加 settingsScope inject + peerDeps）。
 - 测试：dsh-desk 20（含 layout-consumer 5、assembler 通用性/排除/间距 3）、quick-nav client-layout 3；全 workspace 93 测试全绿，typecheck 6 包通过。
 - 提交：worktree feat/dsh-desk-layout。

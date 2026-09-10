@@ -762,7 +762,7 @@ export class ConsoleService extends TypertRemoteService {
           private: true,
           version: '0.0.0',
           dependencies: {},
-          dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desk', 'dsh-quick-nav', 'dsh-tabs'] } },
+          dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desk', 'dsh-quick-nav', 'dsh-focus-session', 'dsh-focus-tabs'] } },
         }, null, 2) + '\n')
       }
       const cordisPath = join(homeProfile, 'cordis.yml')

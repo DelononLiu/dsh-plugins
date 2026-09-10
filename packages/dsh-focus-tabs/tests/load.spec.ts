@@ -1,11 +1,11 @@
 /**
- * dsh-tabs 加载测试：host 插件可加载（settings 服务缺席时跳过注册）。
+ * dsh-focus-tabs 加载测试：host 插件可加载（settings 服务缺席时跳过注册）。
  */
 
 import { describe, expect, it } from 'vitest'
 import { apply } from '../src/index.ts'
 
-describe('dsh-tabs host 入口', () => {
+describe('dsh-focus-tabs host 入口', () => {
   it('settings 服务缺席时 apply 可调用且无异常', () => {
     const ctx = {
       inject(_deps: string[], _cb: (ctx: unknown) => void): void {
@@ -15,7 +15,7 @@ describe('dsh-tabs host 入口', () => {
     expect(() => apply(ctx)).not.toThrow()
   })
 
-  it('settings 服务存在时注册固定会话命名空间', () => {
+  it('settings 服务存在时也不注册命名空间（归 dsh-focus-session）', () => {
     let registered: unknown
     const settings = {
       register(ns: unknown, schema: unknown): void {
@@ -28,7 +28,8 @@ describe('dsh-tabs host 入口', () => {
       },
     } as never
     expect(() => apply(ctx)).not.toThrow()
-    expect(registered).toBeDefined()
-    expect((registered as { ns: unknown }).ns).toMatch(/dsh-tabs-pinned/)
+    // 重复注册同一命名空间会被 settings 服务拒绝：钉住数据的注册权归
+    // dsh-focus-session，本包只读消费。
+    expect(registered).toBeUndefined()
   })
 })

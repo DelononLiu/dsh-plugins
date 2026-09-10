@@ -6,7 +6,7 @@ Status: implemented
 
 设置页左侧导航里的「布局」页（dsh-desk `settings.section`，含 topbar/tabs/
 sidebar 显隐、工具入口与 git-graph 开关）在功能聚焦后不再需要：团队实际使用
-面收敛到 dsh-console 与 dsh-tabs，布局微调页无人配置、徒增设置噪音。
+面收敛到 dsh-console 与 dsh-focus-tabs，布局微调页无人配置、徒增设置噪音。
 
 ## Decision
 
@@ -17,7 +17,7 @@ sidebar 显隐、工具入口与 git-graph 开关）在功能聚焦后不再需�
   型显隐（git-graph）继续以 `my-ui-layout` 配置**缺省**运行（全部可见/默认摆位），
   不再有页面去改——`my-ui-layout` schema 与 `ctx.myUi`（host Config/settings）
   保留（组装器配置仍来自同一命名空间；实例级 cordis 配置仍可写）。
-- **topbar/tabs 显隐回归缺省**：dsh-quick-nav / dsh-tabs 各自读的
+- **topbar/tabs 显隐回归缺省**：dsh-quick-nav / dsh-focus-tabs 各自读的
   `my-ui-layout.layout.topbar/tabs.visible` 不再有 UI 开关——未显式配置即全部
   可见；官方侧边栏折叠/展开走官方自身 toggle（不再有配置驱动的自动折叠）。
 - 旧 LayoutConsumer 能力见
@@ -28,7 +28,7 @@ sidebar 显隐、工具入口与 git-graph 开关）在功能聚焦后不再需�
 
 - 保留页面但隐藏入口：功能已聚焦，留着配置面只会误导「还能调布局」。
 - 连 `my-ui-layout`/`ctx.myUi` 一起删：组装器/slots 控制器仍读该命名空间与
-  实例 Config，删除会牵动 schema/service/quick-nav/dsh-tabs 的读取契约——超出
+  实例 Config，删除会牵动 schema/service/quick-nav/dsh-focus-tabs 的读取契约——超出
   「删页面」的范围，未做。
 
 ## Consequences

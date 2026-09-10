@@ -1,8 +1,8 @@
 /**
- * dsh-tabs 会话 tab 状态小圆点助手：在会话 tab（button[role=tab]，文本含
+ * dsh-focus-tabs 会话 tab 状态小圆点助手：在会话 tab（button[role=tab]，文本含
  * SESSION_MARK）里维护一个前置状态小圆点，幂等同步。
  *
- * 幂等约束：dsh-tabs 的 applyActive 挂在 body 级 MutationObserver（childList+
+ * 幂等约束：dsh-focus-tabs 的 applyActive 挂在 body 级 MutationObserver（childList+
  * subtree）上，**任何结构变更都会再触发一次 applyActive**。因此本函数只在
  * 「点不存在→插入」时产生一次结构变更，收敛后（点已存在且状态相同）零变更、
  * 状态变化只改 data-state 属性（属性变更不在观察范围），避免自触发死循环。

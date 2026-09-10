@@ -44,8 +44,10 @@
               DSH_RELAY_AGENT: web2
     - id: dsh-desk
       name: dsh-desk
-    - id: dsh-tabs
-      name: dsh-tabs
+    - id: dsh-focus-session
+      name: dsh-focus-session
+    - id: dsh-focus-tabs
+      name: dsh-focus-tabs
     - id: dsh-quick-nav
       name: dsh-quick-nav
 - insert:

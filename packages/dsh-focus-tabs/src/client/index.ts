@@ -1,9 +1,9 @@
 /**
- * dsh-tabs：UI·会话标签页（client 半区）——tab 行只显示 Alt+P 固定的会话。
+ * dsh-focus-tabs：UI·会话标签页（client 半区）——tab 行只显示 Alt+P 固定的会话。
  *
  * 保持官方行（conversation.view 条目，与官方「对话/轨迹」同行）：
  * - Alt+P 固定/取消固定当前会话；编号「1. 标题」；会话 tab 无 ×——取消钉
- *   收敛到侧栏置顶区（行尾 × / 拖拽排序，见 PinnedStrip），tab 行 = 纯切换器。
+ *   收敛到侧栏置顶区（行尾 × / 拖拽排序，见 dsh-focus-session 的置顶区），tab 行 = 纯切换器。
  * - 点击会话 tab → 切到绑定的会话（官方 setView + SessionView open）
  * - 选中划线（单一，纯派生）：当前会话固定 → 会话 tab 蓝色划线（官方样式）
  *   并抑制官方「对话/轨迹」划线；未固定 → 官方划线。划线 = 固定且当前，
@@ -11,8 +11,10 @@
  * - 点自己的 tab：拦截官方 setView（防占位）+ prune 清残留（轨迹）+ 借官方
  *   「对话」tab 的 setView('chat') 切回对话视图（官方可靠路径）。
  * - 点击左侧会话 → 默认「对话」（onCurrentChange 清新当前残留）。
- * - 左侧栏「会话/工作区列表」之上注入只读「置顶」区（PinnedStrip）：镜像同一
- *   固定列表（settings dsh-tabs-pinned），点击 = ctx.sessions.open 切会话。
+ * - 左侧栏「置顶」区与「活跃」区**不在本包**：会话关注数据（钉住列表
+ *   `dsh-focus-pinned` + 胶囊标签 `dsh-focus-tags`）与两个侧栏区由
+ *   dsh-focus-session 拥有并渲染；本包只读同一份钉住列表渲染顶部 tab 行，
+ *   因此钉序/标签在两侧天然同步。
  */
 
 import { createElement } from 'react'
@@ -23,7 +25,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { SessionView, type SessionViewInjected } from './SessionView'
-import { startPinnedStrip } from './PinnedStrip'
 import { normalizePendingKind, resolveRowStatus, indexRunningSubagents, type SummaryRow, type PendingInteractionKind } from './session-status'
 import { renderTabStatusDot, TAB_STATUS_ATTR } from './tab-status'
 
@@ -33,18 +34,18 @@ export const inject = ['slots', 'sessions', 'settingsScope', 'uiSession']
 /** 会话 tab 标识标记（区分官方「对话/轨迹」tab）。 */
 const SESSION_MARK = '\u200b'
 /** 会话 tab 划线类名。 */
-const ACTIVE_CLASS = 'dsh-tabs-active'
+const ACTIVE_CLASS = 'dsh-focus-tabs-active'
 /** 抑制官方划线状态类名（body 级：当前会话固定时生效，单一划线）。 */
-const PINNED_ACTIVE_CLASS = 'dsh-tabs-pinned-active'
-/** 固定会话 settings 命名空间（与 host PINNED_NAMESPACE 对应）。 */
-const PINNED_NS = 'dsh-tabs-pinned'
+const PINNED_ACTIVE_CLASS = 'dsh-focus-tabs-pinned-active'
+/** 钉住列表 settings 命名空间（由 dsh-focus-session 拥有并注册；本包只读写）。 */
+const PINNED_NS = 'dsh-focus-pinned'
 
 /** settingsScope 绑定的固定列表。 */
 interface PinnedValue { pinned?: string[] }
 
 /**
  * Client 插件体：Alt+P 固定管理 + 动态注册固定会话 tab + 选中划线 + 侧栏置顶区
- * （PinnedStrip，取消钉/排序的管理面）。
+ * （dsh-focus-session 的置顶区，取消钉/排序的管理面）。
  * @param ctx - client 根上下文。
  */
 
@@ -65,6 +66,23 @@ function sessionsOf(ctx: { sessions: unknown }): TabsSessions {
 export function apply(ctx: ClientContext): void {
   const settings = ctx.settingsScope.bind<{ pinned: string[] }>({ namespace: PINNED_NS })
   const pinnedOf = (): string[] => (settings.getSnapshot().value as PinnedValue | undefined)?.pinned ?? []
+
+  // 依赖诊断：`dsh-focus-pinned` 由 dsh-focus-session 注册（会话关注数据的所有者）。
+  // 只装本包时 scope 会停在 'unavailable'，本包会静默显示空标签行、Alt+P 写入也
+  // 静默失败——这里提示一次，避免无声失效（成对安装是部署约束，见拆分 note）。
+  let warnedUnavailable = false
+  const warnIfNamespaceUnavailable = (): void => {
+    if (warnedUnavailable) return
+    if ((settings.getSnapshot() as { status?: string }).status !== 'unavailable') return
+    warnedUnavailable = true
+    console.warn(
+      '[dsh-focus-tabs] settings 命名空间 "dsh-focus-pinned" 不可用——'
+      + '请确认已安装 dsh-focus-session（会话钉住数据的拥有者）。会话标签行将为空。',
+    )
+  }
+  const unsubNamespaceDiagnostics = settings.subscribe(warnIfNamespaceUnavailable)
+  ctx.effect(() => () => unsubNamespaceDiagnostics(), 'dsh-focus-tabs: pinned namespace diagnostics')
+  warnIfNamespaceUnavailable()
 
   // 会话 tab/置顶区共用：会话 pending 交互 kind（无则 undefined）。
   const pendingKindOf = (id: string): PendingInteractionKind | undefined => {
@@ -150,11 +168,11 @@ export function apply(ctx: ClientContext): void {
     observer.disconnect()
     style.remove()
     document.body.classList.remove(PINNED_ACTIVE_CLASS)
-  }, 'dsh-tabs: active-tab observer')
+  }, 'dsh-focus-tabs: active-tab observer')
 
   // 会话 tab 状态圆点：pending 变更（审批/plan/提问）也要实时刷新。
   const unsubTabPending = ctx.uiSession.pendingInteractions.subscribe(() => applyActive())
-  ctx.effect(() => () => unsubTabPending(), 'dsh-tabs: tab status pending sync')
+  ctx.effect(() => () => unsubTabPending(), 'dsh-focus-tabs: tab status pending sync')
 
   // —— 会话切换（含左侧点击）：清新当前残留视图（如轨迹）→ 默认对话 ——
   // 需求：点击左侧会话默认在「对话」。列表增删时 current 未变则不误清。
@@ -186,7 +204,7 @@ export function apply(ctx: ClientContext): void {
     applyActive()
   }
   const unsubCurrent = sessionsOf(ctx).list.subscribe(onCurrentChange)
-  ctx.effect(() => () => unsubCurrent(), 'dsh-tabs: current sync')
+  ctx.effect(() => () => unsubCurrent(), 'dsh-focus-tabs: current sync')
   {
     // 初始：按当前会话是否固定对齐状态；未固定 → 记录对话记忆。
     const current = sessionsOf(ctx).list.getSnapshot().current
@@ -269,7 +287,7 @@ export function apply(ctx: ClientContext): void {
     }
   }
   document.addEventListener('click', onClickCapture, true)
-  ctx.effect(() => () => document.removeEventListener('click', onClickCapture, true), 'dsh-tabs: tab click delegation')
+  ctx.effect(() => () => document.removeEventListener('click', onClickCapture, true), 'dsh-focus-tabs: tab click delegation')
 
   // —— Alt+P 固定/取消固定；Alt+1..9 切到第 N 个固定 tab ——
   const onKeyDown = (e: KeyboardEvent): void => {
@@ -305,7 +323,7 @@ export function apply(ctx: ClientContext): void {
     applyActive()
   }
   window.addEventListener('keydown', onKeyDown)
-  ctx.effect(() => () => window.removeEventListener('keydown', onKeyDown), 'dsh-tabs: Alt+P pin toggle')
+  ctx.effect(() => () => window.removeEventListener('keydown', onKeyDown), 'dsh-focus-tabs: Alt+P pin toggle')
 
   // —— 动态注册固定的会话 tab ——
   // 每次注册都须经 slots.inject 包装：conversation.view 仅在声明它的
@@ -411,17 +429,4 @@ export function apply(ctx: ClientContext): void {
       clearAll()
     }
   })
-
-  // —— 左侧栏「置顶」区：固定会话管理面（数据 = 同一 dsh-tabs-pinned：拖拽排序 /
-  // 行尾 × 取消钉写回 settings，tab 行顺序自动同步；点击打开，见 PinnedStrip）——
-  const disposePinnedStrip = startPinnedStrip({
-    getPinned: () => pinnedOf(),
-    subscribeSettings: (fn) => settings.subscribe(fn),
-    sessions: sessionsOf(ctx).list,
-    open: (id: string) => { sessionsOf(ctx).open(id as never) },
-    setPinned: (ids) => settings.set('pinned', [...ids]),
-    pendingKindOf,
-    subscribePending: (fn) => ctx.uiSession.pendingInteractions.subscribe(fn),
-  })
-  ctx.effect(() => () => disposePinnedStrip(), 'dsh-tabs: sidebar pinned strip')
 }

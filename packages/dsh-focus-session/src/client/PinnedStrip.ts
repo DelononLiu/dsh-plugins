@@ -1,18 +1,18 @@
 /**
- * dsh-tabs 左侧栏「置顶」区（client 半区，DOM 注入）——官方左侧栏「会话/
- * 工作区列表」之上的固定会话区，镜像 dsh-tabs 的固定会话列表（同一份
- * `dsh-tabs-pinned` settings 数据，天然两边同步）。定位 = 钉子集的**管理面**：
+ * dsh-focus-session 左侧栏「置顶」区（client 半区，DOM 注入）——官方左侧栏「会话/
+ * 工作区列表」之上的固定会话区，镜像 dsh-focus-session 的固定会话列表（同一份
+ * `dsh-focus-pinned` settings 数据，天然两边同步）。定位 = 钉子集的**管理面**：
  * 拖拽排序 + 行尾 × 取消钉都写回 settings → 顶部会话 tab 行只消费同一顺序
  * （tab 行编号 / Alt+1..9 自动跟随），两处各司其职。
  *
  * 数据/交互契约（与会话 tab 行同源，见 index.ts）：
- * - 固定列表 = settings 命名空间 `dsh-tabs-pinned` 的 `pinned`（Alt+P 钉/取消
+ * - 固定列表 = settings 命名空间 `dsh-focus-pinned` 的 `pinned`（Alt+P 钉/取消
  *   钉由会话 tab 行负责；本区行尾 × 是同语义的第二个取消入口）。
  * - 只显示仍存在的会话（按当前会话快照的 ids 过滤）＋ 标题取 byId.displayTitle。
  * - 行可见文本带 `N.` 编号前缀（钉序第 N，与会话 tab 行编号一致；行增删自动
  *   重编号）；tooltip/aria-label 保持纯标题。
  * - 点击行 = 打开该会话（ctx.sessions.open，与点击左侧会话同路径——切换后
- *   dsh-tabs 自己的 current 订阅会更新 tab 行划线等派生状态）。
+ *   dsh-focus-session 自己的 current 订阅会更新 tab 行划线等派生状态）。
  * - 拖拽排序：整行 HTML5 拖拽，drop 时把可见钉序写回 settings（同步触发 tab
  *   行顺序更新）；行内不实时搬移 DOM（避免与 sync 的重排打架）。
  *
@@ -26,6 +26,13 @@
 
 import { resolveRowStatus, indexRunningSubagents } from './session-status'
 import type { SummaryRow, PendingInteractionKind, RowStatusView } from './session-status'
+import {
+  TAG_EDITOR_ATTR, TAG_LIST_ATTR, closeTagEditor, injectTagCss, openTagEditor, renderTagPills,
+} from './tags'
+import {
+  MENU_ATTR, MENU_BUTTON_ATTR, closeRowMenu, injectMenuCss, makeMenuButton, openRowMenu,
+} from './menu'
+import type { SessionTag } from './tags'
 
 /** 置顶区根标记（幂等定位 + 自愈锚点）。 */
 export const PINNED_STRIP_ATTR = 'data-dsh-pinned-strip'
@@ -33,8 +40,6 @@ export const PINNED_STRIP_ATTR = 'data-dsh-pinned-strip'
 const PINNED_LABEL = '置顶区'
 /** 行按钮标记。 */
 const PINNED_ROW_ATTR = 'data-dsh-pinned-row'
-/** 行内取消钉按钮标记。 */
-const UNPIN_ATTR = 'data-dsh-pinned-unpin'
 /** 拖拽源行标记（置灰）。 */
 const DRAGGING_ATTR = 'data-dsh-pinned-dragging'
 /** 拖放落点标记（值 before/after）。 */
@@ -42,7 +47,7 @@ const DROP_ATTR = 'data-dsh-pinned-drop'
 /** 当前会话行标记（行内标题着色，对齐会话 tab 的划线色）。 */
 const PINNED_CURRENT_ATTR = 'data-dsh-pinned-current'
 /** 幂等样式标签标记（同 dsh-desk `data-plugin-css` 约定）。 */
-const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-tabs/pinned-strip"]'
+const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/pinned-strip"]'
 
 /** 置顶区需要的最小会话列表快照（绕开官方 SessionId 品牌类型）。 */
 export interface PinnedListSnapshot {
@@ -80,6 +85,12 @@ export interface PinnedStripDeps {
   pendingKindOf(id: string): PendingInteractionKind | undefined
   /** 订阅 pending 交互变更。 */
   subscribePending(fn: () => void): () => void
+  /** 读某会话的胶囊标签（settings `dsh-focus-tags`）。 */
+  getTags(sessionId: string): readonly SessionTag[]
+  /** 写某会话的胶囊标签（整份映射由调用方回写 settings）。 */
+  setTags(sessionId: string, tags: readonly SessionTag[]): void
+  /** 订阅标签变更。 */
+  subscribeTags(fn: () => void): () => void
 }
 
 /**
@@ -146,15 +157,12 @@ function pinnedCss(): string {
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot[data-state='warning']{color:var(--dsw-alias-state-warn-primary)}`,
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-dot[data-state='done']{color:var(--dsw-alias-state-success-primary)}`,
     `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix{flex:none;width:10px;height:10px;color:var(--dsw-static-deepseek-450)}`,
-    `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix .cell{fill:currentColor;opacity:.15;animation:dsh-tabs-dot-chase 1s infinite}`,
-    `@keyframes dsh-tabs-dot-chase{0%,12.4%{opacity:1}12.5%,24.9%{opacity:.6}25%,37.4%{opacity:.35}37.5%,100%{opacity:.15}}`,
+    `[${PINNED_STRIP_ATTR}] .dsh-pinned-matrix .cell{fill:currentColor;opacity:.15;animation:dsh-focus-dot-chase 1s infinite}`,
+    `@keyframes dsh-focus-dot-chase{0%,12.4%{opacity:1}12.5%,24.9%{opacity:.6}25%,37.4%{opacity:.35}37.5%,100%{opacity:.15}}`,
     // 行管理控件：× 取消钉（hover/focus-within 显示）+ 拖拽源置灰 + 落点指示线。
     `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${DRAGGING_ATTR}]{opacity:.45}`,
     `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${DROP_ATTR}='before']{box-shadow:inset 0 2px 0 0 var(--dsw-alias-state-business-primary)}`,
     `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${DROP_ATTR}='after']{box-shadow:inset 0 -2px 0 0 var(--dsw-alias-state-business-primary)}`,
-    `[${PINNED_STRIP_ATTR}] [${UNPIN_ATTR}]{flex:none;display:none;align-items:center;justify-content:center;width:20px;height:20px;margin-left:2px;padding:0;border:none;border-radius:50%;background:transparent;cursor:pointer;color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:13px;line-height:13px}`,
-    `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}]:hover [${UNPIN_ATTR}],[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}]:focus-within [${UNPIN_ATTR}]{display:inline-flex}`,
-    `[${PINNED_STRIP_ATTR}] [${UNPIN_ATTR}]:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}`,
     // 官方折叠（rail）：AppFrame 折叠时给 frame 加 data-sidebar-collapsed，整区隐藏。
     `[data-sidebar-collapsed] [${PINNED_STRIP_ATTR}]{display:none}`,
   ].join('')
@@ -165,8 +173,8 @@ function injectCss(): () => void {
   if (typeof document === 'undefined') return () => {}
   if (document.querySelector(CSS_TAG_SELECTOR) !== null) return () => {}
   const tag = document.createElement('style')
-  tag.dataset.plugin = 'dsh-tabs'
-  tag.dataset.pluginCss = '@dsh-tabs/pinned-strip'
+  tag.dataset.plugin = 'dsh-focus-session'
+  tag.dataset.pluginCss = '@dsh-focus-session/pinned-strip'
   tag.textContent = pinnedCss()
   document.head.appendChild(tag)
   return () => tag.remove()
@@ -176,7 +184,7 @@ function injectCss(): () => void {
  * 官方侧边栏座位：sidebar 列的 root（logoRow 的 parentElement，兜底首个子元素）
  * 与其内 regionArea（会话/工作区浏览区，置顶区插到它之前 = 列表上方）。
  */
-function sidebarSeat(doc: Document): { root: HTMLElement; region: HTMLElement } | null {
+export function sidebarSeat(doc: Document): { root: HTMLElement; region: HTMLElement } | null {
   const column = doc.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')
   if (column === null) return null
   const logoHost = column.querySelector('[class*="logoRow"]')?.parentElement
@@ -216,16 +224,15 @@ function makeRow(doc: Document, row: PinnedRow): HTMLElement {
   const statusSlot = doc.createElement('span')
   statusSlot.setAttribute('data-dsh-pinned-status', '')
   el.appendChild(statusSlot)
+  // 行首胶囊标签容器（状态点之后、标题之前——`#功能 会话标题` 形态）。
+  const tagList = doc.createElement('span')
+  tagList.setAttribute(TAG_LIST_ATTR, '')
+  el.appendChild(tagList)
   const title = doc.createElement('span')
   title.setAttribute('data-dsh-pinned-title', '')
   el.appendChild(title)
-  const unpin = doc.createElement('button')
-  unpin.type = 'button'
-  unpin.setAttribute(UNPIN_ATTR, '')
-  unpin.title = '取消置顶'
-  unpin.setAttribute('aria-label', '取消置顶')
-  unpin.textContent = '×'
-  el.appendChild(unpin)
+  // 行尾「⋯」菜单入口（官方工作区行尾图标按钮形态；展开项见 onClickDoc）。
+  el.appendChild(makeMenuButton(doc))
   return el
 }
 
@@ -233,7 +240,7 @@ function makeRow(doc: Document, row: PinnedRow): HTMLElement {
  *  不一致才重建一次。syncRows 由 body 级 MutationObserver 驱动——若每次 sync
  *  都无条件 replaceChildren+新建，自我写入会再触发 observer，形成微任务自触发
  *  死循环，渲染主线程被饿死（整页卡死）。本函数是收敛性的唯一保证点。 */
-function syncStatusSlot(slot: HTMLElement, status: RowStatusView, doc: Document): void {
+export function syncStatusSlot(slot: HTMLElement, status: RowStatusView, doc: Document): void {
   const want = status.dot
   const first = slot.firstElementChild
   const settled =
@@ -346,6 +353,9 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
     // 可见文本带编号前缀（钉序第 N，与会话 tab 行编号一致）；tooltip/aria 保持纯标题。
     const label = `${i + 1}. ${row.title}`
     if (titleEl !== null && titleEl.textContent !== label) titleEl.textContent = label
+    // 胶囊标签（幂等渲染：同内容零 DOM 写）。
+    const tagListEl = rowEl.querySelector<HTMLElement>(`[${TAG_LIST_ATTR}]`)
+    if (tagListEl !== null) renderTagPills(tagListEl, deps.getTags(row.id), doc)
     // 状态槽：永远存在（16px 保位对齐）；幂等更新（一致不改 DOM，防 observer 自触发死循环）。
     if (statusSlot !== null) syncStatusSlot(statusSlot, status, doc)
   }
@@ -368,11 +378,14 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
   if (typeof document === 'undefined') return () => {}
   const doc = document
   const removeCss = injectCss()
+  const removeTagCss = injectTagCss()
+  const removeMenuCss = injectMenuCss()
   const stripRef: { el: HTMLElement | null } = { el: null }
   const sync = (): void => syncRows(deps, doc, stripRef)
   const unsubSettings = deps.subscribeSettings(sync)
   const unsubSessions = deps.sessions.subscribe(sync)
   const unsubPending = deps.subscribePending(sync)
+  const unsubTags = deps.subscribeTags(sync)
   const observer = new MutationObserver((records) => {
     // 只响应置顶区之外的变更（React 重排/会话页流式渲染等）——置顶区内的
     // 写入全是我们自己 sync 产生的，忽略它们。否则「sync 写 DOM → observer
@@ -391,20 +404,50 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
   // —— 行交互（容器/文档级事件委托：行可被 sync 反复重建，委托在文档级一次挂载）——
   const rowOf = (target: EventTarget | null): HTMLElement | null =>
     target instanceof Element ? target.closest<HTMLElement>(`[${PINNED_ROW_ATTR}]`) : null
-  const unpinOf = (target: EventTarget | null): HTMLElement | null =>
-    target instanceof Element ? target.closest<HTMLElement>(`[${UNPIN_ATTR}]`) : null
+  const menuButtonOf = (target: EventTarget | null): HTMLElement | null =>
+    target instanceof Element ? target.closest<HTMLElement>(`[${MENU_BUTTON_ATTR}]`) : null
   const insideStrip = (target: EventTarget | null): boolean =>
     target instanceof Element && target.closest(`[${PINNED_STRIP_ATTR}]`) !== null
 
-  // 点击：× → 取消钉（写回 settings）；行其它区域 → 打开会话。
+  /** 打开该行的行菜单（编辑标签 / 从置顶区移除）——置顶区不支持"添加到置顶区"。 */
+  const openMenuFor = (row: HTMLElement, button: HTMLElement | null, id: string): void => {
+    openRowMenu({
+      anchor: row,
+      button,
+      items: [
+        {
+          id: 'edit-tags',
+          label: '编辑标签…',
+          onSelect: () => {
+            openTagEditor({
+              sessionId: id,
+              anchor: row,
+              getTags: (sid) => deps.getTags(sid),
+              setTags: (sid, tags) => deps.setTags(sid, tags),
+            })
+          },
+        },
+        {
+          id: 'unpin',
+          label: '从置顶区移除',
+          onSelect: () => {
+            deps.setPinned([...deps.getPinned()].filter((x) => String(x) !== id))
+          },
+        },
+      ],
+    })
+  }
+
+  // 点击：行尾「⋯」→ 行菜单；行其它区域 → 打开会话。
   const onClickDoc = (e: MouseEvent): void => {
     if (!insideStrip(e.target)) return
     const row = rowOf(e.target)
     if (row === null) return
     const id = row.dataset.sessionId ?? ''
-    if (unpinOf(e.target) !== null) {
+    if (menuButtonOf(e.target) !== null) {
       e.preventDefault()
-      if (id !== '') deps.setPinned([...deps.getPinned()].filter((x) => String(x) !== id))
+      e.stopPropagation()
+      if (id !== '') openMenuFor(row, menuButtonOf(e.target), id)
       return
     }
     if (id !== '') deps.open(id)
@@ -413,7 +456,7 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
   const onKeyDownDoc = (e: KeyboardEvent): void => {
     if (e.key !== 'Enter' && e.key !== ' ') return
     if (!insideStrip(e.target)) return
-    if (unpinOf(e.target) !== null) return
+    if (menuButtonOf(e.target) !== null) return
     const row = rowOf(e.target)
     if (row === null) return
     e.preventDefault()
@@ -478,6 +521,18 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
   }
   doc.addEventListener('click', onClickDoc)
   doc.addEventListener('keydown', onKeyDownDoc)
+  // 点标签面板之外 → 关闭面板。按钮自身的 click 已由 onClickDoc 处理并由本
+  // 监听器按 target 排除（同节点监听器不受 stopPropagation 影响，故用 target 判据）。
+  const onDocClickCloseEditor = (e: MouseEvent): void => {
+    const target = e.target
+    if (target instanceof Element
+      && (target.closest(`[${TAG_EDITOR_ATTR}]`) !== null
+        || target.closest(`[${MENU_ATTR}]`) !== null
+        || target.closest(`[${MENU_BUTTON_ATTR}]`) !== null)) return
+    closeTagEditor()
+    closeRowMenu()
+  }
+  doc.addEventListener('click', onDocClickCloseEditor)
   doc.addEventListener('dragstart', onDragStartDoc)
   doc.addEventListener('dragover', onDragOverDoc)
   doc.addEventListener('drop', onDropDoc)
@@ -488,16 +543,22 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
     unsubSettings()
     unsubSessions()
     unsubPending()
+    unsubTags()
     observer.disconnect()
     doc.removeEventListener('click', onClickDoc)
+    doc.removeEventListener('click', onDocClickCloseEditor)
     doc.removeEventListener('keydown', onKeyDownDoc)
     doc.removeEventListener('dragstart', onDragStartDoc)
     doc.removeEventListener('dragover', onDragOverDoc)
     doc.removeEventListener('drop', onDropDoc)
     doc.removeEventListener('dragend', onDragEndDoc)
     clearDrop()
+    closeTagEditor()
+    closeRowMenu()
     stripRef.el?.remove()
     stripRef.el = null
     removeCss()
+    removeTagCss()
+    removeMenuCss()
   }
 }

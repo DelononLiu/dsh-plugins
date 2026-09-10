@@ -10,8 +10,9 @@
     "dsh-channel": "link:/home/long2015/Code/dsh-plugins/packages/dsh-channel",
     "dsh-console": "link:/home/long2015/Code/dsh-plugins/packages/dsh-console",
     "dsh-desk": "link:/home/long2015/Code/dsh-plugins/packages/dsh-desk",
+    "dsh-focus-session": "link:/home/long2015/Code/dsh-plugins/packages/dsh-focus-session",
+    "dsh-focus-tabs": "link:/home/long2015/Code/dsh-plugins/packages/dsh-focus-tabs",
     "dsh-quick-nav": "link:/home/long2015/Code/dsh-plugins/packages/dsh-quick-nav",
-    "dsh-tabs": "link:/home/long2015/Code/dsh-plugins/packages/dsh-tabs",
     "dsh-user": "link:/home/long2015/Code/dsh-plugins/packages/dsh-user"
   },
   "dsh": {

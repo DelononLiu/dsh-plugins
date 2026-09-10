@@ -6,18 +6,19 @@
   "kernel": "@deepseek-ai/dsh@0.1.2-rc.1",
   "bundles": {
     "@deepseek-ai/dsh-base": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1",
     "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
-    "dsh-user": "0.0.0",
-    "dsh-channel": "0.0.0",
-    "dsh-console": "0.0.0",
-    "dsh-quick-nav": "0.0.0",
-    "dsh-tabs": "0.0.0",
-    "dsh-desk": "0.0.0",
-    "dsh-better-sidebar": "0.18.0-alpha.0",
     "@linxin666/dsh-client-ui-git-graph": "0.3.12",
     "@linxin666/dsh-client-ui-skill-explorer": "0.3.12",
     "@linxin666/dsh-ssh": "0.3.12",
-    "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1"
+    "dsh-better-sidebar": "0.18.0-alpha.0",
+    "dsh-channel": "0.0.0",
+    "dsh-console": "0.0.0",
+    "dsh-desk": "0.0.0",
+    "dsh-focus-session": "0.0.0",
+    "dsh-focus-tabs": "0.0.0",
+    "dsh-quick-nav": "0.0.0",
+    "dsh-user": "0.0.0"
   },
   "vendored": {}
 }

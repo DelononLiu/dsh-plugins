@@ -1,7 +1,7 @@
 {
-  "name": "dsh-tabs",
+  "name": "dsh-focus-session",
   "version": "0.0.0",
-  "description": "UI·会话标签页：Alt+P 固定会话为 tab（对话/轨迹行），点击切换会话",
+  "description": "UI·会话关注层：侧栏置顶区 + 活跃区（最近活跃会话）+ 会话标题胶囊标签；拥有钉住/标签数据（settings 持久化）",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -21,7 +21,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-tabs",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-focus-session",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -29,31 +29,32 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-api-session-controller",
-        "@deepseek-ai/dsh-client-ui-renderer"
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-settings"
       ],
       "platform": "web"
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.2-rc.1"
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-session": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@types/node": "^22.0.0",
-    "typescript": "^6.0.3",
-    "vitest": "^3.0.0",
-    "react": "^19.0.0",
-    "@types/react": "^19.0.0",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/schemastery": "^3.0.0",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-api-session-controller": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-client-store": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-client-ui-session": "^0.1.2-rc.1",
-    "happy-dom": "^20.11.6"
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
+    "@types/node": "^22.0.0",
+    "happy-dom": "^20.11.6",
+    "typescript": "^6.0.3",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.0.0"
   }
 }

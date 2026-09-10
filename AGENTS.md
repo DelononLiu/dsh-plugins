@@ -36,7 +36,7 @@ pnpm test         # pnpm -r test
 
 ```
 业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
-UI                         dsh-desk（布局平台 + 工具入口组装器）· dsh-quick-nav（顶部区域）· dsh-tabs（tab 区）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
+UI                         dsh-desk（布局平台 + 工具入口组装器）· dsh-quick-nav（顶部区域）· dsh-focus-session（侧栏关注区：置顶/活跃/标签）· dsh-focus-tabs（tab 行）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
 管理组件                    dsh-console（档案/生命周期/部署编排/inbox，升级回滚为遗留项）+ 社区 dsh-prometheus
 系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· LLM 记忆（社区 dsh-memento）
 内核                        官方 deepseek-harness（0.1.2-rc.1，2026-09 对齐）
@@ -96,7 +96,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - **main 保持稳定基线**：小改动/文档可直接在 main 提交（原子、单功能）；**大功能（跨多文件/多提交）一律走 worktree 分支**，分支命名 `feat/<功能名>`。
 - 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
 - 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
-- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console（含 console-ui client 半区）→ dsh-quick-nav（type-only 依赖 channel）→ dsh-desk（聚合 nav/tabs）；**dsh-tabs 无内部依赖，独立**。无依赖关系的插件可并行。
+- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console（含 console-ui client 半区）→ dsh-quick-nav（type-only 依赖 channel）→ dsh-desk（聚合 nav/focus-session/focus-tabs）；**dsh-focus-session / dsh-focus-tabs 独立**（focus-tabs 只读 focus-session 的 settings 数据，无编译期依赖）。无依赖关系的插件可并行。
 
 ## 派发编辑型 subagent（编辑护栏）
 
