@@ -259,6 +259,8 @@ export class ConsoleService extends TypertRemoteService {
   private static readonly PROBE_INTERVAL_MS = 15_000
   /** 直连探测请求超时（ms）：目标 hang 时中止，避免挂起请求堆积。 */
   private static readonly PROBE_TIMEOUT_MS = 5_000
+  /** 宿主状态同步周期（ms）：拉取守护本机视图并入实例表（同机 local 模式的状态来源）。 */
+  private static readonly HOST_SYNC_INTERVAL_MS = 5_000
   /** 升级：快照保留份数（滚动删旧；最新一份即回滚点）。 */
   private static readonly UPGRADE_SNAPSHOT_KEEP = 3
   /** 升级：kill 旧进程后等待退出的宽限（ms），超时补 SIGKILL。 */
@@ -484,6 +486,13 @@ export class ConsoleService extends TypertRemoteService {
         // console 角色（多机 hub）：worker 注册落档案（归属 + 状态）并入 inbox。
         const unsubscribeRegister = ctx.channel.onRegister((report) => this.handleWorkerRegister(report))
         ctx.effect(() => unsubscribeRegister)
+        // 状态同步（同机 local 模式）：本管理端看不到的实例（新模型创建、不在 launch 表）
+        // 的状态由宿主守护给出——直连守护控制端口拉它的本机视图，避免 UI 把在跑的实例
+        // 一律显示离线。多机 hub 模式下由 worker 注册载荷上报，两条路径互补。
+        void this.syncHostStatuses()
+        const hostSyncTimer = setInterval(() => void this.syncHostStatuses(), ConsoleService.HOST_SYNC_INTERVAL_MS)
+        hostSyncTimer.unref?.()
+        ctx.effect(() => () => clearInterval(hostSyncTimer))
         // 等 webServer 服务可用后挂 HTTP 端点（ctx.inject 原生等待；
         // daemon/instance 角色部署的无 webserver profile 不会走到这里）。
         // 注意用注入后的 ctx（webServer 只在注入 fiber 的 scope 可见）。
@@ -698,6 +707,50 @@ export class ConsoleService extends TypertRemoteService {
       body: `主机 ${host}${report.version !== undefined ? `（发行包 ${report.version}）` : ''} 上报实例：${report.instances.map((i) => `${i.id}(${i.status}${i.version !== undefined ? `/${i.version}` : ''})`).join('、') || '（无）'}`,
     })
     this.log(`[dsh-console] worker ${host} 注册：实例 ${report.instances.map((i) => i.id).join(',') || '（无）'}`, { scope: 'control' })
+  }
+
+  /**
+   * 从各宿主守护拉取本机实例状态并入 channel 实例表（状态来源 = 拥有主机相对事实的
+   * 守护）。目标 = launch 表里带 addr 的守护条目（同机 local 模式即其控制端口）；
+   * 守护不可达则保留上一轮结论，下一轮重试（不做乐观在线）。
+   */
+  private async syncHostStatuses(): Promise<void> {
+    if (this.ctx.channel.channelMode === 'hub') return
+    const selfId = this.ctx.channel.instanceId
+    for (const [id, spec] of Object.entries(this.config.launch ?? {})) {
+      if (!isHostAgent(id) || id === selfId) continue
+      const addr = spec.addr
+      if (addr === undefined || addr === '') continue
+      try {
+        const res = await fetch(`${addr.replace(/\/+$/, '')}/api/console/listInstances`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            type: 'client-request',
+            rpcId: randomUUID(),
+            method: 'console/listInstances',
+            payload: { args: {} },
+          }),
+          signal: AbortSignal.timeout(ConsoleService.PROBE_TIMEOUT_MS),
+        })
+        const data = await res.json() as {
+          result?: { ok?: boolean; value?: { instances?: Array<{ id: string; addr?: string; status?: string }> } }
+        }
+        const reported = data.result?.value?.instances
+        if (data.result?.ok !== true || reported === undefined) continue
+        for (const item of reported) {
+          if (item.id === selfId || isHostAgent(item.id)) continue
+          const status = item.status === 'online' ? 'online' as const : 'offline' as const
+          if (this.ctx.channel.get(item.id) === undefined) {
+            this.ctx.channel.declare({ id: item.id, name: item.id, addr: item.addr ?? '', status })
+          } else {
+            this.ctx.channel.setStatus(item.id, status)
+          }
+        }
+      } catch {
+        // 守护不可达/超时：保留上一轮结论（下一轮重试）。
+      }
+    }
   }
 
   /**
@@ -1652,6 +1705,10 @@ export class ConsoleService extends TypertRemoteService {
       stdio: ['ignore', fd, fd],
     })
     child.unref()
+    // 状态来源 = channel 实例表（probe 靠 heartbeat 续期）。新拉起的实例必须登记，
+    // 否则 heartbeat 抛 unknown instance 被吞 → 状态永远 offline（实测：deploy 出来的
+    // 实例端口在应答，总控与守护两侧却都显示离线）。
+    this.declareLocalInstance(instanceId, spec)
     this.children.set(instanceId, child)
     const cleanup = (): void => {
       if (this.children.get(instanceId) === child) this.children.delete(instanceId)
@@ -1804,6 +1861,15 @@ export class ConsoleService extends TypertRemoteService {
       return
     }
     this.log(`[dsh-console/daemon] ${instanceId} 已离线，无进程可停`, { scope: 'daemon' })
+  }
+
+  /**
+   * 把本机实例登记进 channel 实例表（状态来源；daemon 构造期与运行期共用）。
+   * addr 用回环 + 档案端口（主机相对语义——跨机探测不是本进程的职责）。
+   */
+  private declareLocalInstance(instanceId: string, spec: LaunchSpec): void {
+    const addr = typeof spec.port === 'number' ? `http://127.0.0.1:${spec.port}` : ''
+    this.ctx.channel.declare({ id: instanceId, name: instanceId, addr, status: 'online' })
   }
 
   /** 本机端口定位 kill（无 broker 时停非守护拉起实例）：lsof 找占用端口的进程发 SIGTERM。 */

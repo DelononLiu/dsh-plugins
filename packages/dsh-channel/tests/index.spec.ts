@@ -495,3 +495,13 @@ describe('本地回环回传执行结论（批 6b）：区分"已下发"与"被�
     expect(r.outcome).toBe(undefined)
   })
 })
+
+describe('declare 契约（状态不得被乐观改绿）', () => {
+  it('declare 尊重传入状态：offline 不被改成 online', () => {
+    const ch = boot()
+    ch.declare({ id: 'web9', name: 'web9', addr: '', status: 'offline' })
+    expect(ch.get('web9')?.status).toBe('offline')
+    ch.declare({ id: 'web9', name: 'web9', addr: '', status: 'online' })
+    expect(ch.get('web9')?.status).toBe('online')
+  })
+})

@@ -2144,3 +2144,44 @@ describe('用户报错回归：UI 传了不存在的守护名（host1）', () =>
     expect(r.error ?? '').toMatch(/不是已知守护|无本机接收者|可用/)
   })
 })
+
+describe('状态来源（在跑实例不得显示离线）', () => {
+  it('deploy 拉起的实例登记进 channel 实例表（否则 probe 的 heartbeat 抛 unknown 被吞→永久离线）', async () => {
+    const child = fakeChild()
+    mockSpawn(child)
+    const ctx = await bootDaemon({})
+    ctx.console.deployInstance({
+      host: 'host1', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
+      dshHome: '/tmp/.dsh-web6-status', port: 3086, token: 'tok-web6',
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(ctx.channel.get('web6')?.status).toBe('online')
+    const svc = ctx.console as unknown as { localInstanceReport(): Array<{ id: string; status: string }> }
+    expect(svc.localInstanceReport().find((i) => i.id === 'web6')?.status).toBe('online')
+  })
+
+  it('状态同步：从宿主守护拉本机视图 → 在跑实例并入实例表且视图在线', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, { launch: { 'host-master': { host: 'host-master', addr: 'http://127.0.0.1:3089' } } })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      result: {
+        ok: true,
+        value: { instances: [
+          { id: 'web1234', addr: 'http://127.0.0.1:31234', status: 'online' },
+          { id: 'web5', addr: 'http://127.0.0.1:3085', status: 'offline' },
+        ] },
+      },
+    }), { status: 200 })))
+    try {
+      const svc = ctx.console as unknown as { syncHostStatuses(): Promise<void> }
+      await svc.syncHostStatuses()
+      expect(ctx.channel.get('web1234')?.status).toBe('online')
+      expect(ctx.channel.get('web5')?.status).toBe('offline')
+      const view = ctx.console.listInstances()
+      expect(view.instances.find((i) => i.id === 'web1234')?.status).toBe('online')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})

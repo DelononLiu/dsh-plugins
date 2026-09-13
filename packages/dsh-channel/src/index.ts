@@ -340,7 +340,9 @@ export class ChannelService extends TypertRemoteService {
    * 不应导致 launch 注册失败（否则管理端发现失效）。
    */
   declare(instance: InstanceIdentity): void {
-    this.instances.set(instance.id, { ...instance, status: 'online', lastSeen: Date.now() })
+    // 状态按传入值落表：调用方拿得到真实状态（如守护上报的本机视图）时不得被改成
+    // 乐观在线——否则"离线实例被登记成在线"，UI 与探测口径互相打架。
+    this.instances.set(instance.id, { ...instance, status: instance.status === 'offline' ? 'offline' : 'online', lastSeen: Date.now() })
   }
 
   /**
