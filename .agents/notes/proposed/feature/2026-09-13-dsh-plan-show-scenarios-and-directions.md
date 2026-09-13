@@ -201,7 +201,7 @@ markdown→模型解析器（带单测）+ 三视图切换（提案卡/看板/�
 
 ## 13. 本轮自验证据（MVP 判据 1-6）
 
-- `pnpm --filter dsh-plan-show typecheck` ✓；`test` **19 通过**（模型 + host 两层）；`build` 产出 `lib/client.js` ✓。
+- `pnpm --filter dsh-plan-show typecheck` ✓；`test` **全部通过**（模型 + host + client 三层，现 43 项）；`build` 产出 `lib/client.js` ✓。
 - 实例自验（dev 实例 web2, 3082，面板期）：入口「Show」出现于侧栏底部 ✓；面板与粘贴导入 ✓；
   只读端点 `GET /api/plan-show/artifacts` → `{"artifacts":[]}` ✓（host 插件已加载）；
   「粘贴导入…」→ 产物入列（方案 · 3/5 · 证据 0）✓；五视图切换 ✓；
