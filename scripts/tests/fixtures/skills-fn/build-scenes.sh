@@ -2,18 +2,22 @@
 # 搭建 skills 的**功能测试现场**（确定性、可重建）——不是校验语法，而是造出真故障，
 # 让 skill 走一遍，看它能不能得出正确结论。期望结论见同目录 GROUND-TRUTH.md。
 #
-# 产出（默认 $TMPDIR/dsh-skills-fn/）：
+# 产出（不给参数 = 建到唯一的 mktemp 目录并打印路径）：
 #   forensics/            真 bug（模块重复副本 → Symbol 不一致）+ 陈旧产物 lib
 #                         + 有人"顺手修过"（TypeError 已变成静默 undefined）→ 证据只剩在 HEAD 里
 #   phase0-clean/         干净现场：已提交、复现确定、无并发写者 → Phase 0 应判"干净"
 #   phase0-contaminated/  受污染现场：未提交在途改动 + 未跟踪残留 + 陈旧 stash + 活跃写者 → 应判"受污染"
 #
 # 用法：bash scripts/tests/fixtures/skills-fn/build-scenes.sh [输出根目录]
+#   给了路径就按它重建（会先 rm -rf）；不给就 mktemp，避免与并发的另一个现场互删
 set -euo pipefail
 
-OUT="${1:-${TMPDIR:-/tmp}/dsh-skills-fn}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-rm -rf "$OUT"; mkdir -p "$OUT"
+if [ $# -ge 1 ]; then
+  OUT="$1"; rm -rf "$OUT"; mkdir -p "$OUT"
+else
+  OUT="$(mktemp -d "${TMPDIR:-/tmp}/dsh-skills-fn-XXXX")"
+fi
 
 gitq() { git -c user.email=t@t -c user.name=t "$@"; }
 

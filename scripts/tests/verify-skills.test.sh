@@ -11,17 +11,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 GATE="$ROOT/scripts/verify-skills.sh"
 
-PASS=0; FAIL=0
-t() { # t <期望> <名称> <命令...>；期望 = ok | fail
-  local want="$1" name="$2"; shift 2
-  local out rc
-  out="$("$@" 2>&1)"; rc=$?
-  if { [ "$want" = ok ] && [ "$rc" -eq 0 ]; } || { [ "$want" = fail ] && [ "$rc" -ne 0 ]; }; then
-    printf '  ✓ %s\n' "$name"; PASS=$((PASS + 1))
-  else
-    printf '  ✗ %s（期望 %s，实际 rc=%s）\n' "$name" "$want" "$rc"; printf '%s\n' "$out" | sed 's/^/      /'; FAIL=$((FAIL + 1))
-  fi
-}
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"   # 共用断言与抽块工具（PASS/FAIL/t/c/block_with）
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 TREE="$TMP/skills"
@@ -61,7 +52,7 @@ echo "未闭合的引号
 EOF
       ;;
     dangling-link) printf -- '---\nname: demo-skill\ndescription: 演示用\n---\n\n见 [arch](../nowhere/architecture.md)。\n' > "$TREE/demo-skill/SKILL.md" ;;
-    template-block)
+    template-block)  # 规范写法：$VAR 或中文占位名——不该报错，也不该进"尖括号占位符"警告
       cat > "$TREE/demo-skill/SKILL.md" <<'EOF'
 ---
 name: demo-skill
@@ -69,8 +60,21 @@ description: 演示用
 ---
 
 ```sh
-git push origin <branch>          # ASCII 占位符
-cp -a ~/.dsh-实例名 /tmp/实例名      # 中文占位（不带尖括号，安全）
+BRANCH=分支名
+git push origin "$BRANCH"
+cp -a ~/.dsh-实例名 /tmp/实例名
+```
+EOF
+      ;;
+    arg-placeholder)  # 参数位置的 <branch> 也是重定向，一样过不了 shell
+      cat > "$TREE/demo-skill/SKILL.md" <<'EOF'
+---
+name: demo-skill
+description: 演示用
+---
+
+```sh
+git push origin <branch>
 ```
 EOF
       ;;
@@ -86,6 +90,32 @@ cp a.txt /tmp/out/<name>.txt       # <name> 在路径位置 → shell 当重定�
 ```
 EOF
       ;;
+    assign-placeholder)  # 赋值位置的占位符同样过不了 shell（<x> 是重定向，不是占位符）
+      cat > "$TREE/demo-skill/SKILL.md" <<'EOF'
+---
+name: demo-skill
+description: 演示用
+---
+
+```sh
+NAME=<文件名>
+cp a.txt "/tmp/$NAME.txt"
+```
+EOF
+      ;;
+    quoted-placeholder)  # 引号内 / 注释里的尖括号是文字，不该误报
+      cat > "$TREE/demo-skill/SKILL.md" <<'EOF'
+---
+name: demo-skill
+description: 演示用
+---
+
+```sh
+# 别写 <pkg>，shell 会当重定向
+git commit -m "docs: <name> 说明"
+```
+EOF
+      ;;
     excluded)  # 用真实被排除的路径（排除表按相对路径匹配）
       rm -rf "$TREE/demo-skill"; mkdir -p "$TREE/domain-modeling"
       printf -- '---\nname: domain-modeling\ndescription: 演示用\n---\n\n正文\n' > "$TREE/domain-modeling/SKILL.md"
@@ -98,7 +128,7 @@ echo "== 真阴性 =="
 fixture clean
 t ok "干净树全过"               env DSH_SKILLS_DIR="$TREE" bash "$GATE"
 fixture template-block
-t ok "模板块不误报（含中文占位符）" env DSH_SKILLS_DIR="$TREE" bash "$GATE"
+t ok "规范占位写法（变量式 / 中文名）不误报" env DSH_SKILLS_DIR="$TREE" bash "$GATE"
 fixture excluded
 t ok "校准样例文件的示例链接被跳过"  env DSH_SKILLS_DIR="$TREE" bash "$GATE"
 
@@ -115,6 +145,12 @@ fixture dangling-link
 t fail "悬空相对链接"              env DSH_SKILLS_DIR="$TREE" bash "$GATE"
 fixture path-placeholder
 t fail "占位符出现在路径位置"       env DSH_SKILLS_DIR="$TREE" bash "$GATE"
+fixture assign-placeholder
+t fail "占位符出现在赋值位置"       env DSH_SKILLS_DIR="$TREE" bash "$GATE"
+fixture arg-placeholder
+t fail "占位符出现在参数位置"       env DSH_SKILLS_DIR="$TREE" bash "$GATE"
+fixture quoted-placeholder
+t ok   "引号/注释里的尖括号不误报"   env DSH_SKILLS_DIR="$TREE" bash "$GATE"
 
 # ---------- skill 内联命令的实跑验证 ----------
 # 不复制一份命令来测（会漂移），而是从 SKILL.md 里抽出真块跑——skill 文本改了这里立刻失配。

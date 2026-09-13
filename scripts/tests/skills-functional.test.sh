@@ -16,7 +16,7 @@ FIX="$ROOT/scripts/tests/fixtures/skills-fn"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"; rm -f /tmp/forensics-untracked-snaprepo-*.tgz' EXIT
 SCENES="$TMP/scenes"
 bash "$FIX/build-scenes.sh" "$SCENES" >/dev/null
 
@@ -81,13 +81,14 @@ fi
 c "contaminated：有在途改动" grep -q '^ M src/calc.mjs' <( cd "$CT" && git status --porcelain --untracked-files=all )
 c "contaminated：有未跟踪残留" grep -q '^?? src/discount.wip' <( cd "$CT" && git status --porcelain --untracked-files=all )
 c "contaminated：有陈旧 stash" grep -q 'stash@{0}' <( cd "$CT" && git stash list )
-"$FIX/start-writer.sh" "$CT" 8 >/dev/null
+W8_OUT="$("$FIX/start-writer.sh" "$CT" 8)"; W8_PID="$(printf '%s\n' "$W8_OUT" | sed -n 's/.*pid=\([0-9]*\).*/\1/p')"
 sleep 4
 if find "$CT/src" -newermt '-6 seconds' -name 'calc.mjs' | grep -q .; then
-  printf '  ✓ contaminated：并发写者确实在写（mtime 2 秒内）\n'; PASS=$((PASS + 1))
+  printf '  ✓ contaminated：并发写者确实在写（写者每 2 秒 append 一次）\n'; PASS=$((PASS + 1))
 else
   printf '  ✗ contaminated：未观察到并发写者\n'; FAIL=$((FAIL + 1))
 fi
+[ -n "$W8_PID" ] && kill "$W8_PID" 2>/dev/null || true
 
 echo "== Phase 0 的活体写者探针（skill 内联命令，能红能绿）=="
 PROBE="$(block_with "$ROOT/.agents/skills/diagnosing-bugs/SKILL.md" 'fingerprint')"
@@ -102,7 +103,8 @@ else
   else
     printf '  ✗ clean：探针误报写者（A=%s B=%s）\n' "$ga" "$gb"; FAIL=$((FAIL + 1))
   fi
-  "$FIX/start-writer.sh" "$CT" 20 >/dev/null
+  WRITER_OUT="$("$FIX/start-writer.sh" "$CT" 20)"
+  WRITER_PID="$(printf '%s\n' "$WRITER_OUT" | sed -n 's/.*pid=\([0-9]*\).*/\1/p')"
   sleep 2
   out="$( cd "$CT" && bash -c "$PROBE" 2>&1 )"
   ga="$(printf '%s\n' "$out" | grep '^A ' | awk '{print $2}')"
@@ -112,7 +114,8 @@ else
   else
     printf '  ✗ contaminated：探针没抓到写者（A=%s B=%s）\n' "$ga" "$gb"; FAIL=$((FAIL + 1))
   fi
-  pkill -f 'dsh-skills-fn/phase0-contaminated' 2>/dev/null || true
+  # 按 pid 收：pkill -f 的模式不会匹配 mktemp 出来的现场路径，而且会误杀别的会话
+  [ -n "$WRITER_PID" ] && kill "$WRITER_PID" 2>/dev/null || true
 fi
 
 echo "== 现场 4：grilling 种子的查证命令可跑 =="

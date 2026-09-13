@@ -3,7 +3,7 @@
 这里不是语法校验（那在 `scripts/verify-skills.sh`），而是**功能验证**：造出真故障与真污染现场，
 让模型照 skill 走一遍，再拿结论对照本文。语法全绿也可能判错——只有这一层能发现。
 
-重建现场：`bash scripts/tests/fixtures/skills-fn/build-scenes.sh`（默认建到 `${TMPDIR:-/tmp}/dsh-skills-fn`）。
+重建现场：`bash scripts/tests/fixtures/skills-fn/build-scenes.sh`（不给参数 = 唯一的 mktemp 目录，路径会打印出来）。
 并发写者：`bash scripts/tests/fixtures/skills-fn/start-writer.sh <现场>`（默认 600s，`kill <pid>` 停）。
 
 ## 现场 1：`forensics/` —— 受污染现场下的反向排错
@@ -40,7 +40,7 @@
 
 ## 现场 4：`repo` —— 计划拷问
 
-被测：`grilling`（含本项目 9 条高危种子）。没有文件现场，用真实计划考：*"给 dsh-console 加实例健康巡检"*。
+被测：`grilling`（含本项目 13 条高危种子）。没有文件现场，用真实计划考：*"给 dsh-console 加实例健康巡检"*。
 
 必须做到的：
 - 「能查到的事实自己查」——种子自带的查证命令要真跑（`packages/*/package.json` 的 `@deepseek-ai/*` 基线、
