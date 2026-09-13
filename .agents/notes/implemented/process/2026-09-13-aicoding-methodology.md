@@ -27,7 +27,9 @@ Status: implemented
   判为受污染时交给它。
 - **Layer 4（挂载点）**：正向链的验证阶段不新造流程，而是挂到既有闸门——`dsh-pre-push-checks`
   增加"自改清单与快照"两项；`scripts/verify-skills.sh` 成为 skill 自身的机械闸门（frontmatter、
-  命令块语法）；`scripts/verify-kernel-upgrade.sh` 保持为内核升级的专用闸门。
+  命令块语法、相对链接、路径位置占位符）；`scripts/verify-kernel-upgrade.sh` 保持为内核升级的专用闸门。
+  **闸门本身分两层测**：语法层是确定性脚本（可 CI），结论层靠"造真故障 + 模型照 skill 走一遍 + 对照
+  GROUND-TRUTH"（`scripts/tests/skills-functional.test.sh` + `scripts/tests/fixtures/skills-fn/`）。
 
 ### 收紧（对原方法论的四点修正）
 
@@ -59,7 +61,14 @@ Status: implemented
   不触碰工作区即可固化现场（含未跟踪文件的 tar 归档），因此"先取证再动手"不再与"别丢现场"冲突。
 - 每次排错要求维护**本人改动清单**（本次会话自己改了什么）——这是判断"现象是否是我造成的"的唯一依据，
   也是多 agent/多 worktree 并存（本仓库常态）下的基本卫生。
-- skill 自身进入机械闸门管理：`scripts/verify-skills.sh` 校验 frontmatter 与内联命令块语法，
-  避免"skill 里的命令早就跑不通"这种静默失效。
+- skill 自身进入机械闸门管理：`scripts/verify-skills.sh` 校验 frontmatter、内联命令块语法、相对链接
+  与**路径位置的占位符**（`dir/<name>.gif` 会被 shell 当重定向——实测踩过），避免"skill 里的命令早就跑不通"
+  这种静默失效。
+- **语法闸门不够**：第一轮功能测试（三个子 agent 照 skill 实跑）里，三个 skill 的结论都正确，却暴露
+  17 处缺陷——Phase 0 的"无并发写者"只有散文零命令、`git diff` 被注释成"本人改动清单"把别人的在途改动
+  洗成自己的、A3 硬编码 `lib/index.js` 导致每个包都报 STALE、grilling 9 条种子里 6 条无命令却已被勾选
+  "每条都有"。**结论层必须拿真故障考，且考完要回改 skill**；只跑语法闸门会给出虚假的"全绿"。
+- 反向链的命令自带一个反直觉纪律：**命令报错（stderr 非空/退出码非 0）≠ clean**——那说明命令没跑成。
+  实测 `grep ... || echo clean` 会把"路径不存在"洗成 clean，正好绕过它自己的判读规则。
 - 收尾：正反两链的种子清单是同一份；`grilling` 的种子清单增补后，`dsh-incident-forensics` 的
   A 步骤不再重新发明怀疑顺序。

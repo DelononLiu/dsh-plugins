@@ -28,13 +28,18 @@ git stash list                             # 既有 stash 不是你的改动，�
 git worktree list                          # 并行 worktree 在改别的目录：确认没跨目录混提
 ```
 
-4. **产物同步**——实例跑的是 `lib/`，源码改了没重建 = 陈旧产物（"陈旧产物 = 污染源"）：
+4. **产物同步**——实例跑的是 `lib/`，源码改了没重建 = 陈旧产物（"陈旧产物 = 污染源"）。
+   用**提交时间**比，别用文件 mtime（`git checkout` 会刷新 mtime，误报）；lib 不存在时不能拿 0 当真
+   （那会把每个包都报成陈旧）：
 
 ```sh
 for p in packages/*/; do
-  c=$(git log -1 --format=%ct -- "$p/src"); l=$(stat -c %Y "$p/lib/index.js" 2>/dev/null || echo 0)
-  [ "$l" -lt "$c" ] && echo "STALE $(basename $p)：src 有更晚提交，lib 未重建"
-done; echo "（有输出先 pnpm build 再验证）"
+  c=$(git log -1 --format=%ct -- "$p/src" 2>/dev/null || true)
+  l=$(find "$p/lib" -type f \( -name '*.js' -o -name '*.mjs' \) -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)
+  if [ -n "$c" ] && [ -n "$l" ] && [ "$l" -lt "$c" ]; then
+    echo "STALE $(basename "$p")：lib 最新产物 $(date -d @$l '+%F %T') 早于 src 最后提交 $(date -d @$c '+%F %T') → 先 pnpm build 再验证"
+  fi
+done
 ```
 
 ## 提交前自检（全部通过才 push/merge）
@@ -64,9 +69,9 @@ grep -l '"@deepseek-ai/dsh-tools"\|"@deepseek-ai/dsh-session"\|"@deepseek-ai/dsh
   packages/*/package.json 2>/dev/null || echo clean
 
 # skills 自身的闸门（本次改到 .agents/skills/** 才跑）：frontmatter / 内联命令块语法 / 相对链接
-# 三个来源都看：未提交、已暂存、以及分支上相对 main 的提交（main 直提时最后一项为空）
-if { git diff HEAD --name-only; git diff --cached --name-only; git diff main...HEAD --name-only 2>/dev/null; } \
-     | sort -u | grep -q '^\.agents/skills/'; then
+# 四个来源都看：未提交、已暂存、未跟踪新文件（新 skill 目录）、以及分支上相对 main 的提交
+if { git diff HEAD --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; \
+     git diff main...HEAD --name-only 2>/dev/null; } | sort -u | grep -q '^\.agents/skills/'; then
   bash scripts/verify-skills.sh || echo "→ 闸门失败，先修再推（闸门自测：bash scripts/tests/verify-skills.test.sh）"
 else echo "未改 skills，跳过"; fi
 

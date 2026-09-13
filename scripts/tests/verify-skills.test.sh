@@ -70,7 +70,19 @@ description: 演示用
 
 ```sh
 git push origin <branch>          # ASCII 占位符
-cp -a ~/.dsh-<实例> /tmp/<目录名>   # 中文占位符
+cp -a ~/.dsh-实例名 /tmp/实例名      # 中文占位（不带尖括号，安全）
+```
+EOF
+      ;;
+    path-placeholder)
+      cat > "$TREE/demo-skill/SKILL.md" <<'EOF'
+---
+name: demo-skill
+description: 演示用
+---
+
+```sh
+cp a.txt /tmp/out/<name>.txt       # <name> 在路径位置 → shell 当重定向
 ```
 EOF
       ;;
@@ -101,6 +113,8 @@ fixture bad-sh
 t fail "命令块语法错误"            env DSH_SKILLS_DIR="$TREE" bash "$GATE"
 fixture dangling-link
 t fail "悬空相对链接"              env DSH_SKILLS_DIR="$TREE" bash "$GATE"
+fixture path-placeholder
+t fail "占位符出现在路径位置"       env DSH_SKILLS_DIR="$TREE" bash "$GATE"
 
 # ---------- skill 内联命令的实跑验证 ----------
 # 不复制一份命令来测（会漂移），而是从 SKILL.md 里抽出真块跑——skill 文本改了这里立刻失配。

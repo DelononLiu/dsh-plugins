@@ -28,7 +28,8 @@ description: Use when upgrading the dsh kernel / official dependency baseline (e
 ## 1. 代码适配（worktree 分支）
 
 ```sh
-git worktree add -b feat/upgrade-<ver> ../dsh-plugins-feat-upgrade-<ver>
+VER=<目标版本>   # 例如 0.1.2-rc.2（尖括号占位在路径位置会被 shell 当重定向）
+git worktree add -b "feat/upgrade-$VER" "../dsh-plugins-feat-upgrade-$VER"
 ```
 
 按官方实际 API 迁移（**以目标版源码为准，不猜**）：

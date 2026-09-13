@@ -72,9 +72,25 @@
 - [x] dsh-pre-push-checks：typecheck/diff 卫生/残留术语/双实例 → SKILL.md 内联确切命令
 - [x] dsh-code-review：变更事实命令段（范围/note/依赖/卫生）内联；结论判断留模型
 - [x] dsh-prose-standard / dsh-trim-cot-leakage：探测命令内联 → 保持 probe + 语义判读
-- [x] grilling：高危种子清单每条带查证命令（先跑命令，再拿结果当提问前提）
-- [x] diagnosing-bugs：Phase 0 闸门内联快照/现场坐标/产物陈旧三类命令
-- [x] dsh-incident-forensics：A–F 每步内联确切命令（快照/A2 现场坐标/A3 陈旧产物/副本隔离）
-- [x] dsh-pre-push-checks：增「本人改动清单 + 产物同步」命令段
-- [x] 全部 skills：`bash scripts/verify-skills.sh` 机械校验 frontmatter 与内联命令块语法
+- [x] grilling：13 条高危种子**每条**带查证命令 + 判读规则（"命令报错 ≠ clean"）
+- [x] diagnosing-bugs：Phase 0 闸门内联快照 / 现场坐标 / **活体写者两采样探针** / 陈旧产物
+- [x] dsh-incident-forensics：A–F 每步内联确切命令（A1 快照 / A2 现场坐标 / A3 陈旧与时间戳 / B 副本隔离）
+- [x] dsh-pre-push-checks：增「自改清单 + 产物同步」命令段
+- [x] 全部 skills：`bash scripts/verify-skills.sh` 机械校验 frontmatter / 命令块语法 / 相对链接（占位符块另给"不可照抄"警告）
 - [ ] mattpocock skills 其余未适配批次：用到时按本原则补内联命令
+
+## 功能测试（2026-09 立，语法检查之外的第二层）
+
+`verify-skills.sh` 只能证明"提示词没写坏"；**提示词写得对不等于 skill 能得出正确结论**。第二层是拿真故障
+考 skill：
+
+- **场景与对照结论**：[`scripts/tests/fixtures/skills-fn/GROUND-TRUTH.md`](../../scripts/tests/fixtures/skills-fn/GROUND-TRUTH.md)
+  —— 重建：`bash scripts/tests/fixtures/skills-fn/build-scenes.sh`。含受污染的反向排错现场（模块重复副本 →
+  Symbol 身份不匹配 + 陈旧产物假绿 + 有人"顺手修"把 TypeError 抹成静默 undefined）、干净入口现场、受污染入口现场。
+- **确定性部分**（可 CI）：`bash scripts/tests/skills-functional.test.sh` —— 断言现场真的坏、篡改真的抹掉了
+  症状、HEAD 真的能恢复证据，并**从 SKILL.md 抽出真命令块实跑**（陈旧判据能红能绿、活体写者探针能红能绿、
+  快照非破坏性）。
+- **结论层**（要模型）：把 skill 交给一个子 agent 照走一遍，结论对照 GROUND-TRUTH。**第一轮实测就有价值**：
+  三个 skill 结论全部正确，但暴露 17 处缺陷（Phase 0 的"无并发写者"零命令、`git diff` 被误标成"我的改动"、
+  A3 硬编码 `lib/index.js` 导致每个包都报 STALE、grilling 9 条种子里 6 条无命令却已被勾选"每条都有"…），
+  全部已修。

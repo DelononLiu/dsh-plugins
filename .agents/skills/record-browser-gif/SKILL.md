@@ -88,7 +88,8 @@ For an existing assets branch, work in a shallow single-branch scratch clone so 
 
 ```sh
 git clone --branch <assets-branch> --single-branch --depth 1 <repo-url> /tmp/assets-checkout
-cp /absolute/path/to/demo.gif /tmp/assets-checkout/<name>.gif
+NAME=<文件名>   # 尖括号占位在路径位置会被 shell 当重定向
+cp /absolute/path/to/demo.gif "/tmp/assets-checkout/$NAME.gif"
 cd /tmp/assets-checkout
 git add <name>.gif
 git commit -m "assets: <what it shows> gif (#<pr>)"

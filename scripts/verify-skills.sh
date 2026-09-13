@@ -89,8 +89,16 @@ for d in "${DIRS[@]}"; do
       bad=$((bad + 1))
       fail "命令块语法错误（$(head -1 "$TMP/err")）"
     fi
+    # <占位符> 出现在**路径位置**最险：shell 会把它当重定向（`dir/<name>.gif` → 输入重定向 + 输出到 .gif），
+    # 命令静默不执行，甚至写出到意料之外的路径。实测踩过。用 shell 变量式占位（$NAME）替代。
+    if grep -qE '<[^<>[:space:]]+>[^[:space:]]*/|/[^[:space:]]*<[^<>[:space:]]+>' "$b"; then
+      fail "占位符出现在路径位置（shell 会当重定向）：$(grep -m1 -nE '<[^<>[:space:]]+>[^[:space:]]*/|/[^[:space:]]*<[^<>[:space:]]+>' "$b")"
+    fi
   done
-  [ "$bad" -eq 0 ] && ok "内联命令块 $blocks 段语法通过（$templated 段含 <> 占位符，按模板校验）"
+  [ "$bad" -eq 0 ] && ok "内联命令块 $blocks 段语法通过"
+  # 占位符块只验了"占位符之外"的语法：命令照抄会静默失败（如 `<pkg>` 被 shell 当重定向），
+  # 所以必须提示它尚未可跑，别把"语法通过"读成"命令可用"。
+  [ "$templated" -gt 0 ] && printf '  ⚠ %s 段含 <> 占位符：语法已校验，但**照抄不可跑**，替换后方可执行\n' "$templated"
 
   # 3. 相对链接（本 skill 的全部 md）
   broken=0; links=0

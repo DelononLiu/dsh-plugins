@@ -17,28 +17,63 @@ someone else is making right now. **A feedback loop built on a contaminated scen
 nonsense** — you will "reproduce" a bug that no longer exists, or chase one your own edits created.
 Answer the gate before Phase 1, and answer it from command output, not from memory.
 
-**Freeze the scene first** — non-destructive, so it never conflicts with "don't disturb the evidence":
+**Freeze the scene first** —— 它**不碰工作区**，但会向 `.git` 写对象与 ref（取证锚）。
+时间戳带 PID：**秒级 TS 会让同秒的第二次取证静默覆盖前一个 ref**（前一份变成悬挂对象 = 失证）。
 
 ```sh
-TS=$(date +%Y%m%d-%H%M%S); SNAP=$(git stash create "forensics $TS")
-if [ -n "$SNAP" ]; then git update-ref "refs/forensics/$TS" "$SNAP"; echo "snapshot=refs/forensics/$TS $SNAP"; else echo "工作区干净，无需快照"; fi
-git ls-files --others --exclude-standard -z | tar czf "/tmp/forensics-untracked-$TS.tgz" --null -T -   # 未跟踪文件不在 stash 里，单独归档
+TS="$(date +%Y%m%d-%H%M%S)-$$"; SCENE="$(basename "$PWD")"; SNAP=$(git stash create "forensics $TS")
+if [ -n "$SNAP" ]; then
+  git update-ref "refs/forensics/$TS" "$SNAP" && echo "snapshot=refs/forensics/$TS $SNAP"
+else echo "工作区干净，无需快照"; fi
+# 未跟踪文件不在 stash 里：归档名带现场名，否则 /tmp 里多份归档无法归属
+git ls-files --others --exclude-standard -z | tar czf "/tmp/forensics-untracked-$SCENE-$TS.tgz" --null -T -
 ```
 
-(`git stash create` 只产生提交对象、**不碰工作区**；ref 是取证锚点。查看/清理：`git for-each-ref refs/forensics`。)
+（处于"证据链只读"约束下、连 `.git` 都不该写时：**只跳过 `git stash create` 与 `git update-ref` 两行**——
+第三行的 tar 只写 `/tmp`，仍要跑（否则未跟踪文件就没有副本了），其余命令输出**落成文本**存档。
+查看/清理：`git for-each-ref refs/forensics`。**收尾时不要删 `/tmp/forensics-untracked-*.tgz`**——
+未跟踪文件不在任何 git 对象里，那是唯一副本。）
 
-Then the three gate questions:
+Then the gate questions —— **每条都要有命令输出支撑**：
 
 ```sh
-git status --short --untracked-files=all   # 未提交改动 = 现场的一部分
-git stash list                             # 既有 stash：别把它当成你的改动
-git diff --stat && git diff --stat --cached # 本人改动清单：本次会话我改了什么
+# 1) 现场改动清单（含别人的）：未提交、未跟踪、已有 stash、过去的取证锚
+git status --short --untracked-files=all; git stash list; git for-each-ref refs/forensics
+git diff --stat && git diff --stat --cached
 git log --oneline -5
+
+# 2) 有没有**活的**写者：单次 git status 对活体写者是盲的（实测：写者每 2 秒改文件，
+#    相隔 6 秒两次 git status 输出完全相同）。跑两遍指纹对比——变了就是有人在写。
+#    写者周期比窗口长就会漏 → 复采样一次（共三次），并留意"是不是刚停机"。
+fingerprint() { find . -path ./.git -prune -o -type f -printf '%T@ %s %p\n' 2>/dev/null | sort | md5sum; }
+echo "A $(fingerprint)"; sleep 6; echo "B $(fingerprint)"; sleep 6; echo "C $(fingerprint)"
+# 能指名到进程时更好（显式传现场路径，别依赖 $PWD；`|| true` 免得"没有匹配"被当成命令失败）：
+ps -eo pid,ppid,lstart,cmd | grep -F "$(pwd)" | grep -v grep || true
+
+# 3) 现象是否稳定 + 是否只在你的改动之后出现：把**同一条** repro 跑两遍并留下两次输出。
+#    现场有多个入口时**逐个都跑**——入口选错会得到相反结论（实测：一个入口稳定"通过"，
+#    另一个入口才照得出问题）。
+<repro-command>; echo "run1 exit=$?"; sleep 2; <repro-command>; echo "run2 exit=$?"
 ```
 
-- [ ] **本人改动清单完整** —— 能逐条说出本次会话自己改了什么（文件 + 意图）。说不清 = 无法区分"现象是我造成的"与"现象本来就在"。
-- [ ] **无并发写者** —— 没有别的 agent/后台任务正在改这个目录。本仓库常态是多 worktree（`.worktrees/`）并行；**正在被别人改的目录不是现场，是流沙**。
-- [ ] **现象可复现且与你的改动无关** —— 在**已知干净**的基线上（`git stash` 起或独立 `DSH_HOME` 实例）现象仍在。
+- [ ] **现场改动清单归属清楚** —— `git status` / `git stash list` / `refs/forensics` 里的每一条都能归到
+      "我这次改的"或"明确的别人/历史"，**归属不明的即污染**。注意：`git diff` 显示的改动**可能是别人的**
+      （多 agent 并存是常态），不要把工作区差异默认当成自己的清单。
+      **`refs/forensics/*` 已有条目 = 别人已经在这个现场取过证/动过手**：先找上一次取证的结论，别重做一遍。
+- [ ] **无并发写者** —— 上面第 2 组命令多次指纹一致，且没有指向本目录的活进程。本仓库常态是多 worktree
+      并行：**正在被别人改的目录不是现场，是流沙**。
+      这条是**必要不充分**：指纹一致只说明采样窗口内没人写（写者可能刚停机）——**问 1 才是主判据**。
+- [ ] **现象稳定且与你的改动无关** —— 两次 repro 输出一致（**不一致即污染；但一致不等于干净**——
+      它只排除 flakiness，不排除在途改动与并发写者），且在**已知干净基线**上现象仍在。
+      基线这样取：`git diff` 为空时**当前树就是基线**（不要 stash——stash 会动到别人的在途工作）；
+      需要隔离基线时导出到**唯一命名的**副本再跑（固定路径会被并发的另一个现场/agent 砸掉）：
+      ```sh
+      BASE="$(mktemp -d "${TMPDIR:-/tmp}/probe-$(basename "$PWD")-XXXX")"
+      git archive HEAD | tar -x -C "$BASE"     # 注意：只含已跟踪文件，未跟踪的以现场为准
+      # 在 $BASE 里跑同一条 repro，与现场输出对比；用完 rm -rf "$BASE"
+      ```
+      注意因果陷阱：`git diff` 里的差异**不是你的改动**时，HEAD 基线与现场之间就多了一个非你引入的变量，
+      这时"现象是否与改动无关"无法用这个对比回答——回问 1，按归属不明处理。
 
 **分流**：
 
@@ -48,6 +83,7 @@ git log --oneline -5
   在污染现场上继续堆改动，会让本来还能救的证据永久失效（污染即失证）。
 
 发现里最容易踩的坑：把"我改到一半"当成"bug 复现了"。判据是命令输出，不是失败画面。
+**在副本/独立实例上做实验，不要在被观测的现场里来回改**——你的每一次"试试看"都是对现场的新污染。
 
 ## Phase 1 — Build a feedback loop
 
@@ -160,6 +196,11 @@ If a correct seam exists:
 3. Apply the fix.
 4. Watch it pass.
 5. Re-run the Phase 1 feedback loop against the original (un-minimised) scenario.
+
+**修因，不要修症状**：把"必然失败的查找"用可选链/默认值/兜底分支变成静默 `undefined`，是**掩蔽**而不是修复——
+它把响亮的失败变成无声的错误数据，还顺手销毁了证据（本仓库实见：`ctx[SCHED].prepare()` 被改成
+`ctx[SCHED]?.prepare()`，故障从 TypeError 变成打印 `undefined`）。修完要能说出**根因**是什么，
+并且复现原来的失败面（不是让它不再报错）。改动前先确认这一步是"修复"还是"恢复"——两条路径的判据不同。
 
 ## Phase 6 — Cleanup + post-mortem
 
