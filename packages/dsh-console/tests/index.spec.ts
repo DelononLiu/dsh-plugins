@@ -2277,4 +2277,23 @@ describe('本机守护自启 + 幽灵行（daemon 是 ~/.dsh 下与 web 平级�
     // 普通实例仍按注册表权威源并入（本条语义未被误伤）。
     expect(ids).toContain('web9')
   })
+
+  it('守护不把守护档案当实例恢复——否则对账/上报会把幽灵行带回管理端', async () => {
+    const reg = loadRegistry()
+    upsertInstance(reg, {
+      id: 'daemon', host: 'master', home: process.env.DSH_HOME ?? '', profileDir: 'daemon',
+      layout: 'profile', role: 'daemon',
+    })
+    upsertInstance(reg, {
+      id: 'web7', host: 'master', home: '/tmp/.dsh-web7', profileDir: 'web7', layout: 'legacy', role: 'instance',
+    })
+    saveRegistry(reg)
+    const ctx = await bootDaemon({})
+    const svc = ctx.console as unknown as { localInstanceReport(): Array<{ id: string }> }
+    const ids = svc.localInstanceReport().map((i) => i.id)
+    // 守护清单里没有它 → 不上报 → 管理端 syncHostStatuses 拉不到 → 不会再并进 channel
+    // （真机实测：只滤管理端注册表合并时，守护上报这条路径仍把幽灵行带了回来）。
+    expect(ids).not.toContain('daemon')
+    expect(ids).toContain('web7')
+  })
 })

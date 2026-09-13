@@ -566,14 +566,18 @@ export class ConsoleService extends TypertRemoteService {
     let instances = this.ctx.channel.list()
     // 过滤已删除实例（墓碑）：注册表是权威源，channel 的实例表不会因删除自动收敛
     // ——不过滤就会把删掉的实例当活跃实例显示（幽灵行，实测踩到）。
+    // 同时滤掉**守护档案**（role: daemon，下方合并处同规则）：它不是实例——没有
+    // webserver/port/addr，存活证据在 `hosts` 一侧。两条路径都会把它带进来：
+    // ① 注册表合并；② `syncHostStatuses` 把守护上报的本机视图并进 channel。只滤一条，
+    // UI 仍会多出一行恒离线的 daemon（真机实测：只改①时幽灵行仍在）。
     try {
       const reg = loadRegistry()
-      const deleted = new Set(
+      const gone = new Set(
         listRegistryInstances(reg, { includeDeleted: true })
-          .filter((i) => i.status === 'deleted')
+          .filter((i) => i.status === 'deleted' || i.role === 'daemon')
           .map((i) => i.id),
       )
-      if (deleted.size > 0) instances = instances.filter((i) => !deleted.has(i.id))
+      if (gone.size > 0) instances = instances.filter((i) => !gone.has(i.id))
     } catch {
       /* 注册表不可读时不隐藏任何实例（宁可多显示，也不静默吞掉） */
     }
@@ -1185,6 +1189,10 @@ export class ConsoleService extends TypertRemoteService {
       for (const entry of listRegistryInstances(reg)) {
         // 只恢复本机实例：注册表可含其它主机的条目（多机），本机守护不认领。
         if (entry.host !== hostId() && entry.host !== 'localhost') continue
+        // 守护档案（role: daemon）不是实例，是**执行面自身**（无 webserver/port/addr）：
+        // 纳入清单会让守护把它当实例对账（`reconcile daemon: offline（无端口信息）`）
+        // 并随本机视图上报，管理端再并进 channel → UI 多一行恒离线的幽灵行（用户报障）。
+        if (entry.role === 'daemon') continue
         this.runtimeInstances.set(entry.id, this.specFromEntry(entry))
       }
       this.log(`[dsh-console/daemon] 注册表恢复 ${this.runtimeInstances.size} 个实例（${registryPath()}）`, { scope: 'deploy' })
