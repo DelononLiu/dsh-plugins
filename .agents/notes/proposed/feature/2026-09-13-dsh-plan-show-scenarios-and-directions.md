@@ -217,3 +217,21 @@ markdown→模型解析器（带单测）+ 三视图切换（提案卡/看板/�
   AI 输出里的围栏 → `[data-dsh-show-inline]` 1 个、`<img src="data:image/svg+xml;...">`、源码块隐藏、
   图/源码按钮切换生效。契约与边界见 [DOM 钩子 note](../../implemented/feature/2026-09-13-plan-show-inline-dom-hooks.md)。
 - 边界：用户消息走官方 `MessageText`（纯文本，围栏不成型）——验证必须让 **AI** 输出围栏。
+
+## 14. 后期优化清单（2026-09-13 用户验收"雏形不错，显示图片 + 源码"后记录）
+
+- **图的表现**：当前是"条目 + 状态点 + 证据徽标"的清单式自绘 SVG。可再考虑分节分组、
+  顺序/依赖连线——但**必须有真数据才画**（调研结论：没有依赖字段的流程图会退化成假关系）。
+- **用户消息里的围栏**：实测用户消息不走 markdown 代码块（DOM 无 `.md-code-block`），
+  当前只渲染**助手消息**；若要在用户消息里也生效，需要另找钩子或上游支持。
+- **其它围栏语言**（mermaid / graphviz / svg / html）：官方做过（PR #3710）后又整体回滚
+  （PR #3901）。若要支持需自托管懒加载（iife bundle 不能背上 mermaid/WASM）+ 许可评估
+  （Graphviz EPL-2.0 条款），并沿用官方那套 strict / neutral / 禁 HTML label 与空沙箱策略。
+- **钩子存在性自检**：官方 `.md-code-block` / `.infostring` / `data-streaming` 若改名，注入会
+  **静默失效**；应在启动时探测一次并在缺失时 `console.warn`（把静默变可见）。
+- **提示词段铺开**：把 `plan-show:format` 铺到 web/3/4/daemon 与其它实例；profile 模板登记
+  dsh-plan-show。
+- **dev 实例坑记档**：`dsh plugin add` 会把依赖写进 `dsh.profile.bundles`，与 patch 的 insert
+  行重复加载 → webserver 路由冲突启动失败；需记文档并考虑修脚本/CLI。
+- **面板删除后的悬空面**：工具 `show_artifact` 与只读端点 `/api/plan-show/artifacts` 暂无 UI
+  消费方（保留待用）；若日后要"历史产物"界面再定。

@@ -30,8 +30,8 @@ const CSS_SELECTOR = 'style[data-plugin-css="@dsh-plan-show/inline"]'
 
 /** 代码块根类名（官方稳定钩子）。 */
 const CODE_BLOCK = '.md-code-block'
-/** 语言名元素的**哈希后**类名（官方 `In.infostring` 编译成 `_infostring_5swpp_44`；无稳定类可依）。 */
-const INFOSTRING_HASHED = '[class*="infostring"]'
+/** 语言名元素的选择器：官方类名带 css-modules 哈希（`_infostring_5swpp_44`），按子串匹配。 */
+const INFOSTRING = '[class*="infostring"]'
 
 /** 源码视图标记：被隐藏的原始代码块（渲染后默认隐藏）。 */
 const HIDDEN_ATTR = 'data-dsh-show-hidden'
@@ -64,7 +64,7 @@ function injectCss(): void {
 
 /** 语言名（小写；缺失返回空串）。 */
 export function languageOf(block: Element): string {
-  const info = block.querySelector(INFOSTRING_HASHED)
+  const info = block.querySelector(INFOSTRING)
   return info?.textContent?.trim().toLowerCase() ?? ''
 }
 
