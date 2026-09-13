@@ -209,3 +209,11 @@ markdown→模型解析器（带单测）+ 三视图切换（提案卡/看板/�
 - 过程中被抓到并修掉的两个真问题（都是实例自验的产物，单测抓不到）：
   ① 相对导入缺 `.js` 后缀 → Node ESM `ERR_UNSUPPORTED_DIR_IMPORT`（仓库约定：值导入用 `.js`）；
   ② host 插件未声明 `export const inject = ['tools']` → cordis 启动即报 `cannot get property "tools" without inject`。
+
+## 14. 就地渲染（D7 主路径）真机自验
+
+- 原实现按 `.infostring` 取语言名，真机一条都不渲染：类名是 css-modules 哈希（`_infostring_5swpp_44`），
+  测试现场是手写假 DOM 才全绿。改用类名子串匹配 + 测试现场照抄官方 `CodeBlock` 产物后，web2 真机复验：
+  AI 输出里的围栏 → `[data-dsh-show-inline]` 1 个、`<img src="data:image/svg+xml;...">`、源码块隐藏、
+  图/源码按钮切换生效。契约与边界见 [DOM 钩子 note](../../implemented/feature/2026-09-13-plan-show-inline-dom-hooks.md)。
+- 边界：用户消息走官方 `MessageText`（纯文本，围栏不成型）——验证必须让 **AI** 输出围栏。

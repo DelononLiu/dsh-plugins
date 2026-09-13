@@ -253,7 +253,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ✅ 已上线三端（2 测试） |
 | dsh-focus-session | UI | **会话关注层**：侧栏「置顶」区（钉住/拖拽排序/行尾取消钉）+「活跃」区（最近活跃会话，`updatedAt` 序，上限 5）+ 会话标题**胶囊标签**（人工标签）；行菜单与标签弹框照官方 Menu/Modal 契约；拥有钉住/标签 settings 数据 | ✅ 已实现（101 测试） |
 | dsh-focus-tabs | UI | 顶部会话标签行（Alt+P 固定、Alt+1..9 切换、编号标题、状态圆点）；只读消费 dsh-focus-session 的钉住数据，两处天然同步 | ✅ 已实现（24 测试，web2 验证） |
-| dsh-plan-show | UI | **AI 产物呈现层（Show）**：约定围栏 ```plan-show + 提示词段（教模型按格式输出）→ 客户端观察会话 DOM（官方稳定钩子）→ **消息内就地渲染成图片**（自绘 SVG → `data:image/svg+xml` → `<img>` 惰性图片；图/源码/复制切换）；验收硬规则：**无证据 = 未验证**。无独立界面（侧栏入口与面板已删除） | ✅ 已实现（42 测试 + dev 实例自验；场景/分期/调研见 [note](.agents/notes/proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)） |
+| dsh-plan-show | UI | **AI 产物呈现层（Show）**：约定围栏 ```plan-show + 提示词段（教模型按格式输出）→ 客户端观察会话 DOM（照官方 `CodeBlock` 形状：`md-code-block` + `infostring` 类名子串 + 祖先 `data-streaming`）→ **消息内就地渲染成图片**（自绘 SVG → `data:image/svg+xml` → `<img>` 惰性图片；图/源码/复制切换）；只作用于 **AI 输出**（用户消息走官方 `MessageText`，不做 markdown）；验收硬规则：**无证据 = 未验证**。无独立界面（侧栏入口与面板已删除） | ✅ 已实现（43 测试 + dev 实例（web2/3082）真机自验；场景/分期/调研见 [note](.agents/notes/proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)，DOM 钩子契约见 [note](.agents/notes/implemented/feature/2026-09-13-plan-show-inline-dom-hooks.md)） |
 | dsh-desk | UI（平台） | 布局/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：SSH/技能中心摆控制台上方、任务看板摆会话头快捷导航右侧，均对齐官方契约；回退 foot）** | ✅ 组装器已实现（assembler.spec 15 测试）；布局配置开关已实现，见 §9 |
 
 > dsh-quick-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。

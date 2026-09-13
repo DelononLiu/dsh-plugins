@@ -2,11 +2,14 @@
  * 消息内就地渲染（client 半区）：把 AI 输出里的 ```plan-show 围栏变成**图片**显示在
  * 消息流里——不用侧栏面板、不需要 agent 调工具（提示词已要求按约定围栏输出）。
  *
- * 只依赖官方**稳定 DOM 钩子**（不碰 css-modules 哈希类名）：
+ * 只依赖官方**代码块自身的形状**（不碰其它 css-modules 哈希类名）：
  * - 代码块根：`.md-code-block`（官方 `CodeBlock` 显式挂的稳定类）
- * - 语言名：`.md-code-block .infostring` 的文本
+ * - 语言名：根内标题栏里的 `infostring` 元素（无稳定类，只能按类名子串匹配）
  * - 流式中：祖先带 `data-streaming` → 不渲染（官方 settled-only 语义）
  * - 原文：`.md-code-block pre code` 的文本
+ *
+ * 边界：官方用户消息走 `MessageText`（引用 chip + 纯文本，不做 markdown），围栏只在
+ * **AI 输出**（`MarkdownText` → `CodeBlock`）里成型——本插件因此只作用于 AI 产物。
  *
  * 呈现照官方图片方法：`artifactImageUrl()` 产出 `data:image/svg+xml` 用 `<img>` 显示
  * （惰性图片：图里的脚本/链接不生效）；默认隐藏源码、提供 图/源码/复制 切换。
@@ -27,8 +30,8 @@ const CSS_SELECTOR = 'style[data-plugin-css="@dsh-plan-show/inline"]'
 
 /** 代码块根类名（官方稳定钩子）。 */
 const CODE_BLOCK = '.md-code-block'
-/** 语言名元素。 */
-const INFOSTRING = '.infostring'
+/** 语言名元素的**哈希后**类名（官方 `In.infostring` 编译成 `_infostring_5swpp_44`；无稳定类可依）。 */
+const INFOSTRING_HASHED = '[class*="infostring"]'
 
 /** 源码视图标记：被隐藏的原始代码块（渲染后默认隐藏）。 */
 const HIDDEN_ATTR = 'data-dsh-show-hidden'
@@ -59,9 +62,10 @@ function injectCss(): void {
   document.head.appendChild(tag)
 }
 
-/** 语言名（小写；取 `.infostring` 文本，缺失返回空串）。 */
+/** 语言名（小写；缺失返回空串）。 */
 export function languageOf(block: Element): string {
-  return block.querySelector(INFOSTRING)?.textContent?.trim().toLowerCase() ?? ''
+  const info = block.querySelector(INFOSTRING_HASHED)
+  return info?.textContent?.trim().toLowerCase() ?? ''
 }
 
 /** 代码块原文（`.md-code-block pre code` 的文本）。 */
