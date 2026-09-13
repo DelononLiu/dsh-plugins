@@ -281,6 +281,9 @@ export class ConsoleService extends TypertRemoteService {
    * 模板只带三件套（package.json + patch + lock），**不含 node_modules**——不装依赖
    * 的实例起不来（实机验收发现）。装完再链接池，保证官方作用域由池覆盖。
    */
+  /** 直连守护控制面的 HTTP 实现（可注入，测试用；默认全局 fetch）。 */
+  static fetchImpl: typeof fetch = fetch
+
   /** 删除前等待实例进程退出的上限（超时即放弃归档，绝不归档活实例）。 */
   static DELETE_STOP_TIMEOUT_MS = 5_000
 
@@ -1887,6 +1890,33 @@ export class ConsoleService extends TypertRemoteService {
     return [...this.instances.values()]
   }
 
+  /**
+   * 解析"该把指令派给哪个守护"。优先级：
+   * 1) channel 归属（多机注册的 host）→ 2) launch 配置里该实例的 host（守护 agent 名）；
+   * 3) **本机唯一/在线守护**（launch 里第一个 host-* 键，或 channel 在线的唯一 host agent）——
+   *    legacy 实例（`~/.dsh-<名>`）不在 launch 配置里，只有机器标识，靠这一条兜住（实测踩到）；
+   * 4) 都不行 → 返回 undefined（调用方给可操作的错误）。
+   * ⚠️ 注册表的 host 是**机器标识**（hostname），不是守护 agent 名，不能直接拿去派发。
+   */
+  private resolveTargetHost(instanceId: string): string | undefined {
+    const byOwnership = this.ctx.channel.hostOf(instanceId)
+    if (byOwnership !== undefined && byOwnership !== '') return byOwnership
+    const fromLaunch = (this.config.launch?.[instanceId] as { host?: string } | undefined)?.host
+    if (fromLaunch !== undefined && fromLaunch !== '') return fromLaunch
+    const launchHosts = Object.keys(this.config.launch ?? {}).filter((k) => isHostAgent(k))
+    const onlineHosts = this.ctx.channel.list().filter((i) => isHostAgent(i.id)).map((i) => i.id)
+    const candidates = [...new Set([...onlineHosts, ...launchHosts])]
+    return candidates.length === 1 ? candidates[0] : (launchHosts[0] ?? (onlineHosts.length > 0 ? onlineHosts[0] : undefined))
+  }
+
+  /** 已知守护清单（失败信息里列出，便于自查）。 */
+  private knownHosts(): string[] {
+    return [...new Set([
+      ...Object.keys(this.config.launch ?? {}).filter((k) => isHostAgent(k)),
+      ...this.ctx.channel.list().filter((i) => isHostAgent(i.id)).map((i) => i.id),
+    ])]
+  }
+
   /** 查询实例的访问地址（launch 配置 addr，跳转用；未配置返回 undefined）。 */
   getLaunchAddr(instanceId: string): string | undefined {
     return this.config.launch?.[instanceId]?.addr
@@ -1919,7 +1949,9 @@ export class ConsoleService extends TypertRemoteService {
     actor: string,
   ): ControlResult {
     const result = this.controlInstanceCore(instanceId, command, payload, actor)
-    this.adminEvent(command, instanceId, result.ok, actor, result.ok ? '' : (result.error ?? ''))
+    // 下发型（细节以「已下发」开头）= 只受理，不记「成功」（与 deleteInstance 包装同口径）
+    const dispatched = result.ok && (result.detail ?? '').startsWith('已下发')
+    this.adminEvent(command, instanceId, result.ok, actor, result.ok ? (result.detail ?? '') : (result.error ?? ''), dispatched ? 'accepted' : undefined)
     return result
   }
 
@@ -1985,11 +2017,11 @@ export class ConsoleService extends TypertRemoteService {
         }).catch((e: unknown) => this.adminEvent('delete', instanceId, false, 'daemon', e instanceof Error ? e.message : String(e)))
         return { ok: true, detail: '删除已受理（本机守护执行：停进程 → 确认退出 → 归档）' }
       }
-      const targetHost = this.ctx.channel.hostOf(instanceId) ?? (this.config.launch?.[instanceId] as { host?: string } | undefined)?.host
-      if (targetHost !== undefined && targetHost !== '') {
-        return this.dispatchToHost(targetHost, { type: command, payload: { instanceId } }, actor)
+      const targetHost = this.resolveTargetHost(instanceId)
+      if (targetHost === undefined) {
+        return { ok: false, error: `实例 ${instanceId} 无法确定目标守护——已知守护：${this.knownHosts().join(', ') || '（无）'}` }
       }
-      return { ok: false, error: `实例 ${instanceId} 无守护宿主信息，无法下发 ${command}` }
+      return this.dispatchToHost(targetHost, { type: command, payload: { instanceId } }, actor)
     }
     const online = this.isInstanceOnline(instanceId)
     const daemonAgent = this.ctx.channel.hostOf(instanceId) ?? this.config.launch?.[instanceId]?.host
@@ -2054,10 +2086,12 @@ export class ConsoleService extends TypertRemoteService {
     // 非 daemon 角色：路由到实例所属守护。host 取值优先级 = launch 配置的 host（部署时登记的
     // **守护 agent 名**，如 host-master）→ channel 归属 → 档案 host。⚠️ 注册表的 host 是**机器标识**
     // （hostname，如 DELONON-THINK），拼成 host-<hostname> 会派发到不存在的守护（review 实测）。
-    const launchSpec = this.config.launch?.[instanceId] as { host?: string } | undefined
-    const host = launchSpec?.host ?? this.ctx.channel.hostOf(instanceId) ?? entry.host
-    if (host === undefined || host === '') {
-      return { ok: false, error: `实例 ${instanceId} 无守护宿主信息（launch 配置缺失），无法派发删除` }
+    const host = this.resolveTargetHost(instanceId)
+    if (host === undefined) {
+      return {
+        ok: false,
+        error: `实例 ${instanceId} 无法确定目标守护（launch 无该实例、也没有唯一可用的守护）——已知守护：${this.knownHosts().join(', ') || '（无）'}`,
+      }
     }
     // 「已下发」不等于成功：异步执行的完成态看实例列表/墓碑，措辞不许写成"成功"（review 第 3 条）。
     const dispatched = this.dispatchToHost(host, { type: 'delete', payload: { instanceId } }, 'system')
@@ -2254,8 +2288,13 @@ export class ConsoleService extends TypertRemoteService {
       // delete/restore 不经 controlInstance 的窄联合（那是 stop/start/restart 的生命周期语义）
       return this.remoteLifecycle(hostId, command.type, instanceId)
     }
+    if (command.type === 'deploy') {
+      // deploy 在守护侧是独立方法（console/deployInstance），local 模式有 addr 时同样直连下发
+      // ——否则同机部署根本走不通（实测：UI 新建实例报"需要 hub 模式"）。
+      return this.remoteLifecycle(hostId, 'deploy', instanceId, command.payload)
+    }
     if (command.type !== 'stop' && command.type !== 'start' && command.type !== 'restart') {
-      return { ok: false, error: `${command.type} 需要 hub 模式（多机台账派发）；同机 local 模式只直连 stop/start/restart/delete/restore` }
+      return { ok: false, error: `${command.type} 需要 hub 模式（多机台账派发）；同机 local 模式只直连 stop/start/restart/delete/restore/deploy` }
     }
     return this.remoteControl(hostId, { instanceId, command: command.type })
   }
@@ -2268,14 +2307,34 @@ export class ConsoleService extends TypertRemoteService {
    * 经直连 RPC 下发 delete/restore（这两个动作不属于 stop/start/restart 的生命周期语义，
    * 因此不共用 remoteControl 的窄联合）。语义同 dispatchToHost：ok = 已下发，异步完成。
    */
-  private remoteLifecycle(targetId: string, command: 'delete' | 'restore', instanceId: string): ControlResult {
-    const result = this.ctx.channel.callRemote<ControlResult>(targetId, {
-      namespace: 'console',
-      method: 'controlInstance',
-      args: { instanceId, command, payload: {} },
-    }, 15_000)
-    result.catch(() => { /* 回执异步：失败经实例状态/墓碑呈现 */ })
-    this.log(`[dsh-console] 控制 ${instanceId} ${command} → 直连 RPC 下发守护 ${targetId}`, { scope: 'control' })
+  private remoteLifecycle(targetId: string, command: 'delete' | 'restore' | 'deploy', instanceId: string, payload: unknown = {}): ControlResult {
+    // **直接按 addr POST**，不用 channel.callRemote：后者要求目标在 channel 的实例表里且 online，
+    // 而守护 agent（host-*）不在那张表 → 会 reject，我此前还把它 catch 掉了 = 静默不生效（实测踩到）。
+    // 帧格式与守护控制面一致（`console/<method>`），已有手工验证。
+    const launchSpec = this.config.launch?.[targetId] as { addr?: string } | undefined
+    const addr = launchSpec?.addr ?? this.ctx.channel.get(targetId)?.addr
+    if (addr === undefined || addr === '') {
+      return { ok: false, error: `守护 ${targetId} 无可直连 addr，无法下发 ${command}` }
+    }
+    const method = command === 'deploy' ? 'deployInstance' : 'controlInstance'
+    const args = command === 'deploy' ? { request: payload } : { instanceId, command, payload: {} }
+    const url = `${addr.replace(/\/$/, '')}/api/console/${method}`
+    void ConsoleService.fetchImpl(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method: `console/${method}`, payload: { args } }),
+    }).then(async (res) => {
+      const data = (await res.json().catch(() => null)) as { result?: { ok?: boolean; error?: { message?: string } } } | null
+      if (data?.result?.ok === false) {
+        // **不吞错**：下发失败要留痕（此前 catch(() => {}) 让删除静默不生效）
+        this.log(`[dsh-console] 下发 ${command} ${instanceId} → ${targetId} 失败：${data.result.error?.message ?? '未知原因'}`, { scope: 'control', level: 'error' })
+        this.adminEvent(command, instanceId, false, 'system', data.result.error?.message ?? '下发失败')
+      }
+    }).catch((e: unknown) => {
+      const reason = e instanceof Error ? e.message : String(e)
+      this.log(`[dsh-console] 下发 ${command} ${instanceId} → ${targetId} 异常：${reason}`, { scope: 'control', level: 'error' })
+    })
+    this.log(`[dsh-console] 控制 ${instanceId} ${command} → 直连 RPC 下发守护 ${targetId}（${addr}）`, { scope: 'control' })
     return { ok: true, detail: `已下发守护 ${targetId} 执行 ${command}（异步；完成态见列表/墓碑）` }
   }
 
@@ -2380,6 +2439,18 @@ export class ConsoleService extends TypertRemoteService {
   }
 
   private deployInstanceCore(request: DeployInstanceRequest): ControlResult {
+    // 客户端可能传了个不认识的名字（实测：UI 受控下拉显示 host-master、state 还是初始 'host1'
+    // → 报「目标 host1 无本机接收者」）。这里以"已知守护"为准纠正，纠正不了才失败并列出可用守护。
+    const known = this.knownHosts()
+    if (request.host === undefined || request.host === '' || (known.length > 0 && !known.includes(request.host))) {
+      const resolved = this.resolveTargetHost(request.instanceId)
+      if (resolved !== undefined) {
+        this.log(`[dsh-console] deploy ${request.instanceId}：请求的目标守护 "${String(request.host)}" 不可用 → 改用 ${resolved}`, { scope: 'deploy' })
+        request = { ...request, host: resolved }
+      } else if (known.length > 0) {
+        return { ok: false, error: `目标守护 "${String(request.host)}" 不是已知守护——可用：${known.join(', ')}` }
+      }
+    }
     const { host, instanceId, name, version, addr } = request
     if (!host || !instanceId || !version) return { ok: false, error: '部署请求缺 host/instanceId/version' }
     // 先派发再登记：登记 = 已受理（派发失败时不留下"有档案无人执行"的假成功）。

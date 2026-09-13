@@ -318,10 +318,13 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     const id = newInstId.trim()
     if (!id || !newInstPort) { setNewInstResult('请填写实例名称与端口'); return }
     if (newInstVersion === '') { setNewInstResult('池内没有可用版本：先到「版本」页签导入一个 runtime 版本'); return }
+    // 目标守护必须来自真实守护列表（受控 select 的显示值可能与 state 不一致，这里以真实列表为准）
+    const targetHost = daemonHosts.includes(newInstHost) ? newInstHost : (daemonHosts[0] ?? '')
+    if (targetHost === '') { setNewInstResult('没有可用守护：请先启动目标主机的 daemon'); return }
     setNewInstBusy(true)
     try {
       const r = await host.deployInstance({
-        host: newInstHost, instanceId: id, name: id, version: newInstVersion, profile: newInstTemplate,
+        host: targetHost, instanceId: id, name: id, version: newInstVersion, profile: newInstTemplate,
         dshHome: `/home/long2015/.dsh-home/instance-${id}`, port: Number(newInstPort), token: Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2),
         addr: `http://127.0.0.1:${newInstPort}`, env: { DSH_RELAY_AGENT: id, DSH_CONSOLE_ADDR: 'http://127.0.0.1:3082' },
       })
@@ -359,7 +362,12 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
         ...(v.hosts ?? []).map((h) => h.id),
         ...(v.instances ?? []).map((i) => i.host ?? '').filter(Boolean),
       ]))
-      if (hosts.length > 0) setDaemonHosts(hosts)
+      if (hosts.length > 0) {
+        setDaemonHosts(hosts)
+        // 受控 select：显示第一项、state 还停在初始 'host1' 时，提交的就是不存在的守护（实测报
+        // "目标 host1 无本机接收者"）→ 列表变化即把非法值纠正为真实守护。
+        setNewInstHost((cur) => (hosts.includes(cur) ? cur : hosts[0]))
+      }
       setLoaded(true)
       setLastUpdated(Date.now())
     } catch {
@@ -513,7 +521,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                       {(pool?.versions ?? []).map((v) => <option key={v.version} value={v.version}>{v.version}</option>)}
                     </select>
                   </div>
-                  <button type="button" className="dsh-console-btn primary" onClick={() => { void deployNewInstance() }} disabled={newInstBusy}>{newInstBusy ? '部署中…' : '部署实例'}</button>
+                  <button type="button" className="dsh-console-btn primary" onClick={() => { void deployNewInstance() }} disabled={newInstBusy || daemonHosts.length === 0} title={daemonHosts.length === 0 ? '没有可用守护（先在目标主机上启动 daemon）' : undefined}>{newInstBusy ? '部署中…' : '部署实例'}</button>
                   {newInstResult && <span style={{ fontSize: 12, color: newInstResult.startsWith('已') || newInstResult.startsWith('下发') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{newInstResult}</span>}
                 </div>
               </div>

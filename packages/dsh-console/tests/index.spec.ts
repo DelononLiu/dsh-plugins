@@ -2035,19 +2035,19 @@ describe('删除路由（review 阻塞项回归）：console 角色 → 派发�
     saveRegistry(reg)
     // 守护必须在 channel 里有 addr，才走直连 RPC（否则走本地回环 → 无接收者 → 显式失败）
     ctx.channel.register({ id: 'host-master', name: 'host-master', addr: 'http://127.0.0.1:3089', status: 'online' }, 'tok-master')
-    const channel = ctx.channel as unknown as { callRemote: (...a: unknown[]) => Promise<unknown>; sendControl: (...a: unknown[]) => unknown }
-    const remote = vi.spyOn(channel, 'callRemote').mockResolvedValue({ ok: true, value: { ok: true } })
+    const calls: string[] = []
+    ConsoleService.fetchImpl = (async (url: string) => { calls.push(String(url)); return new Response(JSON.stringify({ result: { ok: true, value: { ok: true } } }), { status: 200 }) }) as unknown as typeof fetch
     const r = await ctx.console.deleteInstance('web9')
     expect(r.ok).toBe(true)
     expect(r.detail ?? '').toMatch(/已下发/)
     // 目标 = launch 的 host-master（不是 host-DELONON-THINK）
-    expect(remote.mock.calls[0][0]).toBe('host-master')
+    expect(calls[0]).toContain('http://127.0.0.1:3089/api/console/')
     // 不许谎报成功：管理事件必须记「已受理」而不是「成功」
     const logFile = Logger.resolvePath('console')!
     const admins = readFileSync(logFile, 'utf8').split('\n').filter((l) => l.includes('admin-event'))
     expect(admins.some((l) => l.includes('已受理'))).toBe(true)
     expect(admins.some((l) => l.includes('→ 成功'))).toBe(false)
-    remote.mockRestore()
+    ConsoleService.fetchImpl = fetch
   })
 
   it('守护不可达（无 addr、无本机接收者）→ 显式失败，不谎报成功', async () => {
@@ -2065,5 +2065,82 @@ describe('删除路由（review 阻塞项回归）：console 角色 → 派发�
     expect(r.error ?? '').toMatch(/无本机接收者|无守护宿主/)
     expect(existsSync(home)).toBe(true) // 目录与档案原样
     expect(findInstance(loadRegistry(), 'web9')!.status).toBe('active')
+  })
+})
+
+describe('目标守护解析（用户报错回归）：legacy 实例只有机器标识时的回退', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+  })
+
+  it('legacy 实例：launch 无该实例、channel 无归属 → 回退到本机唯一守护（host-master）', async () => {
+    mockSpawn(fakeChild())
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, { launch: { 'host-master': { host: 'host-master', addr: 'http://127.0.0.1:3089' } } })
+    ctx.channel.register({ id: 'host-master', name: 'host-master', addr: 'http://127.0.0.1:3089', status: 'online' }, 'tok')
+    // legacy 实例：home 在 ~/.dsh-webX，档案 host 是机器标识，launch 里没有它
+    const home = join(process.env.HOME ?? '', '.dsh-webX')
+    mkdirSync(join(home, 'profiles', 'webX'), { recursive: true })
+    const reg = loadRegistry()
+    upsertInstance(reg, { id: 'webX', host: 'DELONON-THINK', home, profileDir: 'webX', layout: 'legacy', role: 'console' })
+    saveRegistry(reg)
+    const calls: string[] = []
+    ConsoleService.fetchImpl = (async (url: string) => { calls.push(String(url)); return new Response(JSON.stringify({ result: { ok: true, value: { ok: true } } }), { status: 200 }) }) as unknown as typeof fetch
+    const r = await ctx.console.deleteInstance('webX')
+    expect(r.ok).toBe(true)
+    expect(calls[0]).toContain('http://127.0.0.1:3089/api/console/')  // 不是 host-DELONON-THINK
+    ConsoleService.fetchImpl = fetch
+  })
+
+  it('没有任何守护 → 显式失败并列出已知守护（便于自查）', async () => {
+    mockSpawn(fakeChild())
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, {})
+    const home = join(process.env.HOME ?? '', '.dsh-webY')
+    mkdirSync(join(home, 'profiles', 'webY'), { recursive: true })
+    const reg = loadRegistry()
+    upsertInstance(reg, { id: 'webY', host: 'DELONON-THINK', home, profileDir: 'webY', layout: 'legacy' })
+    saveRegistry(reg)
+    const r = await ctx.console.deleteInstance('webY')
+    expect(r.ok).toBe(false)
+    expect(r.error ?? '').toMatch(/无法确定目标守护|已知守护/)
+  })
+})
+
+describe('用户报错回归：UI 传了不存在的守护名（host1）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+  })
+
+  it('console 角色：request.host=host1 但已知守护是 host-master → 自动纠偏并派发', async () => {
+    mockSpawn(fakeChild())
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, { launch: { 'host-master': { host: 'host-master', addr: 'http://127.0.0.1:3089' } } })
+    ctx.channel.register({ id: 'host-master', name: 'host-master', addr: 'http://127.0.0.1:3089', status: 'online' }, 'tok')
+    const calls: string[] = []
+    ConsoleService.fetchImpl = (async (url: string) => { calls.push(String(url)); return new Response(JSON.stringify({ result: { ok: true, value: { ok: true } } }), { status: 200 }) }) as unknown as typeof fetch
+    const r = ctx.console.deployInstance({
+      host: 'host1', instanceId: 'mytest', version: '0.1.2-rc.1', profile: 'dev',
+      dshHome: join(tmpdir(), 'instance-mytest'), port: 3096, token: 't',
+    })
+    expect(r.ok).toBe(true)
+    expect(calls[0]).toContain('http://127.0.0.1:3089/api/console/')   // 纠偏到真实守护
+    ConsoleService.fetchImpl = fetch
+  })
+
+  it('没有任何已知守护 → 失败信息列出可用守护（便于自查）', async () => {
+    mockSpawn(fakeChild())
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, {})
+    const r = ctx.console.deployInstance({
+      host: 'host1', instanceId: 'mytest2', version: '0.1.2-rc.1', profile: 'dev',
+      dshHome: join(tmpdir(), 'instance-mytest2'), port: 3096, token: 't',
+    })
+    expect(r.ok).toBe(false)
+    expect(r.error ?? '').toMatch(/不是已知守护|无本机接收者|可用/)
   })
 })
