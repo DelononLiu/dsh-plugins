@@ -3,7 +3,7 @@
  * inbox（系统事件消息，按 owner 隔离）。
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import * as childProcess from 'node:child_process'
@@ -22,6 +22,32 @@ import ConsoleService, {
   type LogReadResult,
   type LogRecord,
 } from '../src/index.ts'
+
+/**
+ * 目录隔离：整套测试跑在临时 DSH_HOME 下——daemon 角色会把部署清单/日志写进
+ * 数据根（roleDataRoot），沿用外部 DSH_HOME 会污染正在运行的环境（曾把
+ * instances.json 写进 ~/.dsh-web2）并让测试互相串（上一个用例的部署清单被
+ * 下一个用例恢复，断言随之失真）。
+ */
+let savedDshHome: string | undefined
+let testDshHome = ''
+
+beforeAll(() => { savedDshHome = process.env.DSH_HOME })
+afterAll(() => {
+  if (savedDshHome === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = savedDshHome
+})
+
+// 每个用例独立数据根：daemon 的部署清单/日志互不串联（否则上个用例 deploy 的实例
+// 会被下个用例的守护恢复，断言随之失真）。
+beforeEach(() => {
+  testDshHome = mkdtempSync(join(tmpdir(), 'dsh-console-test-home-'))
+  process.env.DSH_HOME = testDshHome
+})
+afterEach(() => {
+  if (savedDshHome !== undefined) process.env.DSH_HOME = savedDshHome
+  rmSync(testDshHome, { recursive: true, force: true })
+})
 
 async function boot(): Promise<Context> {
   const ctx = new Context()
@@ -1357,5 +1383,89 @@ describe('多机 hub（worker 注册 → 归属/状态/台账派发）', () => {
     svc.probeLaunch() // 不应把已注册实例标离线（跨机地址不由本进程判定）
     await new Promise((r) => setTimeout(r, 30))
     expect(ctx.channel.get('webA')?.status).toBe('online')
+  })
+})
+
+describe('多机 P1b（部署清单持久化 / 对账 / 回执真实结果 / 审计）', () => {
+  it('deploy 落盘清单；新守护进程从清单恢复（不再"清单丢、进程变孤儿"）', async () => {
+    const ctx = await bootDaemon({})
+    ctx.console.deployInstance({
+      host: 'host1', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
+      dshHome: '/tmp/.dsh-web6-persist', port: 3086, token: 'tok-web6',
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    const listFile = join(process.env.DSH_HOME!, 'instances.json')
+    expect(existsSync(listFile)).toBe(true)
+    expect(JSON.parse(readFileSync(listFile, 'utf8')).instances.web6.port).toBe(3086)
+    // 新守护（同 DSH_HOME）恢复清单：白名单/端口定位/上报都能看见部署出来的实例
+    const ctx2 = await bootDaemon({})
+    mkdirSync(join(process.env.DSH_HOME!, 'logs'), { recursive: true })
+    writeFileSync(join(process.env.DSH_HOME!, 'logs', 'web6.log'), 'x\n')
+    expect(ctx2.console.listLogFiles().instances.map((m) => m.id)).toContain('web6')
+    // 对账含端口探测（每实例最长 2s），须等任务完成而非猜时间窗。
+    await ctx2.console.reconcileReady()
+    expect(ctx2.console.reconcileResult().some((r) => r.id === 'web6')).toBe(true)
+  })
+
+  it('启动对账报告疑似孤儿（有日志但不在清单）', async () => {
+    mkdirSync(join(process.env.DSH_HOME!, 'logs'), { recursive: true })
+    writeFileSync(join(process.env.DSH_HOME!, 'logs', 'ghost9.log'), 'x\n')
+    const ctx = await bootDaemon({})
+    await ctx.console.reconcileReady()
+    const orphan = ctx.console.reconcileResult().find((r) => r.id === 'ghost9')
+    expect(orphan?.state).toBe('orphan')
+  })
+
+  it('守护回执真实结果：busy 与未知实例都不再假报成功', async () => {
+    const ctx = await bootDaemon({})
+    const svc = ctx.console as unknown as {
+      handleDaemonControl(cmd: unknown, from: string): { ok: boolean; error?: string; detail?: string }
+      ops: Map<string, string>
+    }
+    // busy：实例已有操作在跑
+    svc.ops.set('web3', 'restarting')
+    const busy = svc.handleDaemonControl({ id: 'c1', type: 'start', payload: { instanceId: 'web3' }, ts: Date.now() }, 'hub')
+    expect(busy.ok).toBe(false)
+    expect(busy.error).toContain('busy')
+    svc.ops.delete('web3')
+    // 不在本机清单
+    const unknown = svc.handleDaemonControl({ id: 'c2', type: 'stop', payload: { instanceId: 'nope' }, ts: Date.now() }, 'hub')
+    expect(unknown.ok).toBe(false)
+    expect(unknown.error).toContain('不在本机清单')
+  })
+
+  it('注册上报版本 → 实例与主机档案可查（升级编排依据）', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, {
+      tokens: { host2: 'tok-2' }, heartbeatTimeoutMs: 30_000, mode: 'hub', pollWaitMs: 100,
+    })
+    await ctx.plugin(ConsoleService, {})
+    ctx.channel.registerWorker({
+      id: 'host2',
+      version: '0.1.2-rc.1',
+      instances: [{ id: 'web3', status: 'online', version: '0.1.1-rc.2' }],
+    }, 'tok-2')
+    expect(ctx.console.getInstanceRecord('web3')?.version).toBe('0.1.1-rc.2')
+    // 主机档案带守护发行包版本（UI 主机表 version 列）
+    const hostRecord = ctx.console.listInstanceRecords().find((r) => r.id === 'host2')
+    expect(hostRecord?.version).toBe('0.1.2-rc.1')
+  })
+
+  it('审计：控制指令 actor 随台账条目记录（显式身份走 HTTP 面）', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, {
+      tokens: { host2: 'tok-2' }, heartbeatTimeoutMs: 30_000, mode: 'hub', pollWaitMs: 100,
+    })
+    await ctx.plugin(ConsoleService, { launch: { webA: { host: 'host2' } } })
+    ctx.channel.registerWorker({ id: 'host2', instances: [{ id: 'webA', status: 'online' }] }, 'tok-2')
+    const svc = ctx.console as unknown as {
+      controlInstanceAs(instanceId: string, command: string, payload: object, actor: string): { ok: boolean; commandId?: string }
+    }
+    const r = svc.controlInstanceAs('webA', 'restart', {}, 'alice')
+    expect(r.ok).toBe(true)
+    expect(ctx.channel.commandStatus(r.commandId!)?.actor).toBe('alice')
+    // @Remote 面（无身份）→ system
+    const viaRemote = ctx.console.controlInstance('webA', 'start')
+    expect(ctx.channel.commandStatus(viaRemote.commandId!)?.actor).toBe('system')
   })
 })

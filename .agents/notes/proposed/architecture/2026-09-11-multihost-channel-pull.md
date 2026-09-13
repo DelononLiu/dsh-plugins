@@ -15,7 +15,7 @@ Status: proposed
 3. **broker 组件在本仓库无实现**：`packages/dsh-agent-relay` 缺失；已部署 home 内 `node_modules/dsh-agent-relay` 是指向该路径的死链；19121 无监听。
 4. **channel 无自己的 server**：`register`/`heartbeat`/`declare`/`emit`/`subscribe`/`ack` 均为进程内 API，事件总线无任何远端投递。只有 `list`/`get`/`brokerStatus` 带 `@Remote`，经官方 typert gateway 可 HTTP 到达（即 `directRpc` 的目标面）。
 5. **身份与地址语义**：自身身份取自 `ctx.channel.relay?.agent` 或 `DSH_RELAY_AGENT`（不要求 broker 存活——19121 无监听时 3082 仍返回 `self: true`）；实例 id 由 launch/instances 配置的 `declare` 提供。daemon 为本机实例构造的 addr 是 `http://127.0.0.1:<port>`，管理端 `probeLaunch` 直接 fetch 该 addr 判活。
-6. **探活已覆盖带 addr 的 host 条目**（当前 host1 的 addr 即 daemon controlPort），判据是"有响应即活"（fetch 不抛就续心跳）——端口被无关进程占用同样算在线；`isPortFree` 硬编码 `127.0.0.1`，仅适用于本机。
+6. **探活已覆盖带 addr 的 host 条目**（总控主机守护 `host-master` 的 addr 即 daemon 控制口），判据是"有响应即活"（fetch 不抛就续心跳）——端口被无关进程占用同样算在线；`isPortFree` 硬编码 `127.0.0.1`，仅适用于本机。
 7. **console 两个路由无凭据校验**：`/api/console/instances`（GET）与 `/api/console/control`（POST，直通 `controlInstance`）经 `webServer.register` 注册，不读任何凭据——实测无凭据 POST 非法指令得到 `400 unsupported command: bogus`（handler 已执行）。当前只在回环可及；绑 `0.0.0.0` 即等同裸暴露。
 8. **注册面默认信任**：`register()` 仅在 `config.tokens[id]` 已配置时才校验，未配置即无条件接受；且 `instances.set()` 无条件覆写 `declare` 写入的 addr。
 9. **内核绑定约束**：`webserver.host` 只接受 `127.0.0.1 | 0.0.0.0`。
@@ -65,13 +65,13 @@ Status: proposed
 5. 归属与默认 deny：`tokens` 未登记的 id 拒绝注册；注册声明写 `hostIndex`（实例 → worker），归属冲突逐个拒绝（不牵连整次注册）；实例表按上报值 upsert（状态权威 = 注册上报）。console 侧 `handleWorkerRegister` 落档案并投 inbox（`system.host.register`）。
 6. 显式失败：`sendControl` 返回 `ControlDispatchResult`（hub 未注册目标 → ok=false；本机无接收者 → ok=false，不再空转）；console 新增 `dispatchToHost`——hub 走台账，同机 local 模式保留直连（有 addr → `remoteControl` 直连守护控制端口；无 addr → 进程内回环），`deploy`/`upgrade` 在缺 hub 时给出明确错误；`deployInstance` 改为**先派发成功再登记档案**（失败不留无主档案）；hub 模式探测跳过跨机地址与已注册目标（状态权威来自注册）。
 7. 测试：channel 37 项（含真 HTTP 端到端：注册 → 长轮询 → 本地执行 → 回执进台账；鉴权 401/403；归属冲突；租约重投；台账恢复；回执归属校验）+ console 116 项（含 hub 注册落档案与主机上线 inbox、台账派发、未注册显式失败、deploy 失败不留档案、探测跳过跨机/已注册）。
-**P1a 遗留（未做，P1b 内一并处理）**：守护/实例 id 命名规则统一（代码 `^host\d+$`、配置 `host1`、部分文档写 `host-<id>`）；daemon 侧并发上限与"操作进行中"回执语义（现由既有 busy 锁承担，未把 409 语义回给 hub）；`DSH_RELAY_*` 旧配置的 fail-fast 或显式降级提示；daemon 的手写控制端口（`startControlServer`）与同机直连路径仍保留（local 模式使用），P1b 统一切到 pull 后删除。
+**P1a 遗留（P1b 内一并处理）**：**命名统一已落地**——守护/实例 agent 名规范形态 = `host-<id>`，`<id>` 是**字符串**（当前取值多为数字串，如 `hostId: '1'` → `host-1`；总控主机 = `host-master`）；`isHostAgent` 同时接受旧的无短横形态 `host<N>`（迁移期兼容），`hostAgentId()` 负责归一化，`launch` 的 host 键与守护自报名必须同形（否则路由判定"目标守护未注册"）。其余遗留：daemon 侧并发上限与"操作进行中"回执语义（现由既有 busy 锁承担，未把 409 语义回给 hub）；`DSH_RELAY_*` 旧配置的 fail-fast 或显式降级提示；daemon 的手写控制端口（`startControlServer`）与同机直连路径仍保留（local 模式使用），P1b 统一切到 pull 后删除。
 
-### P1b 部署、升级、状态与日志接同一通道
+### P1b 部署、升级、状态与日志接同一通道——**8/9/11/12 已落地；10 未落地**
 
-8. `deployInstance` 经台账下发；daemon 落地后回执；实例清单**落盘**（`<DSH_HOME>/instances.json`）并在启动时 reconcile（报告孤儿进程与端口占用）；`killPortProcess`/`logPathFor`/`listLogFiles` 统一读清单。
+8. `deployInstance` 经台账下发；daemon 落地后回执；实例清单**落盘**（`<DSH_HOME>/instances.json`）并在启动时 reconcile（报告孤儿进程与端口占用）；`killPortProcess`/`logPathFor`/`listLogFiles` 统一读清单。对账是异步任务（端口探测每实例最长 2s），就绪契约 = `reconcileReady()`（消费方 await，不猜时间窗）。
 9. 状态由 daemon 注册载荷上报；console 不跨机 fetch worker 地址。
-10. 日志：`readLog`/`listLogFiles` 改异步语义（现为同步 fallback 空结果，见 [console-structured-log](../../implemented/architecture/2026-09-06-console-structured-log.md)）。
+10. 日志：`readLog`/`listLogFiles` 改异步语义（现为同步 fallback 空结果，见 [console-structured-log](../../implemented/architecture/2026-09-06-console-structured-log.md)）——**未落地**（两者仍为同步签名，等 P2 与事件面一并接线）。
 11. 升级：v1 明确"各主机本地发行包源"（现状即如此，见 [unified-upgrade-engine](../../implemented/architecture/2026-09-04-unified-upgrade-engine.md)），console 编排 + 校验各机版本；跨机推发行包 = v1 之后（否则跨机升级验收不可测）。
 12. 审计：指令记录发起者（可得用户身份记 id，否则 `system`）、时间、目标、结果。
 
