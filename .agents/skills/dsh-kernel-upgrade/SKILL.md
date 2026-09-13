@@ -34,7 +34,7 @@ git worktree add -b "feat/upgrade-$VER" "../dsh-plugins-feat-upgrade-$VER"
 
 按官方实际 API 迁移（**以目标版源码为准，不猜**）：
 
-1. **版本 bump**：各 package.json 官方依赖 + profiles/web/dsh.lock.json（kernel/bundles）→ 目标版。
+1. **版本 bump**：各 package.json 官方依赖 + profiles/master/dsh.lock.json（kernel/bundles）→ 目标版。
 2. **核心包移除/改名**（如 dsh-client-runtime 移除）：
    - client 插件 `ClientContext` 从被移除包 → `@deepseek-ai/cordis` 的 `Context`（官方同款）。
    - `dsh.client.inject` 换按需服务（用 slots→ui-renderer、remote→api-remotes、settingsScope→ui-settings、sessions→api-session-controller）。
@@ -64,11 +64,11 @@ overrides:
 ## 3. 隔离验证（web5——不动 web2/3/4）
 
 1. **独立 alpha CLI**：`mkdir ~/dsh-alpha5-cli && cd 那里 && npm install @deepseek-ai/dsh@<ver>`（不装全局——web2/3/4 共用全局旧内核）。
-2. **web5 home**：`mkdir ~/.dsh-web5 && cp -r ~/.dsh-web2/profiles/web ~/.dsh-web5/profiles/web`，改：
+2. **web5 home**：`mkdir ~/.dsh-web5 && cp -r ~/.dsh-web2/profiles/web2 ~/.dsh-web5/profiles/web5`，改：
    - 自研依赖 `link:` → worktree 的 packages
    - webserver 端口 → 3085、gateway 端口 → 3445（避开 web2 的 3082/3443）
    - profile `@deepseek-ai/dsh-tools` → 目标版（旧版与内核不兼容会崩）
-3. **启动**：`env DSH_HOME=~/.dsh-web5 <alpha-cli>/dsh --profile web --no-open`（无浏览器环境用 curl 验证）。
+3. **启动**：`env DSH_HOME=~/.dsh-web5 <alpha-cli>/dsh --profile web5 --no-open`（无浏览器环境用 curl 验证）。
 4. **验证清单**：
    - [ ] 页面 200（`curl -L "http://127.0.0.1:3085/?token=<boot-token>"` 取 cookie → 带 cookie 访问）
    - [ ] 自研 host API（如 `console /api/console/instances` 返回真实数据）

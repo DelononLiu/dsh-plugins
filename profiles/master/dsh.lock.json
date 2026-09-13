@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "id": "dsh-distro-web2",
-  "name": "dsh 测试环境（web2：管理端 console 全家桶）",
+  "id": "dsh-distro-master",
+  "name": "dsh 模板（master：开发 + 正式，完整自研 + vendored 全家桶）",
   "version": "0.0.0",
   "kernel": "@deepseek-ai/dsh@0.1.2-rc.1",
   "bundles": {
     "@deepseek-ai/dsh-base": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1",
     "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
     "@linxin666/dsh-client-ui-git-graph": "0.3.12",
     "@linxin666/dsh-client-ui-skill-explorer": "0.3.12",
+    "@linxin666/dsh-client-ui-task-board": "0.3.12",
     "@linxin666/dsh-ssh": "0.3.12",
-    "dsh-better-sidebar": "0.18.0-alpha.0",
+    "dsh-better-sidebar": "0.15.2",
     "dsh-channel": "0.0.0",
     "dsh-console": "0.0.0",
     "dsh-desk": "0.0.0",
@@ -20,5 +20,12 @@
     "dsh-quick-nav": "0.0.0",
     "dsh-user": "0.0.0"
   },
-  "vendored": {}
+  "vendored": {
+    "dsh-memento": "0.4.4",
+    "@nanmicoder/dsh-agent-teams": "0.1.12",
+    "dsh-web-ui": "0.2.6(npm @linxin666)",
+    "dsh-gateway": "1.6.0",
+    "dsh-update-checker": "TBD",
+    "dsh-prometheus": "TBD"
+  }
 }

@@ -6,12 +6,12 @@ Status: implemented
 
 DeepSeek 官方额度不可用期间，需要免费模型"打下手"。kilo.ai 网关的免费档
 （OpenRouter 兼容、匿名可用）经实测可用且有工具调用支持。希望按仓库
-`profiles/web` 构建/部署的 web 实例**开箱即带**这批免费模型，而不必每台
+`profiles/master` 构建/部署的 web 实例**开箱即带**这批免费模型，而不必每台
 手写 `settings.yaml`。
 
 ## Decision
 
-在发行包 profile 补丁层 `profiles/web/cordis.patch.yml` 里以 row 覆盖方式给
+在发行包 profile 补丁层 `profiles/master/cordis.patch.yml` 里以 row 覆盖方式给
 base bundle 中 dormant 挂载的 `llm-pi-ai` 行补默认 providers：
 
 - 路由 key `kilo-free`：`api: openai-completions`，`baseURL: https://api.kilo.ai/api/openrouter`，
@@ -36,7 +36,7 @@ base bundle 中 dormant 挂载的 `llm-pi-ai` 行补默认 providers：
 
 ## Consequences
 
-- 按 `profiles/web` 构建/部署的 web 实例开箱带 4 个 kilo 免费模型；运行前提 =
+- 按 `profiles/master` 构建/部署的 web 实例开箱带 4 个 kilo 免费模型；运行前提 =
   环境能解析 `KILO_API_KEY`（值 `anonymous`：export 或写 DSH_HOME/.credentials.yaml refs）。
 - **边界（重要）**：dsh-console（daemon）部署的实例**不吃**这条默认——console 的
   deploy 重建实例 `cordis.patch.yml`、upgrade 显式跳过实例 patch（身份层归实例），

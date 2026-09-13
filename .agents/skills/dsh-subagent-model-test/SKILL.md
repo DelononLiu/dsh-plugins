@@ -84,7 +84,7 @@ llm-pi-ai:
           contextWindow: <n>
 ```
 
-repo 侧种子同步：仅当该 env 的 profile 模板受控时改 `profiles/<env>/cordis.patch.yml` 的 `llm-pi-ai` 段（web2 = repo + 运行时双处同步；**不动 profiles/web、web3、worktree**——用户口径）。改完**必须开新会话**才能派（ACL 快照机制）。
+repo 侧种子同步：仅当该 env 的 profile 模板受控时改 `profiles/<env>/cordis.patch.yml` 的 `llm-pi-ai` 段（dev = repo + 运行时双处同步；**不动 master、explorer、worktree**——用户口径）。改完**必须开新会话**才能派（ACL 快照机制）。
 
 ## 4. 已知实测快照（2026-09-06，会过期——以现跑为准）
 

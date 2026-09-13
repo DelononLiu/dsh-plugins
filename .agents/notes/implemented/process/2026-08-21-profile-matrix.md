@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-**三个 profile 模板**（`profiles/web|web2|web3/`，各含 package.json + cordis.patch.yml + dsh.lock.json）：
+**四个实例模板**（`profiles/master|dev|explorer|minimal/`，各含 package.json + cordis.patch.yml + dsh.lock.json）：
 
 | profile | 用途 | bundles 内容 |
 | --- | --- | --- |

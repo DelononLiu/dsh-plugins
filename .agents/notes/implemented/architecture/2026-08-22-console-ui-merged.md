@@ -12,7 +12,7 @@ dsh-console（纯服务端管理组件）与 dsh-console-ui（纯 UI，client �
 
 - `dsh-console` 声明 `dsh.client`（inject dsh-client-runtime + dsh-client-ui-sidebar，platform web），exports 加 `"./client"`，build 产出 client bundle（build-client.mjs）；
 - `src/client/`（ConsoleBadge.tsx + 入口）从 dsh-console-ui 移入；删除 dsh-console-ui 包；
-- profile（web2/web3 与 profiles/web 模板）移除 dsh-console-ui insert/bundle。
+- profile（web2/web3 与 profiles/master 模板）移除 dsh-console-ui insert/bundle。
 
 **UI 可替换性保留**：client 面仍独立于 host 逻辑（`src/client/` + `exports["./client"]`），未来替换界面只需换 client 入口。
 

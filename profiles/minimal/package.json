@@ -1,0 +1,15 @@
+{
+  "name": "dsh-profile-minimal",
+  "private": true,
+  "version": "0.0.0",
+  "description": "官方默认模板：只要官方基线（base + web-app），不含任何自研/社区插件——最小可跑实例，也是「模板 = 创建时快照」的最简样本。",
+  "dependencies": {},
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app"
+      ]
+    }
+  }
+}

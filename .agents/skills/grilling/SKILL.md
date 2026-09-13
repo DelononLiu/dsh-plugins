@@ -31,7 +31,7 @@ grep -rn '"@deepseek-ai/' packages/*/package.json | sort | head -40            #
 grep -rn '"kernel"' profiles/*/dsh.lock.json                                  # 基线权威源（模板锁，不是 package.json 的推测）
 ```
 
-判读：上一条命令要**逐 profile 比对**——不同 profile 锁的内核版本可能不一致（实见 `profiles/web3`
+判读：上一条命令要**逐 profile 比对**——不同 profile 锁的内核版本可能不一致（实见 `profiles/explorer`
 仍是 `0.1.1-rc.2` 而 web/web2 是 `0.1.2-rc.1`）。不一致 = 那个实例上的"正确行为"标准与别的实例不同，
 任何跨实例判据（健康/版本/兼容）都要先解决它。
 
@@ -75,7 +75,7 @@ web3 3083 / web4 3084 / daemon headless）？端口从哪来？
 grep -rn 'DSH_HOME\|process\.env\.DSH_\|dshHome' packages/dsh-console/src | head -30
 grep -rn 'roleDataRoot\|homedir()' packages/*/src | head -20        # 无 DSH_HOME 时 fallback ~/.dsh = 直接踩 3080 红线
 grep -rn 'webserver' profiles/*/cordis.patch.yml scripts/dsh-profile.sh | head -20   # 端口权威源只在这里
-ls -1 profiles/                                                     # 模板清单（实见只有 web/web2/web3；web4/daemon 无模板）
+ls -1 profiles/                                                     # 模板清单（master/dev/explorer/minimal 四个）
 grep -n 'port?: number' -B3 packages/*/src/index.ts | head -20      # 配置里到底有没有 port 字段（有字段 ≠ 被填过）
 ```
 

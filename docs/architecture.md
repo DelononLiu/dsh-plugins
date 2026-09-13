@@ -209,19 +209,20 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 - 升级路径：跟随 DSH rc 整体 bump，不散装升级。
 - 部署/升级 = 版本矩阵整体推进，console 协调所有主机/实例。
 - 分发形态（已确认）：**完整 profile 模板**（git clone 现成 profile 目录直接用），模板即实例种子。
-- 落地形式：`profiles/web/dsh.lock.json`（版本锁 schema 已定稿：schemaVersion/id/name/version/kernel/bundles/vendored，见 §9）。边界语义：`kernel` = CLI 入口（@deepseek-ai/dsh）版本；`bundles` = profile 组件（含官方内置 base/web-app 与自研插件）；`vendored` = 社区插件锁定。
+- 落地形式：`profiles/master/dsh.lock.json`（版本锁 schema 已定稿：schemaVersion/id/name/version/kernel/bundles/vendored，见 §9）。边界语义：`kernel` = CLI 入口（@deepseek-ai/dsh）版本；`bundles` = profile 组件（含官方内置 base/web-app 与自研插件）；`vendored` = 社区插件锁定。
 
-### Profile 矩阵（三个模板）
+### Profile 矩阵（四个模板）
 
 | profile | 用途 | bundles 内容 |
 | --- | --- | --- |
-| **web** | 开发 + 正式 | 官方基线 + 全部自研（user/channel/console/nav/tabs/my-ui）+ vendored 全家桶（TBD） |
-| **web2** | 单插件测试（隔离） | 官方基线（无自研）——测试时 `dsh plugin --profile web2 add <被测>` 临时装入 |
-| **web3** | 多插件测试（集成） | 官方基线 + 核心组合（user/channel/console + nav/tabs）——测试时临时增删 |
+| **master** | 开发 + 正式 | 官方基线 + 全部自研（user/channel/console/nav/tabs/desk）+ vendored 全家桶 |
+| **dev** | 管理端 console 组合（日常开发/组装器验证） | 官方基线 + desk（自研按需 `dsh plugin --profile dev add <被测>` 临时装入） |
+| **explorer** | 多插件集成探索（变动最快） | 官方基线 + 核心组合（user/channel/console + nav/tabs）——测试时临时增删 |
+| **minimal** | 官方默认（最小可跑） | 官方基线（base + web-app），无自研/社区插件 |
 
 原则：**web 是正式基线（~/.dsh），测试环境用独立 DSH_HOME 目录隔离**（非共享 home 的 profile 隔离，sessions/settings/storages 完全独立）；自研插件经 cordis.patch.yml insert（不进 bundles）；webserver 端口独立配置（避开正式 3080）。版本矩阵锁（dsh.lock.json）各自维护。
 
-**测试环境固定矩阵**（2026-08 定，不靠猜——脚本 `scripts/dsh-profile.sh` 一键启停/restart/status）：
+**测试环境固定矩阵**（2026-08 定，不靠猜——脚本 `scripts/dsh-profile.sh` 一键启停/restart/status；实例清单权威源 = **注册表** `~/.dsh-home/registry.json`，读写用 `scripts/dsh-registry.mjs`，运行时**不扫描目录**，`import` 子命令显式登记现有实例）：
 
 | 环境 | DSH_HOME | profile | 端口 | 角色 |
 | --- | --- | --- | --- | --- |
@@ -231,7 +232,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | web4 | `~/.dsh-web4` | web4 | 3084 | instance（`DSH_RELAY_AGENT=web4`） |
 | daemon | `~/.dsh-daemon` | daemon | 无 web（headless） | 总控主机守护 `host-master`（`hostId: 'master'`；broker `http://127.0.0.1:19121` 出站连） |
 
-profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名>`，`dsh --profile <名>` 即 boot 之）；web2/3/4 内容同源 web 全家桶，目录各归各实例，可逐实例补丁/升级。发行包模板（profiles/web|web2|web3）是另一层命名，勿混。
+profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名>`，`dsh --profile <名>` 即 boot 之）；web2/3/4 内容同源 web 全家桶，目录各归各实例，可逐实例补丁/升级。实例模板（`profiles/master|dev|explorer|minimal`）是**另一层命名**（模板 = 创建时快照），勿混。
 
 实例矩阵权威源 = 管理端 web2 的 `dsh-console.launch` 配置；quick-nav/console 从 `DSH_CONSOLE_ADDR=http://127.0.0.1:3082` 拉实例表。
 
@@ -400,7 +401,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-desk 工具入口组装器（SSH/技能中心 re-parent 到 foot 区控制台上方、任务看板隐藏 + 顶部按钮摆到会话头快捷导航右侧；均对齐官方契约样式 + 间距；无顶部目标回退 foot） | assembler.spec 15 测试 + web2 验证 |
 | dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关 + 组装器配置化/通用性 + **slots 型插件显隐 git-graph 开关**） | 25 测试（含 slots-controller 5） |
 | vendored 全家桶 5 包（better-sidebar/git-graph/ssh/task-board/skill-explorer） | profile 依赖 + lock 锁版本 |
-| 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh | scripts/ 已实测 |
+| 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh 读实例注册表 | scripts/ 已实测（registry.test.mjs 7 项 + profile-registry.test.sh 14 项） |
 | vendoring 统一 npm（submodule 归零） | AGENTS.md policy |
 
 **❌ 未完成（开放项，见上）**

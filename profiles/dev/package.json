@@ -1,5 +1,5 @@
 {
-  "name": "dsh-profile-web",
+  "name": "dsh-profile-dev",
   "private": true,
   "dependencies": {
     "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1",

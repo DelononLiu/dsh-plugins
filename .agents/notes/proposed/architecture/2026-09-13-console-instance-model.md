@@ -70,7 +70,7 @@ layout(legacy|home) · addr · status`。删除留 **tombstone**（档案不物�
 **12. 模板本轮只改名**：`web→master`、`web2→dev`、`web3→explorer`，新建 `minimal`
 （= 官方默认：`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app`，与 3080 的 bundle 列表去掉
 gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与技能种子命令同步改。
-**内核版本本轮一律不动**（`profiles/web3` 仍为 `0.1.1-rc.2`），多内核调试留到功能完成后。
+**内核版本本轮一律不动**（`profiles/explorer` 仍为 `0.1.1-rc.2`），多内核调试留到功能完成后。
 
 **13. UI**：创建向导 = 名称 / 模板 / 版本（**必选，默认最新**）/ 端口 / **主机下拉（默认本机，列出已注册主机）**；
 已删除实例**默认隐藏**并另给「已删除」筛选；**列表不展示布局徽标**（并存期靠档案 `layout` 字段判读）。
@@ -110,4 +110,4 @@ gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与
 - **待复核的不一致**：`AGENTS.md` 写 `web` = 总控（dsh-console + dsh-channel），实测 3080 的
   `package.json` 依赖只有 `dsh-gateway` + `@wxg-prc-cpg/browser-skill-dsh-plugin`、bundle 为
   base/web-app/gateway/browser-skill（**未装 console/channel**）。收口时与用户确认是改文档还是改实装。
-- 其余不一致（console 测试数 121 vs 文档 116/37/124；`profiles/web3` 内核版本漂移）随对应批次同步。
+- 其余不一致（console 测试数 121 vs 文档 116/37/124；`profiles/explorer` 内核版本漂移）随对应批次同步。

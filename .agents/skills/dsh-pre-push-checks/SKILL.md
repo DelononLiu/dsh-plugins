@@ -81,7 +81,7 @@ else echo "未改 skills，跳过"; fi
 # UI 语义变量：仓库引用的 --dsw-alias-state-* 必须在官方主题里有定义（写错 token = 静默无色，无 fallback 时尤其）
 # 官方 checkout 不在本机时跳过；基线 tag 取 profiles/*/dsh.lock.json 的 kernel 版本
 if [ -f /home/long2015/Code/deepseek-harness/package.json ]; then
-  TAG="dsh-v$(node -p "require('./profiles/web2/dsh.lock.json').kernel.split('@').pop()")"
+  TAG="dsh-v$(node -p "require('./profiles/dev/dsh.lock.json').kernel.split('@').pop()")"
   TOK="$(mktemp)"   # 别用固定 /tmp 名：并发的另一个会话会覆盖它（见 forensics B 步）
   git -C /home/long2015/Code/deepseek-harness show "$TAG:packages/client/ui-theme/src/styles/design-platform.css" \
     | grep -o -- '--dsw-alias-state-[a-z-]*' | sort -u > "$TOK"

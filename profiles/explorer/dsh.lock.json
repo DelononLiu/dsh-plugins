@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "dsh-distro-web3",
-  "name": "dsh 测试环境（web3：多插件集成测试）",
+  "id": "dsh-distro-explorer",
+  "name": "dsh 模板（explorer：核心组合 user/channel/console + nav/tabs）",
   "version": "0.0.0",
   "kernel": "@deepseek-ai/dsh@0.1.1-rc.2",
   "bundles": {

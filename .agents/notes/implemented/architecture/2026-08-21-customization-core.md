@@ -27,6 +27,6 @@ Status: implemented
 
 - dsh-desk 定位 = 自定义 UI 平台（默认全家桶 + 组合/布局自定义，**不做换肤**），非纯聚合。
 - vendored 社区 dsh-web-ui 时**不引入皮肤中心**（皮肤否决 2026-08，功能优先）；自定义维度=布局+插件组合。
-- profiles/web 模板的 cordis.patch.yml 是自定义化的主战场，默认配置要"够用且可改"。
+- profiles/master 模板的 cordis.patch.yml 是自定义化的主战场，默认配置要"够用且可改"。
 
 相关：[分层架构](2026-08-21-layered-architecture.md) · [命名决策](2026-08-21-naming-decisions.md)

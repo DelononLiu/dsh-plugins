@@ -13,7 +13,7 @@ Status: implemented
 ```json
 {
   "schemaVersion": 1,
-  "id": "dsh-distro-web",
+  "id": "dsh-distro-master",
   "name": "dsh 团队发行包（web：开发+正式）",
   "version": "0.0.0",
   "kernel": "@deepseek-ai/dsh@0.1.0-rc.8",

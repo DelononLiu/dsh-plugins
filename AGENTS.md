@@ -13,9 +13,9 @@ DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**
 ```
 packages/   自研家族（packages/<plugin>/：package.json + tsconfig*.json + src/）
 vendored/   社区插件清单（npm 安装 + lock 锁版本；见 Vendoring policy）
-profiles/   发行包 profile 模板：web=开发+正式 / web2=单插件测试（官方基线）/ web3=多插件测试（核心组合），各含 dsh.lock.json 版本锁
+profiles/   实例模板（master=开发+正式全家桶 / dev=管理端 console 组合 / explorer=核心组合 / minimal=官方默认），各含 package.json + cordis.patch.yml + dsh.lock.json；创建实例时选模板（模板 = 创建时快照，见 console 实例模型 note）
 presets/    团队自定义 agent preset 源（<id>/{agent.cordis.yml,preset.yml}），安装=铺到目标环境 $DSH_HOME/.agent-presets/<id>/
-scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）+ 运维与闸门脚本（dsh-profile.sh 实例启停 · verify-skills.sh · verify-kernel-upgrade.sh · tests/ 自测）
+scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）+ 运维与闸门脚本（dsh-profile.sh 实例启停 · dsh-registry.mjs 实例注册表 · verify-skills.sh · verify-kernel-upgrade.sh · tests/ 自测）
 docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
 .agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（自研流程/检查 skills + vendored 官方 harness / mattpocock，清单与来源见 .agents/skills/README.md；`scripts/verify-skills.sh` 是 skills 自身的机械闸门：frontmatter / 内联命令块语法 / 尖括号占位符位置（重定向风险） / 相对链接可解析；结论层另需真故障功能测试——`scripts/tests/skills-functional.test.sh`（可断言的现场与判据）+ `scripts/tests/fixtures/skills-fn/`（GROUND-TRUTH 对照，需模型照 skill 实跑，不可 CI））
 ```
@@ -62,7 +62,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
 - **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
 - 本项目当前为**已实现 + 部分接入**：6 插件实现（124 测试全绿）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
-- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-rc.1）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 rc.1 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态/重启用 `scripts/dsh-profile.sh`——**动态发现模型**（不写死清单）：参数 = 实例名，按 `~/.dsh-<名>` 找 + 校验 `profiles/<名>` per-instance 布局 + 读该实例自己 cordis.patch.yml 的 webserver.port（daemon 无 webserver = headless）；未知名/布局非法报错（不设别名）；restart 继承旧进程的**实例作用域 env**（provider 凭证、relay 配置），**会话/宿主变量一律剔除**（DSH_SESSION_ID/DSH_SESSION_JSONL/DSH_SHELL/DSH_WEB_URL，调用方 env 与旧进程继承两条路径都过滤）；start/restart **等待就绪**（端口监听，headless 看进程；超时打印日志尾部并非零退出）；自操作防护：当前 shell 的 DSH_HOME 即目标实例时拒绝 stop/restart（防止自己杀自己）。下表现有已知实例，新实例建好 `~/.dsh-<名>/profiles/<名>` 即可被脚本发现（web2/3/4 内容同源 web 全家桶，目录各归各实例，console launch 逐实例指向）：
+- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-rc.1）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 rc.1 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态/重启用 `scripts/dsh-profile.sh`——实例清单读**注册表** `~/.dsh-home/registry.json`（读写用 `scripts/dsh-registry.mjs`；唯一权威，运行时**不扫描目录**，主键 `<host>/<id>`）：参数 = 实例名，按注册表取 home/profileDir + 读该实例自己 cordis.patch.yml 的 webserver.port（无 webserver = headless）；未登记/目录缺失报错（不设别名/不猜），`import` 子命令显式登记现有实例（幂等）；**start/stop/restart/resolve 必须点名实例（无参禁用，防止误碰开发实例）**，`status` 列出注册表内全部；restart 继承旧进程的**实例作用域 env**（provider 凭证、relay 配置），**会话/宿主变量一律剔除**（DSH_SESSION_ID/DSH_SESSION_JSONL/DSH_SHELL/DSH_WEB_URL，调用方 env 与旧进程继承两条路径都过滤）；start/restart **等待就绪**（端口监听，headless 看进程；超时打印日志尾部并非零退出）；自操作防护：当前 shell 的 DSH_HOME 即目标实例时拒绝 stop/restart（防止自己杀自己）。下表现有已知实例，老实例（`~/.dsh-<名>`，自带安装）经一次 `dsh-profile.sh import` 登记；新实例（`~/.dsh-home/instance-<名>`，引用 runtime 池）由创建流程登记（见 [console 实例模型](.agents/notes/proposed/architecture/2026-09-13-console-instance-model.md)）：
 
   | 环境 | DSH_HOME | 启动 | 端口 | 角色 |
   | --- | --- | --- | --- | --- |

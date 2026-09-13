@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# dsh 实例一键启停/重启：按名字动态发现，不写死清单。见 AGENTS.md「测试环境」。
+# dsh 实例一键启停/重启：实例清单读**注册表**，不扫描目录。见 AGENTS.md「测试环境」。
 #
-# 发现规则（约定）：
-#   实例名 → DSH_HOME = ~/.dsh-<实例名>，profile = 同名（per-instance 布局：
-#   ~/.dsh-web2/profiles/web2、~/.dsh-web3/profiles/web3 …），
-#   dsh --profile <名> 即 boot $DSH_HOME/profiles/<名>。
-#   port 从该实例自己的 cordis.patch.yml 读（webserver.config.port）；daemon 无
-#   webserver = headless。web2/3/4 内容同源（web 全家桶），目录各归各实例。
-#   例外：web → DSH_HOME = ~/.dsh，profile = web（per-instance 布局：
-#   ~/.dsh/profiles/web）。显式点名才生效（不列入默认扫描）。
-#   传名不在 ~/.dsh-<名> 或布局不合法 → 报错退出（不静默别名/不猜）。
-#   默认（无参数）= 扫描 ~/.dsh-*/ 下全部 per-instance 布局实例。
+# 权威源（约定）：`~/.dsh-home/registry.json`（覆盖用 DSH_REGISTRY）——实例清单的**唯一入口**，
+#   主键 `<host>/<id>`，字段见 scripts/dsh-registry.mjs。运行时**不做目录扫描**：
+#   老实例（`~/.dsh-<名>` per-instance 布局、自带安装）由一次显式 `import` 登记；
+#   新实例（`~/.dsh-home/instance-<名>`、引用 runtime 池）由创建流程登记。
+#   port 从该实例自己的 cordis.patch.yml 读（webserver.config.port）；无 webserver = headless。
+#   未在注册表 → 报错退出（不静默别名/不猜）。
 #
 # 🔴 自操作防护：当前 shell 的 DSH_HOME 就是目标实例时 stop/restart 拒绝
 #   （自己杀自己）；在实例环境外（无 DSH_HOME）执行。
@@ -22,10 +18,15 @@
 # 🔴 永不触碰正式 ~/.dsh（3080 禁令，见 AGENTS.md）。
 #
 # 用法：
-#   scripts/dsh-profile.sh status                              # 扫描全部实例
+#   scripts/dsh-profile.sh status                              # 列出注册表内全部实例
+#   scripts/dsh-profile.sh import                              # 显式登记现有实例（幂等）
+#   scripts/dsh-profile.sh resolve <name>                      # 打印解析结果（排障/测试用）
 #   scripts/dsh-profile.sh start|stop|restart <name> [...]     # 操作指定实例（可多个）
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REGISTRY_CLI="$SCRIPT_DIR/dsh-registry.mjs"
 
 # 内核 0.1.2-rc.1 独立 CLI（测试环境不与正式 ~/.dsh 共用内核；覆盖用 DSH_BIN）。
 DSH_BIN="${DSH_BIN:-/home/long2015/dsh-alpha5-cli/node_modules/.bin/dsh}"
@@ -55,34 +56,40 @@ read_instance_port() {
     }
   ' "$patch"
 }
-# 解析实例：<name> → 校验布局 → 输出 "home|profile|port(空=daemon|relay"
+# 解析实例：<name> → 读注册表（唯一权威，不扫描）→ 校验布局 → 输出
+# "home|profile|port(空=headless)|relay"
 # relay：daemon 特判总控守护 `host-master`（守护 agent 名规范形态 `host-<id>`，
 # id 是字符串）；其它 = 实例名（web3 → DSH_RELAY_AGENT=web3）。
 # 返回 0=有效（echo 元数据），1=无效（已打印原因）。
 resolve_instance() {
   local name="$1"
-  local home="$HOME/.dsh-$name" prof="$name"
-  if [[ "$name" == "web" ]]; then
-    home="$OFFICIAL_HOME"
-    prof="web"
+  local meta
+  if ! meta="$(node "$REGISTRY_CLI" get "$name" --format tsv 2>&1)"; then
+    echo "[$name] ✗ $meta" >&2
+    echo "        现有实例：$(node "$REGISTRY_CLI" list 2>/dev/null | awk -F'\t' '{printf "%s ", $1}')" >&2
+    echo "        新实例先登记：$REGISTRY_CLI import（或由创建流程写入）" >&2
+    return 1
   fi
+  local home prof host layout role version port status
+  IFS=$'\t' read -r home prof host layout role version port status <<< "$meta"
   if [[ "$home" == "$OFFICIAL_HOME" && "$name" != "web" ]]; then
     echo "[$name] 🔴 拒绝：正式 home（~/.dsh，3080 禁令）" >&2
     return 1
   fi
-  [[ -d "$home" ]] || { echo "未知实例: $name（无 $home）" >&2; return 1; }
+  [[ -d "$home" ]] || { echo "[$name] ✗ 目录缺失：$home（注册表有档案但目录不在）" >&2; return 1; }
   [[ -d "$home/profiles/$prof" ]] || {
-    echo "[$name] ✗ 布局无效：无 $home/profiles/$prof（per-instance 布局要求 profile 目录名 = 实例名）" >&2
+    echo "[$name] ✗ 布局无效：无 $home/profiles/$prof（注册表的 profileDir=$prof）" >&2
     return 1
   }
-  # port：读实例自己 webserver 段；daemon 无 webserver → headless（port 空）。
-  local port=""
+  # port：优先读实例自己 webserver 段（注册表里的 port 是登记时的快照，可能过期）。
+  local live_port=""
   if [[ -f "$home/profiles/$prof/cordis.patch.yml" ]]; then
-    port="$(read_instance_port "$home" "$prof" 2>/dev/null || true)"
+    live_port="$(read_instance_port "$home" "$prof" 2>/dev/null || true)"
   fi
+  [[ -n "$live_port" ]] || live_port="$port"
   local relay="$name"
   [[ "$name" == "daemon" ]] && relay="host-master"
-  echo "$home|$prof|$port|$relay"
+  echo "$home|$prof|$live_port|$relay"
 }
 
 # 自操作防护：目标 home == 当前环境 DSH_HOME → 拒绝（stop/restart 会杀掉承载
@@ -263,68 +270,77 @@ restart_one() {
   launch_instance "$name" "$home" "$profile" "$port" "$relay" ${inherit[@]+"${inherit[@]}"}
 }
 
-# 扫描 ~/.dsh-*/ 下全部 per-instance 布局实例（~/.dsh-<名>/profiles/<名>），按名排序。
-# web 是唯一例外：DSH_HOME=~/.dsh，profile=web。
+# 注册表内的实例名（唯一权威；不含墓碑，按名排序）。运行时**不扫描目录**。
 list_instances() {
-  local d
-  for d in "$HOME"/.dsh-*; do
-    [[ -d "$d" ]] || continue
-    local name; name="$(basename "$d")"; name="${name#.dsh-}"
-    [[ "$name" == "dsh" || -z "$name" ]] && continue
-    [[ -d "$d/profiles/$name" ]] && echo "$name"
-  done
-  if [[ -d "$OFFICIAL_HOME/profiles/web" ]]; then
-    echo "web"
-  fi | sort
+  node "$REGISTRY_CLI" list 2>/dev/null | awk -F'\t' 'NF {print $1}' | sort
 }
 
 status() {
-  echo "实例状态（动态扫描 ~/.dsh-<名>/profiles/<名>，见 AGENTS.md「测试环境」）："
-  local any=0
-  for name in $(list_instances); do
+  echo "实例状态（读注册表 $(node "$REGISTRY_CLI" path)，见 AGENTS.md「测试环境」）："
+  local any=0 name
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
     any=1
-    local info; info="$(resolve_instance "$name")" || continue
+    local info
+    if ! info="$(resolve_instance "$name" 2>&1)"; then
+      echo "  $name: 不可用 —— $(printf '%s' "$info" | head -1)"
+      continue
+    fi
+    local home profile port relay
     IFS='|' read -r home profile port relay <<< "$info"
     local pid; pid="$(is_running "$home" || true)"
-    local port_txt="headless"
+    local port_txt="port=headless"
     if [[ -n "$port" ]]; then
-      port_txt=":$(ss -tln 2>/dev/null | grep ":$port " >/dev/null && echo "$port (监听)" || echo "$port (未监听)")"
+      port_txt="port=$port$(ss -tln 2>/dev/null | grep -q ":$port " && echo ' (监听)' || echo ' (未监听)')"
     fi
     if [[ -n "$pid" ]]; then
-      echo "  $name: RUNNING pid=$pid port$port_txt  $home"
+      echo "  $name: RUNNING pid=$pid $port_txt  $home"
     else
-      echo "  $name: stopped  port$port_txt  $home"
+      echo "  $name: stopped  $port_txt  $home"
     fi
-  done
-  [[ $any -eq 1 ]] || echo "  （无 per-instance 布局实例：$HOME 下未见 ~/.dsh-<名>/profiles/<名>）"
+  done < <(list_instances)
+  [[ $any -eq 1 ]] || echo "  （注册表为空：先跑 $0 import 登记现有实例，或由创建流程写入）"
 }
 
 main() {
   local cmd="${1:-status}"
   shift || true
-  local targets=()
-  if [[ $# -eq 0 ]]; then
-    targets=(daemon web2 web3 web4)   # status/默认操作仅知名实例集（避免误碰 web5 等开发目录）
-    # 注：无参数时操作哪些实例——daemon/web2/3/4 是"已知矩阵"；其余实例需显式点名。
-  else
-    targets=("$@")
-  fi
+  local targets=("$@")
   case "$cmd" in
-    start)
-      for t in "${targets[@]}"; do start_one "$t"; done
+    start | stop | restart | resolve)
+      # 破坏性/定点操作**必须显式点名**：无参时注册表内可能包含开发实例（web5 等），
+      # 一把操作会误碰一片（2026-09 用户定）。
+      if [[ ${#targets[@]} -eq 0 ]]; then
+        echo "✗ 必须显式点名实例（无参操作已禁用——注册表内可能含开发实例）" >&2
+        echo "  在册实例：$(list_instances | tr '\n' ' ')" >&2
+        echo "  例：$0 $cmd web2" >&2
+        exit 2
+      fi
       ;;
-    stop)
-      for t in "${targets[@]}"; do stop_one "$t"; done
-      ;;
-    restart)
-      for t in "${targets[@]}"; do restart_one "$t"; done
+  esac
+  case "$cmd" in
+    start | stop | restart)
+      # 单个实例失败不中断其余（注册表里可能有过期/被拒条目）——最后统一非零退出。
+      local failed=0 t
+      for t in "${targets[@]}"; do
+        "${cmd}_one" "$t" || { failed=$((failed + 1)); echo "[$t] ✗ $cmd 失败（继续其余实例）" >&2; }
+      done
+      [[ $failed -eq 0 ]] || { echo "✗ 有 $failed 个实例操作失败" >&2; exit 1; }
       ;;
     status)
       status
       ;;
+    import)
+      # 显式登记现有实例（唯一允许扫描目录的动作）；幂等，不改已有条目。
+      node "$REGISTRY_CLI" import
+      ;;
+    resolve)
+      for t in "${targets[@]}"; do resolve_instance "$t"; done
+      ;;
     *)
-      echo "用法: $0 {start|stop|restart|status} [<实例名> ...]   # 如 dsh-profile.sh restart web2 web77" >&2
-      echo "      实例 = ~/.dsh-<名>/profiles/<名>（per-instance 布局）；不写死清单。" >&2
+      echo "用法: $0 {start|stop|restart|status|import|resolve} <实例名> [...]" >&2
+      echo "      实例清单权威源 = 注册表（$REGISTRY_CLI path）；import = 登记现有实例。" >&2
+      echo "      start/stop/restart/resolve 必须点名实例（无参禁用）；status 列出全部。" >&2
       exit 2
       ;;
   esac

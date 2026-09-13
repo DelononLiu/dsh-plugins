@@ -1,5 +1,5 @@
 {
-  "name": "dsh-profile-web3",
+  "name": "dsh-profile-explorer",
   "private": true,
   "version": "0.0.0",
   "description": "多插件测试环境：官方基线 + 核心组合（系统层 user/channel + 管理组件 console + UI 读端 nav/tabs）。验证插件间协同，测试时临时增删。",

@@ -10,7 +10,7 @@ Status: implemented
 
 - **测试实例 profile 目录名 = 实例名**：web2/3/4 各持自家 home 下 `profiles/web2|web3|web4`（内容同源 web 全家桶，目录各归各实例——console launch 逐实例指向、各自打补丁/升级）；daemon 同（`profiles/daemon`）。
 - `dsh-profile.sh` 参数 = 实例名；「web」是 web2 的日常简称（管理端 3082）。
-- 发行包模板（repo `profiles/{web,web2,web3}`，含 dsh.lock.json）是**另一层命名**，勿混。
+- 发行包模板（repo `profiles/{master,dev,explorer,minimal}`，含 dsh.lock.json）是**另一层命名**，勿混。
 - 补齐迁移：`~/.dsh-web2/profiles/web` → `web2`（内容原样 mv——hoisted node_modules 无绝对路径引用，web3 同法先行验证可行）。
 - 同步文档：AGENTS.md 测试矩阵启动列、docs/architecture.md §4 测试矩阵与脚本头部注释，改述为 per-instance 命名。
 
