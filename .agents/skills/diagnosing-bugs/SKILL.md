@@ -1,13 +1,53 @@
 ---
 name: diagnosing-bugs
-description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
+description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow. Entry gate checks whether the scene is contaminated by in-flight work first.
 ---
 
 # Diagnosing Bugs
 
 A discipline for hard bugs. Skip phases only when explicitly justified.
 
-When exploring the codebase, read `CONTEXT.md` (if it exists) to get a clear mental model of the relevant modules, and check ADRs in the area you're touching.
+When exploring the codebase, read [`AGENTS.md`](../../../AGENTS.md) and [`docs/architecture.md`](../../../docs/architecture.md) for a clear mental model of the relevant modules, and check Agent Notes (`.agents/notes/`) in the area you're touching.
+
+## Phase 0 — Is the scene trustworthy? (contamination gate)
+
+This repo has several agents, worktrees and instances (web/web2/web3/web4/daemon) writing at once, and a
+plausible-looking failure is very often an artifact of a half-applied change, a stale build, or an edit
+someone else is making right now. **A feedback loop built on a contaminated scene produces confident
+nonsense** — you will "reproduce" a bug that no longer exists, or chase one your own edits created.
+Answer the gate before Phase 1, and answer it from command output, not from memory.
+
+**Freeze the scene first** — non-destructive, so it never conflicts with "don't disturb the evidence":
+
+```sh
+TS=$(date +%Y%m%d-%H%M%S); SNAP=$(git stash create "forensics $TS")
+if [ -n "$SNAP" ]; then git update-ref "refs/forensics/$TS" "$SNAP"; echo "snapshot=refs/forensics/$TS $SNAP"; else echo "工作区干净，无需快照"; fi
+git ls-files --others --exclude-standard -z | tar czf "/tmp/forensics-untracked-$TS.tgz" --null -T -   # 未跟踪文件不在 stash 里，单独归档
+```
+
+(`git stash create` 只产生提交对象、**不碰工作区**；ref 是取证锚点。查看/清理：`git for-each-ref refs/forensics`。)
+
+Then the three gate questions:
+
+```sh
+git status --short --untracked-files=all   # 未提交改动 = 现场的一部分
+git stash list                             # 既有 stash：别把它当成你的改动
+git diff --stat && git diff --stat --cached # 本人改动清单：本次会话我改了什么
+git log --oneline -5
+```
+
+- [ ] **本人改动清单完整** —— 能逐条说出本次会话自己改了什么（文件 + 意图）。说不清 = 无法区分"现象是我造成的"与"现象本来就在"。
+- [ ] **无并发写者** —— 没有别的 agent/后台任务正在改这个目录。本仓库常态是多 worktree（`.worktrees/`）并行；**正在被别人改的目录不是现场，是流沙**。
+- [ ] **现象可复现且与你的改动无关** —— 在**已知干净**的基线上（`git stash` 起或独立 `DSH_HOME` 实例）现象仍在。
+
+**分流**：
+
+- 三条全过 → 现场干净，进 Phase 1（构造反馈环）。
+- **任一条不过 → 现场受污染，停止一切"顺手修一下"**。改用
+  [`../dsh-incident-forensics/SKILL.md`](../dsh-incident-forensics/SKILL.md)：先取证存档、隔离现场、再做证伪实验。
+  在污染现场上继续堆改动，会让本来还能救的证据永久失效（污染即失证）。
+
+发现里最容易踩的坑：把"我改到一半"当成"bug 复现了"。判据是命令输出，不是失败画面。
 
 ## Phase 1 — Build a feedback loop
 
@@ -129,6 +169,8 @@ Required before declaring done:
 - [ ] Regression test passes (or absence of seam is documented)
 - [ ] All `[DEBUG-...]` instrumentation removed (`grep` the prefix)
 - [ ] Throwaway prototypes deleted (or moved to a clearly-marked debug location)
+- [ ] Forensics snapshots from Phase 0 dealt with — `git for-each-ref refs/forensics`：bug 已定论则
+      `git update-ref -d refs/forensics/<ts>` 删除，仍需保留证据则留着并在报告里点名
 - [ ] The hypothesis that turned out correct is stated in the commit / PR message — so the next debugger learns
 
-**Then ask: what would have prevented this bug?** If the answer involves architectural change (no good test seam, tangled callers, hidden coupling) hand off to the `/improve-codebase-architecture` skill with the specifics. Make the recommendation **after** the fix is in, not before — you have more information now than when you started.
+**Then ask: what would have prevented this bug?** If the answer involves architectural change (no good test seam, tangled callers, hidden coupling), record it as an Agent Note (`.agents/notes/proposed/architecture/`) — or hand off to the `improve-codebase-architecture` skill if it is installed. If the answer is "a hazard we keep hitting" (wrong instance, kernel-package double-instance, stale build artifacts), **add it to the hazard seeds in [`../grilling/SKILL.md`](../grilling/SKILL.md)** so the next plan gets grilled on it — that is the only mechanism that stops the same class of bug recurring. Make the recommendation **after** the fix is in, not before — you have more information now than when you started.

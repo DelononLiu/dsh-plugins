@@ -9,8 +9,8 @@ description: Use when reviewing a pull request or branch in this repository (dsh
 
 ## Sources of truth
 
-- [AGENTS.md](../../AGENTS.md)：仓库分层/依赖纪律、插件包形态、提交规则、worktree 流程。
-- [docs/architecture.md](../../docs/architecture.md)：架构 spec（分层、插件矩阵、机制）。
+- [AGENTS.md](../../../AGENTS.md)：仓库分层/依赖纪律、插件包形态、提交规则、worktree 流程。
+- [docs/architecture.md](../../../docs/architecture.md)：架构 spec（分层、插件矩阵、机制）。
 - [.agents/notes/](../../notes/README.md)：设计决策记录——与 Agent Note 分歧是设计讨论，不是自动否决。
 - 变更的 Agent Note（非平凡变更必须同提交附 note）与实现一致。
 

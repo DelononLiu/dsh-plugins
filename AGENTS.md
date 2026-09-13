@@ -17,7 +17,7 @@ profiles/   发行包 profile 模板：web=开发+正式 / web2=单插件测试�
 presets/    团队自定义 agent preset 源（<id>/{agent.cordis.yml,preset.yml}），安装=铺到目标环境 $DSH_HOME/.agent-presets/<id>/
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
 docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
-.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（dsh-code-review / dsh-prose-standard / dsh-trim-cot-leakage / dsh-pre-push-checks / record-browser-gif，vendored 自官方 harness 并适配）
+.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（自研流程/检查 skills + vendored 官方 harness / mattpocock，清单与来源见 .agents/skills/README.md；`scripts/verify-skills.sh` 是 skills 自身的机械闸门：frontmatter / 内联命令块语法 / 相对链接可解析）
 ```
 
 ## 命令
@@ -98,6 +98,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
 - 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
 - **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console（含 console-ui client 半区）→ dsh-quick-nav（type-only 依赖 channel）→ dsh-desk（聚合 nav/focus-session/focus-tabs）；**dsh-focus-session / dsh-focus-tabs 独立**（focus-tabs 只读 focus-session 的 settings 数据，无编译期依赖）。无依赖关系的插件可并行。
+- **正反两链与闸门**（2026-09 定）：正向链 = 拷问（`grilling`，含本项目高危种子清单）→ 规格 → 实施 → **验证**（`dsh-pre-push-checks`；内核升级另加 `scripts/verify-kernel-upgrade.sh`）→ 发布；反向链 = 故障 → **污染判定**（`diagnosing-bugs` Phase 0）→ 干净现场构造反馈环 / 受污染现场走 `dsh-incident-forensics`（A–F + 七条铁律，非破坏性快照落在 `refs/forensics/<ts>`）。约束分三类：**机械闸门**（命令有输出即失败）/ 结构化约束 / 纯判断——不把纯判断伪装成闸门。方法论与收紧见 [.agents/notes/implemented/process/2026-09-13-aicoding-methodology.md](.agents/notes/implemented/process/2026-09-13-aicoding-methodology.md)。
 
 ## 派发编辑型 subagent（编辑护栏）
 

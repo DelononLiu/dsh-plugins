@@ -7,7 +7,7 @@ description: Use when upgrading the dsh kernel / official dependency baseline (e
 
 在 dsh-plugins 升级官方内核/依赖基线（如 rc → alpha / rc → rc）时使用。流程保证**不影响当前运行的 web2/3/4/daemon 测试环境**（它们在全局 rc 内核上，3080 禁令见 AGENTS.md）。
 
-规则来源：[AGENTS.md](../../AGENTS.md)（测试环境矩阵 / vendoring / worktree 流程）+ 2026-08 rc.2→alpha.5 升级实测（见 `.agents/notes/proposed/architecture/2026-08-24-upgrade-012-align-design.md`）。
+规则来源：[AGENTS.md](../../../AGENTS.md)（测试环境矩阵 / vendoring / worktree 流程）+ 2026-08 rc.2→alpha.5 升级实测（见 `.agents/notes/proposed/architecture/2026-08-24-upgrade-012-align-design.md`）。
 
 > **强制验证脚本**（2026-09 起）：静态检查（内核包双实例/残留/link）+ 运行健康检查
 > 一律跑 `scripts/verify-kernel-upgrade.sh`——**不要靠自觉逐项查**（2026-09 rc.1

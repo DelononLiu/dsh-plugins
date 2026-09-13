@@ -16,7 +16,7 @@
 | dsh-subagent-model-test | 本仓库原创 | subagent 模型能力验证（确定性工具链冒烟 + 派发稳定性 + ACL 会话机制；备胎模型验收用） |
 | record-browser-gif | 官方 harness | 工具直接拷（含 encode_gif.py；依赖 harness 环境浏览器能力） |
 | browser-skill | 社区（Tencent BrowserSkill） | 字节抽取 bsk 内嵌 SKILL.md → agent skill 形态（`bash` 调 `bsk` CLI；不依赖 dsh 插件）；要求 `bsk` 在 PATH 上 + bsk daemon 在跑 + 浏览器扩展已连 |
-| grilling | mattpocock/skills（productivity） | 直接拷——就计划/设计对用户连环追问（strict 拷问协议） |
+| grilling | mattpocock/skills（productivity） | 拷问协议保留原样 + **追加本项目高危种子清单**（内核基线/双实例/实例隔离/3080/回滚/文档同步/UI 抄官方/概念模型/验证闸门，含查证命令） |
 | grill-me | mattpocock/skills（productivity） | 直接拷——`/grilling` 的一行入口（`disable-model-invocation`，需用户显式触发） |
 | grill-with-docs | mattpocock/skills（engineering） | 直接拷——带文档上下文的 grilling 变体 |
 | to-spec | mattpocock/skills | 直接拷——把当前对话综合成 spec 并发布；**依赖 issue tracker 配置**（见下"未装依赖"） |
@@ -25,14 +25,32 @@
 | code-review | mattpocock/skills（engineering） | 直接拷——通用双轴审查（Standards + Spec 并行 subagent）；**与本仓库 `dsh-code-review` 并存**（后者是仓库特定规则，二者互补） |
 | domain-modeling | mattpocock/skills（engineering） | 直接拷——领域术语/ADR 建模（含 ADR-FORMAT.md/CONTEXT-FORMAT.md） |
 | codebase-design | mattpocock/skills（engineering） | 直接拷——深模块设计词汇（含 DEEPENING.md/DESIGN-IT-TWICE.md） |
-| diagnosing-bugs | mattpocock/skills（engineering） | 直接拷——硬 bug/性能回归诊断循环（含 scripts/） |
+| diagnosing-bugs | mattpocock/skills（engineering） | 六阶段循环保留 + **前插 Phase 0 污染检查闸门**（非破坏性快照 + 本人改动清单 + 并发写者 → 分流）；CONTEXT.md/ADR 引用改指本仓库 AGENTS/architecture/notes |
+| dsh-incident-forensics | 本仓库原创 | 反向链的受污染分支（A–F 取证/隔离/证伪/验证/恢复/复核 + 七条铁律）；`diagnosing-bugs` Phase 0 判污染时的出口 |
 
 ### 未装依赖（引用但不影响本批工作）
 
 - `to-spec` / `code-review` 提示 `run /setup-matt-pocock-skills if docs/agents/issue-tracker.md is missing`——需 issue tracker 配置（本仓库用 Agent Notes + docs/architecture 体系，未配置；用到时按提示补 `setup-matt-pocock-skills`）。
-- `diagnosing-bugs` 结尾 hand off 到 `/improve-codebase-architecture`（未装——该建议仅在诊断结论涉及架构改造时出现，可届时再补装）。
+- `diagnosing-bugs` 结尾原本 hand off 到 `/improve-codebase-architecture`（未装）——**适配后改为**：架构类结论落 Agent Note（`.agents/notes/proposed/architecture/`），复发类结论回灌 `grilling` 高危种子清单；该 skill 装上后可再接管前者。
 
 官方/mattpocock skills 保留各自版权声明（MIT © 2026 DeepSeek / © 2026 Matt Pocock）；`browser-skill` 保留 Tencent BrowserSkill 版权（MIT）。本仓库的适配改动均归本仓库 MIT（见根 LICENSE）。上游更新时按 vendoring policy 同步。
+
+## 正反两链与闸门映射（2026-09 立）
+
+方法论来源与准入理由见 [Agent Note：AICoding 方法论吸纳](../notes/implemented/process/2026-09-13-aicoding-methodology.md)。**约束分三类，别混**：
+机械闸门（命令有输出即失败）· 结构化约束（格式/清单，可 lint 但需人判）· 纯判断（架构与语义，不装成闸门）。
+
+| 链 | 阶段 | 载体 | 类型 |
+| --- | --- | --- | --- |
+| 正向 | 拷问 | `grilling`（高危种子清单，含查证命令） | 结构化约束 |
+| 正向 | 规格 | `to-spec`（需 issue tracker 配置） | 纯判断 |
+| 正向 | 实施 | `implement` / `tdd` / `dsh-code-review` | 混合 |
+| 正向 | **验证** | `dsh-pre-push-checks`（+ 内核升级 `verify-kernel-upgrade.sh`） | **机械闸门** |
+| 正向 | 发布 | AGENTS.md 提交规则 / 推送 | 机械闸门 |
+| 反向 | 污染判定 | `diagnosing-bugs` Phase 0 | **机械闸门** |
+| 反向 | 干净现场 | `diagnosing-bugs` Phase 1–6（构造反馈环） | 混合 |
+| 反向 | 受污染现场 | `dsh-incident-forensics` A–F + 七条铁律 | 结构化约束 |
+| 两链共享 | 高危面记忆 | `grilling` 种子清单 ← 事故结论回灌 | 结构化约束 |
 
 ## 检查脚本化原则（2026-09 立，所有检查型 skills 适用）
 
@@ -54,4 +72,9 @@
 - [x] dsh-pre-push-checks：typecheck/diff 卫生/残留术语/双实例 → SKILL.md 内联确切命令
 - [x] dsh-code-review：变更事实命令段（范围/note/依赖/卫生）内联；结论判断留模型
 - [x] dsh-prose-standard / dsh-trim-cot-leakage：探测命令内联 → 保持 probe + 语义判读
-- [ ] mattpocock skills（未适配批次）：用到时按本原则补内联命令
+- [x] grilling：高危种子清单每条带查证命令（先跑命令，再拿结果当提问前提）
+- [x] diagnosing-bugs：Phase 0 闸门内联快照/现场坐标/产物陈旧三类命令
+- [x] dsh-incident-forensics：A–F 每步内联确切命令（快照/A2 现场坐标/A3 陈旧产物/副本隔离）
+- [x] dsh-pre-push-checks：增「本人改动清单 + 产物同步」命令段
+- [x] 全部 skills：`bash scripts/verify-skills.sh` 机械校验 frontmatter 与内联命令块语法
+- [ ] mattpocock skills 其余未适配批次：用到时按本原则补内联命令
