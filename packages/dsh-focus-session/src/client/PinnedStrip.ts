@@ -36,6 +36,11 @@ import type { SessionTag } from './tags'
 
 /** 置顶区根标记（幂等定位 + 自愈锚点）。 */
 export const PINNED_STRIP_ATTR = 'data-dsh-pinned-strip'
+/**
+ * 活跃区容器选择器——座位判定用（ActiveStrip 拥有该属性）。此处写字面量而非
+ * import：ActiveStrip 反向 import 本文件的 PINNED_STRIP_ATTR，互相 import 成环。
+ */
+const ACTIVE_STRIP_SELECTOR = '[data-dsh-active-strip]'
 /** 置顶区标题（与会话 tab 同域，中文环境沿用中文文案）。 */
 const PINNED_LABEL = '置顶区'
 /** 行按钮标记。 */
@@ -300,8 +305,12 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
   }
   const strip = stripRef.el ?? makeStrip(doc)
   stripRef.el = strip
-  // 座位：插到 regionArea 之前（列表区上方）；React 重排导致移位时重插。
-  if (strip.parentElement !== seat.root || strip.nextElementSibling !== seat.region) {
+  // 座位：插到 regionArea 之前（列表区上方）；活跃区可紧随本区之后——两种落点都算
+  // 就位。只认 region 会与活跃区（同样锚 region）互相搬移成死循环（渲染主线程饿死）。
+  const activeStrip = seat.root.querySelector(ACTIVE_STRIP_SELECTOR)
+  const seated = strip.parentElement === seat.root
+    && (strip.nextElementSibling === seat.region || strip.nextElementSibling === activeStrip)
+  if (!seated) {
     seat.root.insertBefore(strip, seat.region)
   }
   const listEl = strip.querySelector<HTMLElement>('[data-dsh-pinned-list]')

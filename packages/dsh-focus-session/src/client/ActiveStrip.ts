@@ -221,10 +221,10 @@ function syncRows(deps: ActiveStripDeps, doc: Document, stripRef: { el: HTMLElem
   // 座位：置顶区之后（置顶区不存在时在列表区 regionArea 之前）。位置已正确时零
   // DOM 写——`insertBefore` 即使落在相同位置也会产生 childList 记录，body 级
   // observer 会因此自触发（曾现网卡死，见 session-pin-status-sync-convergence）。
-  const pinnedStrip = seat.root.querySelector(`[${PINNED_STRIP_ATTR}]`)
-  const wantNext: Element | null = pinnedStrip !== null ? pinnedStrip.nextElementSibling : seat.region
-  if (strip.parentElement !== seat.root || strip.nextElementSibling !== wantNext) {
-    seat.root.insertBefore(strip, wantNext)
+  // 座位：regionArea 之前（有置顶区时自然落在其之后）。锚点固定为 region——不用
+  // 置顶区的瞬时 next（两区同时挂载时它会变，互相搬移会把渲染主线程饿死）。
+  if (strip.parentElement !== seat.root || strip.nextElementSibling !== seat.region) {
+    seat.root.insertBefore(strip, seat.region)
   }
   const listEl = strip.querySelector<HTMLElement>('[data-dsh-active-list]')
   if (listEl === null) return

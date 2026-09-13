@@ -34,6 +34,12 @@ Status: implemented
 - **回归测试**：`tests/pinned-strip.spec.ts` 加「状态点已渲染后，状态不变再次
   同步零 DOM 变更」用例（`MutationObserver.takeRecords()` 同步断言零 childList
   记录）——修复前必红、修复后全绿。
+- **多区共存的座位锚点契约**：同一容器内多个自挂载区（置顶区 / 活跃区）必须锚
+  **同一个稳定锚点**（`regionArea`），不得把「对方的瞬时 next」当成自己的期望位置。
+  否则 A 要求「我的 next = region」、B 要求「我的 next = A.next」，稳定后两区仍
+  判定位错、互相 `insertBefore` 搬移 → 无限 mutation 回环（渲染主线程饿死，页面
+  卡死；不是测试失败而是**挂死**）。现状契约：置顶区接受「next = region 或
+  next = 活跃区」两种落点，活跃区一律锚 region。
 
 ## Alternatives
 
@@ -49,5 +55,8 @@ Status: implemented
 - 同类风险存在于其它「全站 MutationObserver + 写 DOM」的同步代码（如
   `index.ts` 的划线 `applyActive`）——后续任何此类代码须遵守本约束：
   先比对后写入、observer 忽略自身子树写入、配收敛回归用例。
+- 多区共存回归：`tests/both-strips.spec.ts`（两区同时挂载 → 外部变更零重复写）。
+  座位契约被破坏时该用例表现为**整进程挂死**（`vitest` 报 `ERR_IPC_CHANNEL_CLOSED`
+  且无输出），排查口径 = 渲染主线程被 microtask 饿死，而非"测试写得慢"。
 - 不改变任何数据/视觉契约，纯实现收敛性修复；功能 note 见
   [session-pin-sidebar-strip](./2026-09-06-session-pin-sidebar-strip.md)。
