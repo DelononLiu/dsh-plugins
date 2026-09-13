@@ -376,6 +376,9 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
   诊断）。当前以 profile 模板成对安装兜底；若要支持"只装标签行"，需把命名空间注册
   下沉共享包，或让 focus-tabs 自带降级（自带同名命名空间会与 focus-session 的注册
   冲突，故非直接可选）。
+- [ ] **会话体量快捷提示（侧栏会话行悬浮）**（2026-09-13 用户记录，**归属 dsh-focus-session**）：鼠标悬浮会话行时显示该会话体量——自身事件数 + fork 继承前缀、磁盘字节、内存量级——让"这个会话已经很重"在动手之前可见。动机见下一条缺陷（大会话一次分支吃掉默认 2GB 堆的 60%）。待定：取数来源（projcache/查询服务 vs 直接读 session 目录）、是否分列"自身/继承"、阈值分级配色。
+- [ ] **缺陷：分支大会话把宿主撑爆（内核 OOM，2026-09-13 实测）**：点「在新对话中分支」会让宿主进程 V8 堆 OOM abort——用户侧表现就是"web 一直在重启断掉"。实测（隔离实例 web5，未触碰 3080）：对「更新」会话（fork 链第 5 层，自身 74,723 事件、链上合计 28.6 万、内核物化 2,687,488 条）一次 fork = **+1264MB 常驻活堆**（`sessionQuery.observeSession` +604MB，`agents.create({seed})` 再 +660MB）、21 秒；第二次再 +656MB → 1,971MB → `FATAL ERROR: Ineffective mark-compacts near heap limit`（默认堆上限 ≈2GB）。对照：2.6MB 小会话一次 fork 仅 +74MB。占用**不回收**且逐次叠加；崩在半路时子会话不落盘（返回的 childId 在磁盘无文件）。根因在官方内核 `dsh-api-session-controller.fork()`：整份事件前缀被物化两次（observe 源 + seed 子）并在活跃 store 里长期持有，无流式/懒加载/体积护栏——**插件层修不了**，需内核补丁或上游。复现配方：把 `~/.dsh/profiles/web` 复制成独立实例（独立端口）→ `--patch` 注入一个 `inject: ['sessionController']` 的探针插件 → 在 apply 里 `await ctx.get('sessionController').fork({ sessionId })`，前后各 `gc()` 一次对比 `heapUsed`。
+
 - [ ] **console 跨守护实例日志读取**（2026-09 定 v1 边界，见 [console-structured-log](../.agents/notes/implemented/architecture/2026-09-06-console-structured-log.md)）：日志结构化落地后，「日志」查看器实例项仍不可用——console→守护转发 readLog 为同步 v1 fallback（空），且守护 `logs/<id>.log` 是实例 stdout 自由文本。待落地：转发改 async @Remote + 实例 stdout 收集入 JSONL。
 
 - [x] ~~dsh-desk 布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-focus-tabs / dsh-quick-nav 订阅 `my-ui-layout` **实时注册/注销**（slots.inject 内订阅配置，visible=false 注销、恢复重新注册）；组装器配置化（tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默 + **slots 型插件显隐（git-graph 开关）** 全部落地。

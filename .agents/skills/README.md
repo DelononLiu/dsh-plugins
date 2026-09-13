@@ -27,6 +27,7 @@
 | codebase-design | mattpocock/skills（engineering） | 直接拷——深模块设计词汇（含 DEEPENING.md/DESIGN-IT-TWICE.md） |
 | diagnosing-bugs | mattpocock/skills（engineering） | 六阶段循环保留 + **前插 Phase 0 污染检查闸门**（非破坏性快照 + 本人改动清单 + 并发写者 → 分流）；CONTEXT.md/ADR 引用改指本仓库 AGENTS/architecture/notes |
 | dsh-incident-forensics | 本仓库原创 | 反向链的受污染分支（A–F 取证/隔离/证伪/验证/恢复/复核 + 七条铁律）；`diagnosing-bugs` Phase 0 判污染时的出口 |
+| dsh-component-hardening | 本仓库原创 | 加固链——既有组件"毛病很多"时的可复用流程（目标可判定化 → 只读取证 → 成因归类 → 分批排序 → 先红后绿 → 收口回灌；六步各带闸门 + 三条不变式 + 反模式清单） |
 
 ### 未装依赖（引用但不影响本批工作）
 
@@ -35,7 +36,7 @@
 
 官方/mattpocock skills 保留各自版权声明（MIT © 2026 DeepSeek / © 2026 Matt Pocock）；`browser-skill` 保留 Tencent BrowserSkill 版权（MIT）。本仓库的适配改动均归本仓库 MIT（见根 LICENSE）。上游更新时按 vendoring policy 同步。
 
-## 正反两链与闸门映射（2026-09 立）
+## 正反两链与加固链（2026-09 立）
 
 方法论来源与准入理由见 [Agent Note：AICoding 方法论吸纳](../notes/implemented/process/2026-09-13-aicoding-methodology.md)。**约束分三类，别混**：
 机械闸门（命令有输出即失败）· 结构化约束（格式/清单，可 lint 但需人判）· 纯判断（架构与语义，不装成闸门）。
@@ -50,7 +51,8 @@
 | 反向 | 污染判定 | `diagnosing-bugs` Phase 0 | **机械闸门** |
 | 反向 | 干净现场 | `diagnosing-bugs` Phase 1–6（构造反馈环） | 混合 |
 | 反向 | 受污染现场 | `dsh-incident-forensics` A–F + 七条铁律 | 结构化约束 |
-| 两链共享 | 高危面记忆 | `grilling` 种子清单 ← 事故结论回灌 | 结构化约束 |
+| 加固 | 目标可判定化 → 收口 | `dsh-component-hardening` 六步（取证 / 归因 / 分批 / 先红后绿 / 回灌） | 混合（第 2、5 步为机械闸门） |
+| 三链共享 | 高危面记忆 | `grilling` 种子清单 ← 事故结论与加固结论回灌 | 结构化约束 |
 
 ## 检查脚本化原则（2026-09 立，所有检查型 skills 适用）
 

@@ -15,9 +15,9 @@ packages/   自研家族（packages/<plugin>/：package.json + tsconfig*.json + 
 vendored/   社区插件清单（npm 安装 + lock 锁版本；见 Vendoring policy）
 profiles/   发行包 profile 模板：web=开发+正式 / web2=单插件测试（官方基线）/ web3=多插件测试（核心组合），各含 dsh.lock.json 版本锁
 presets/    团队自定义 agent preset 源（<id>/{agent.cordis.yml,preset.yml}），安装=铺到目标环境 $DSH_HOME/.agent-presets/<id>/
-scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
+scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）+ 运维与闸门脚本（dsh-profile.sh 实例启停 · verify-skills.sh · verify-kernel-upgrade.sh · tests/ 自测）
 docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
-.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（自研流程/检查 skills + vendored 官方 harness / mattpocock，清单与来源见 .agents/skills/README.md；`scripts/verify-skills.sh` 是 skills 自身的机械闸门：frontmatter / 内联命令块语法 / 尖括号占位符位置（重定向风险） / 相对链接可解析）
+.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（自研流程/检查 skills + vendored 官方 harness / mattpocock，清单与来源见 .agents/skills/README.md；`scripts/verify-skills.sh` 是 skills 自身的机械闸门：frontmatter / 内联命令块语法 / 尖括号占位符位置（重定向风险） / 相对链接可解析；结论层另需真故障功能测试——`scripts/tests/skills-functional.test.sh`（可断言的现场与判据）+ `scripts/tests/fixtures/skills-fn/`（GROUND-TRUTH 对照，需模型照 skill 实跑，不可 CI））
 ```
 
 ## 命令
@@ -98,7 +98,7 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
 - 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
 - **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console（含 console-ui client 半区）→ dsh-quick-nav（type-only 依赖 channel）→ dsh-desk（聚合 nav/focus-session/focus-tabs）；**dsh-focus-session / dsh-focus-tabs 独立**（focus-tabs 只读 focus-session 的 settings 数据，无编译期依赖）。无依赖关系的插件可并行。
-- **正反两链与闸门**（2026-09 定）：正向链 = 拷问（`grilling`，含本项目高危种子清单）→ 规格 → 实施 → **验证**（`dsh-pre-push-checks`；内核升级另加 `scripts/verify-kernel-upgrade.sh`）→ 发布；反向链 = 故障 → **污染判定**（`diagnosing-bugs` Phase 0）→ 干净现场构造反馈环 / 受污染现场走 `dsh-incident-forensics`（A–F + 七条铁律，非破坏性快照落在 `refs/forensics/<ts>`）。约束分三类：**机械闸门**（命令有输出即失败）/ 结构化约束 / 纯判断——不把纯判断伪装成闸门。方法论与收紧见 [.agents/notes/implemented/process/2026-09-13-aicoding-methodology.md](.agents/notes/implemented/process/2026-09-13-aicoding-methodology.md)。
+- **三条链与闸门**（2026-09 定）：元原则 = **机械闸门 > 人的自觉 / 模型自洽叙事**——流程文字本身不产生闸门，能机械判定的必须落成命令。正向链 = 拷问（`grilling`，含本项目高危种子清单）→ 规格 → 实施 → **验证**（`dsh-pre-push-checks`；内核升级另加 `scripts/verify-kernel-upgrade.sh`）→ 发布；反向链 = 故障 → **污染判定**（`diagnosing-bugs` Phase 0）→ 干净现场构造反馈环 / 受污染现场走 `dsh-incident-forensics`（A–F + 七条铁律，非破坏性快照落在 `refs/forensics/<ts>`）；**加固链** = 既有组件"毛病很多"时走 `dsh-component-hardening`（目标可判定化 → 只读取证 → 成因归类 → 分批排序 → **先红后绿** → 收口回灌）——方案即批次表，每批可独立合入与回滚。约束分三类：**机械闸门**（命令有输出即失败）/ 结构化约束（格式·清单，可 lint 需人判）/ 纯判断——不把纯判断伪装成闸门。三条链**共用同一份高危种子清单**：拷问产出的高危面就是排错优先怀疑的对象，事故与加固结论回灌同一清单（同一提交内更新），不各自漂移。方法论与收紧见 [.agents/notes/implemented/process/2026-09-13-aicoding-methodology.md](.agents/notes/implemented/process/2026-09-13-aicoding-methodology.md)。
 
 ## 派发编辑型 subagent（编辑护栏）
 
