@@ -16,7 +16,7 @@
 | dsh-subagent-model-test | 本仓库原创 | subagent 模型能力验证（确定性工具链冒烟 + 派发稳定性 + ACL 会话机制；备胎模型验收用） |
 | record-browser-gif | 官方 harness | 工具直接拷（含 encode_gif.py；依赖 harness 环境浏览器能力） |
 | browser-skill | 社区（Tencent BrowserSkill） | 字节抽取 bsk 内嵌 SKILL.md → agent skill 形态（`bash` 调 `bsk` CLI；不依赖 dsh 插件）；要求 `bsk` 在 PATH 上 + bsk daemon 在跑 + 浏览器扩展已连 |
-| grilling | mattpocock/skills（productivity） | 拷问协议保留原样 + **追加本项目 13 条高危种子**（内核基线/双实例/实例隔离/3080/数据面权威源/状态写入者冲突/内存态/增量闸门/回滚/文档同步/UI 抄官方/概念模型/验证闸门，各带查证命令） |
+| grilling | mattpocock/skills（productivity） | 拷问协议保留原样 + **追加本项目 18 条高危种子**（内核基线/双实例/实例隔离/3080/数据面权威源/状态写入者冲突/内存态/增量闸门/回滚/文档同步/UI 抄官方/概念模型/验证闸门 + 模板落地最后一步/乐观日志/wire 格式先证/包管理器协议/权威源收敛，各带查证命令） |
 | grill-me | mattpocock/skills（productivity） | 直接拷——`/grilling` 的一行入口（`disable-model-invocation`，需用户显式触发） |
 | grill-with-docs | mattpocock/skills（engineering） | 直接拷——带文档上下文的 grilling 变体 |
 | to-spec | mattpocock/skills | 直接拷——把当前对话综合成 spec 并发布；**依赖 issue tracker 配置**（见下"未装依赖"） |

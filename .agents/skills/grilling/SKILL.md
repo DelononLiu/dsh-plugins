@@ -209,6 +209,49 @@ grep -n '机械检查' -A 20 .agents/skills/dsh-pre-push-checks/SKILL.md   # 仓
 
 说不出这条命令 = 这个计划还没有完成判据。
 
+### 14. 模板 → 可运行实例的"最后一步"
+
+模板目录只有三件套（没有 node_modules / cordis.yml）——谁负责把它变成**能跑**的实例？
+问"装依赖"与"profile 根入口"落在哪一步。
+
+```sh
+TPL=dev                                       # ← 换成目标模板名
+ls -1 "profiles/$TPL/"                          # 应只有 package.json/cordis.patch.yml/dsh.lock.json
+ls -1 ~/.dsh-home/instance-*/profiles/*/ 2>/dev/null | head -20   # 实例目录里该有 node_modules 与 cordis.yml
+```
+判读：实例目录缺 node_modules 或 cordis.yml = 创建流程漏了最后一步（实测踩过：建出来的实例起不来）。
+
+### 15. 乐观日志：宣告成功前有没有等真实事件？
+
+```sh
+grep -rn "listen(" packages/*/src/*.ts | head
+grep -rn "on('listening'\|on('error'" packages/*/src/*.ts | head
+```
+判读：只看到 `listen(...)` 紧跟一行日志、却没有 `listening`/`error` 处理 = 端口被占也照报"就绪"（实测踩过）。
+
+### 16. 探测外部面之前，wire 格式是从代码确认的还是猜的？
+
+```sh
+grep -rn "frame.method.split\|namespace !== " packages/*/src/*.ts | head
+```
+判读：探测请求得到"unknown method"时，先核对自己的请求是否符合该格式——**别把"我请求写错了"当成"对面坏了"**（实测踩过：漏了 `console/` 前缀，误判成端口被占）。
+
+### 17. 包管理器协议差异
+
+```sh
+grep -rn '"link:' profiles/*/package.json | head
+```
+判读：`link:` 是 pnpm 专有协议，npm 直接报 `EUNSUPPORTEDPROTOCOL`；跨包管理器要落成 `file:`（实测踩过）。
+
+### 18. 实例清单的权威源收敛
+
+```sh
+node scripts/dsh-registry.mjs list | wc -l          # 注册表里几个
+ss -tlnp 2>/dev/null | grep -c 30[0-9][0-9]         # 实际在跑的端口数（粗判）
+```
+判读：删除/迁移之后，**别的清单（channel 实例表、UI 视图）会不会仍显示幽灵条目**？以注册表为准做收敛
+（实测踩过：删除后 UI 仍显示已删实例）。
+
 ## 收尾
 
 - 拷问产出的种子清单与 `../dsh-incident-forensics/SKILL.md` 共用：**排错时按同一份清单优先怀疑**

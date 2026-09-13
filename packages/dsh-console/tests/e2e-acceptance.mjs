@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { createConnection } from 'node:net'
 import { fileURLToPath } from 'node:url'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
@@ -40,7 +41,12 @@ const step = (n, ok, extra = '') => {
   console.log(`${ok ? '✓' : '✗'} ${n}${extra ? ' — ' + extra : ''}`)
 }
 
-step('池内已导入 runtime 0.1.2-rc.1', c.listRuntimePool().versions.some((v) => v.version === '0.1.2-rc.1') || c.importRuntimeVersion('0.1.2-rc.1').ok)
+// 先确保版本在池（首次运行会真导入；已存在则跳过——不能用 || 让两种结果都算通过）
+if (!c.listRuntimePool().versions.some((v) => v.version === '0.1.2-rc.1')) {
+  const imported = c.importRuntimeVersion('0.1.2-rc.1')
+  step('首次运行：导入 runtime 0.1.2-rc.1', imported.ok, imported.error ?? '')
+}
+step('池内有 0.1.2-rc.1 且自检通过', c.listRuntimePool().versions.some((v) => v.version === '0.1.2-rc.1' && v.ok))
 step('重复导入被拒（池不可变）', c.importRuntimeVersion('0.1.2-rc.1').ok === false)
 const pool = c.listRuntimePool()
 step('池内版本自检通过', pool.versions.every((v) => v.ok), JSON.stringify(pool.versions))
@@ -61,12 +67,13 @@ const denied = c.removeRuntimeVersion('0.1.2-rc.1')
 step('被实例引用的版本禁止删除', denied.ok === false, denied.error ?? '')
 
 await new Promise((r) => setTimeout(r, 8000))
-let pid = ''
-try { pid = execFileSync('bash', ['-lc', "pgrep -f 'dsh --profile dev' | head -1"], { encoding: 'utf8' }).trim() } catch { pid = '' }
-step('实例进程被真实拉起', pid !== '', pid !== '' ? `pid=${pid}` : `（未起；实例日志：${join(home, 'logs', 'e2e-a.log')}）`)
-if (pid !== '') { try { process.kill(Number(pid), 'SIGTERM'); console.log(`  · 已停止验收实例 pid=${pid}`) } catch { /* 已退出 */ } }
+// 确定性判据：只看**本次验收实例**的端口是否被监听（全局 pgrep 会被机器上同名进程假绿——review 指出）
+const portUp = await new Promise((resolve) => { const s = createConnection({ host: '127.0.0.1', port: 3099 }); s.on('connect', () => { s.end(); resolve(true) }); s.on('error', () => resolve(false)); setTimeout(() => { s.destroy(); resolve(false) }, 2000) })
+step('验收实例端口 3099 被监听（真拉起）', portUp, portUp ? 'port=3099' : `（未监听；实例日志：${join(home, 'logs', 'e2e-a.log')}）`)
+const pid = portUp ? execFileSync('bash', ['-lc', "ss -tlnp 2>/dev/null | grep ':3099 ' | grep -oE 'pid=[0-9]+' | head -1"], { encoding: 'utf8' }).trim() : ''
+if (pid !== '') { try { process.kill(Number(pid.replace('pid=', '')), 'SIGTERM'); console.log(`  · 已停止验收实例 ${pid}`) } catch { /* 已退出 */ } }
 
-const del = c.deleteInstance('e2e-a')
+const del = await c.deleteInstance('e2e-a')
 step('删除 = 归档 + 墓碑', del.ok && !existsSync(dshHome), del.error ?? `${del.detail ?? ''}`)
 const tombstones = c.listDeletedInstances()
 step('墓碑可查（含归档路径）', tombstones.length === 1 && (tombstones[0].archivePath ?? '').includes('.archive/'), JSON.stringify(tombstones))

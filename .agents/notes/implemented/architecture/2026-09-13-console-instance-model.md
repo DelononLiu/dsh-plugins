@@ -1,6 +1,6 @@
 # Agent Note: console 实例模型与加固方案（模板 / 版本 / 布局 / 删除 / 事件 / broker 退场）
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
@@ -95,7 +95,7 @@ gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与
 | 2 模板改名 master/dev/explorer + minimal | ✅ 完成 | `05577fc` |
 | 3 runtime 池（模块/存储迁移/创建引用/升级切引用/UI 版本页签） | ✅ 完成 | `0be43a8` `b25d392` `(3c)` |
 | 4 删除（归档 + tombstone + 默认实例拒绝 + CLI 恢复） | ✅ 完成 | `(4)` |
-| 5 broker 退场 | ⏳ 5a 术语/id 载体改名 ✅、5b-1 删 `brokerStatus` 公共面+消费面 ✅、5b-2 配置面与文档 ✅；**5b-3 channel 内部 broker 传输路径未删** | `de05f4e` `b925f68` `de3fb80` |
+| 5 broker 退场（5a 术语/5b-1 公共面/5b-2 配置面与文档/**5b-3 channel 内部传输路径**） | ✅ 完成 | `de05f4e` `b925f68` `de3fb80` `(5b-3)` |
 | 6 管理事件 + 静默失败收口 | ✅ 完成（6a 管理事件；6b `readLog` 改 async + 回环结论回传） | `3ce8fdc` `(6b)` |
 | 7 UI 收口（tombstone 筛选 ✅ + 跳转回归待用户 UI 自验） | ✅ 完成 | `(7)` |
 
@@ -105,11 +105,13 @@ gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与
    同进程回环此前丢弃 `onControl` handler 返回的 `ControlOutcome`，现已回传（`ControlDispatchResult.outcome`），
    console 据此把守护的拒绝变成 `ok: false`（只认真正的 ControlOutcome，避免把 handler 的其它返回值当结论）。
    跨守护 `readLog` 也从 "fire-and-forget + 空返回" 改为 await + 返回结果/错误（`LogReadResult.error`）。
-5. **daemon 的 controlPort 3089 被官方 `dsh-sdk-jsonrpc-server` 占用**（端到端实测：向 3089 发
-   我们的 client-request 帧，回的是官方 jsonrpc 的 `unknown method`，连 `listInstances` 都不认）。
-   我们的控制服务会打印"本机控制端口 http://127.0.0.1:3089"（**乐观日志**，未校验 bind 结果）→
-   "同机直连 controlPort" 这条路径实际不可用。归属**新批次（批 8）**：端口让位/复用官方 RPC 面，
-   或把该服务做成显式失败（bind 失败必须报错，不能只打印一行乐观日志）。
+5. ~~daemon 的 controlPort 3089 被官方 `dsh-sdk-jsonrpc-server` 占用~~ → **误判，已订正**：
+   3089 **是**我们自己的控制面，工作正常。当时探测失败是因为帧格式不合规——`method` 必须带
+   namespace 前缀（`"console/listInstances"`，见 `startControlServer` 的 `frame.method.split('/')`），
+   我只发了 `listInstances` → 命中 `namespace !== 'console'` 分支回 "unknown method"。教训：
+   **探测前先从代码确认 wire 格式**，别把"我的请求写错了"当成"对面坏了"。
+   该轮保留的真修复：控制端口**不再乐观宣告**——改成 `listening` 事件才报就绪、`error` 事件响亮报错
+   （含 EADDRINUSE 提示），并暴露 `controlServerStatus()`（@Remote + HTTP 面）供部署者查证。
 4. **删除后 channel 实例表不会自动收敛**（批 7 实测：删除的实例仍出现在实例列表 = 幽灵行）。
    已在 `listInstances()` 按注册表过滤墓碑（注册表是权威源）；注册表不可读时**不隐藏任何实例**
    （宁可多显示，也不静默吞掉）。
@@ -149,6 +151,61 @@ gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与
 2. 实例列表只有 3 个（channel 发现 + 自身），**注册表里 6 个**——`listInstances` 没有并入注册表
    → 现并入注册表内（非墓碑）实例，未向本管理端注册者记 `offline`（不做乐观在线）。
    复验：页脚 `6 实例 · 1 个 runtime`、总览"实例总数 6（在线 3 / 离线 3）"、daemon/web 出现在列表。
+
+6. **注册表是"读-改-写"且无锁**（自查发现，未修）：所有写入路径都是 loadRegistry() → 改 → saveRegistry()
+   （console 的 persistDeployedInstances / deleteInstance 等包装；脚本的 import / remove）。
+   文件级写入是原子的（temp + rename，不会写坏），但**并发写者会互相丢更新**——实测场景：终端跑
+   `dsh-registry.mjs import` 的同时守护落盘部署清单。当前靠"实际只有一个写者"的自觉，属**未机械化的约束**。
+   修法（未做）：注册表加锁文件（open wx + 重试 + finally 清理），两份实现都要加；或把写入收敛到单一进程。
+   归属：**待定批次**。
+
+
+### 独立代码审查（2026-09-13，`ac582ca..HEAD`）与其处置
+
+审查结论：机制面落地、门禁绿；**3 个阻塞项已修**，其余转台账。
+
+已修：
+- **守护名推导错**（阻塞，会导致 UI 删除在真实单机派发到不存在的守护）：注册表的 `host` 是**机器标识**
+  （hostname，实测 `DELONON-THINK`），与守护 agent 名（`host-master`）不是一回事。改为按 launch 配置的
+  `host` → channel 归属 → 档案 host 的优先级解析；并把 `delete`/`restore` 提为一等控制指令（联合类型 +
+  HTTP 白名单 + 直连 RPC 的 `remoteLifecycle`），local 模式的限制同步放宽。
+- **归档早于进程退出**（阻塞，违反决策 6 顺序）：删除改异步，先停进程并**确认退出**（子进程 exitCode +
+  端口释放，上限 5s），超时即放弃归档并显式失败——绝不归档活实例。
+- **异步下发谎报成功**（阻塞）：管理事件新增「已受理」态——下发型操作不再记「成功」，真实结果由执行面
+  另记一条；`deleteInstance` 的返回文案同步改为「已下发守护 X（异步；完成态见列表/墓碑）」。
+- 顺手清理：`void spec` 残留、`DSH_RELAY_AGENT` 不再被**新写入**（只保留兼容读）、e2e 脚本两处假绿判据
+  （`||` 二选一、全局 `pgrep`）改为确定性断言（池状态 + 本次实例端口监听）。
+- 回归用例：新增 console 角色删除路由（断言派发到 `host-master`、不是 `host-<hostname>`、事件记「已受理」
+  而非「成功」）+ 守护不可达时显式失败且目录/档案原样。
+
+转台账（未修，按优先级）：
+- **实例启动用的内核来自 PATH/守护自身，而不是它引用的池 runtime**（去掉 e2e 的假绿判据后暴露，**已修**）：
+  `daemonStart` 原来用"守护自己的 CLI"（意图是版本一致），但实例档案里的 `version` 于是**只是登记值**——
+  实测守护 CLI 0.1.1-rc.2 与池 0.1.2-rc.1 错配时，实例起不来且报 `ctx.userQuestions.registerProvider is not a function`
+  （毫无指向性）。改为**池内版本优先**（`~/.dsh-runtimes/<ver>/node_modules/.bin/dsh`），缺 `.bin/dsh` 时回退
+  守护自身 CLI 并告警，且每次都记一行"启动 CLI = …（档案版本 …）"。修后严格判据（实例端口真被监听）13/13 通过。
+
+7. 注册表主键 `host/id` 未被查找使用（`findInstance`/`removeInstance` 只按 id）→ 跨主机同名误伤。
+8. `instancesUsingVersion` 过滤墓碑 → 删除仅被墓碑引用的版本后，`restoreInstance` 会恢复出悬空软链。
+9. `importRuntime` 失败抛异常而非返回 `{ok:false}`；`cp -al` 与来源共享 inode →「池不可变」在来源
+   就地改写时不成立（需内容指纹或真拷贝兜底）。
+10. `currentRuntimeVersion` 只做前缀比较 → 池根 `/a/.dsh-runtimes` 会把 `/a/.dsh-runtimes-old/...` 误判成版本。
+11. `persistDeployedInstances` 对老实例默认写 `layout: 'home'`，与决策 13 的判读口径矛盾。
+12. 判据缺测试：R4「改模板后已建实例不变」、R7 升级失败自动回滚、R2 多机注册/回执（当前靠 e2e 脚本覆盖一部分）。
+13. 越界项：`restoreInstance` 同时上了 @Remote 与 HTTP 面（决策 6 原写"只提供 CLI"）。**修正决策口径**：
+   恢复只提供**命令入口**（@Remote/HTTP，UI 不出按钮）——UI 上仅显示墓碑与归档路径。
+
+### 真机全链路复验（2026-09-13，运行中的 daemon + web2，最新构建）
+
+不是测试桩，而是真守护进程 + 真控制面 RPC + 真实例：
+
+1. `console/deployInstance`（模板 dev + 内核 0.1.2-rc.1）→ **实例真监听 3097**；
+   日志一行证到 R7：`e2e-final 启动 CLI = /home/long2015/.dsh-runtimes/0.1.2-rc.1/node_modules/.bin/dsh（档案版本 0.1.2-rc.1）`。
+2. `console/controlInstance {command: delete}` → 受理回执「删除已受理（本机守护执行：停进程 → 确认退出 → 归档）」；
+   现场核对：端口释放 ✓ / 目录移走 ✓ / 归档 `/…/.archive/e2e-final-<ts>` ✓ / 档案 `deleted` + 归档路径 ✓。
+3. 复验中修掉一个真缺陷：本机守护收到 delete/restore 时**不该要求"宿主信息"**（它自己就是执行面），
+   原先会回「实例 X 无守护宿主信息」——已改为本地执行（与 @Remote 同实现）。
+4. 顺带把 `deployInstance` 补进守护 HTTP 派发链（此前只有 @Remote，CLI/验证驱动不了）。
 
 ## Alternatives
 

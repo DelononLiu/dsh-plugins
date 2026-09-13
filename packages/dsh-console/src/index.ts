@@ -20,7 +20,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
-import { hostAgentId, instanceIdFromEnv, isHostAgent, signRequest, type ControlCommand, type ControlOutcome, type InstanceIdentity, type WorkerInstanceReport, type WorkerReport } from 'dsh-channel'
+import { hostAgentId, instanceIdFromEnv, isHostAgent, type ControlCommand, type ControlOutcome, type InstanceIdentity, type WorkerInstanceReport, type WorkerReport } from 'dsh-channel'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -43,7 +43,7 @@ import {
   type InstanceEntry,
 } from './registry.js'
 import { currentRuntimeVersion, linkRuntimeInto, runtimeReady } from './runtimes.js'
-import { importRuntime, listRuntimes, poolRoot, removeRuntime, verifyRuntime } from './runtimes.js'
+import { importRuntime, listRuntimes, poolRoot, removeRuntime, runtimeDir, verifyRuntime } from './runtimes.js'
 import { archiveInstance, deleteGuard, restoreInstance } from './lifecycle.js'
 
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则）——唯一来源，
@@ -281,6 +281,9 @@ export class ConsoleService extends TypertRemoteService {
    * 模板只带三件套（package.json + patch + lock），**不含 node_modules**——不装依赖
    * 的实例起不来（实机验收发现）。装完再链接池，保证官方作用域由池覆盖。
    */
+  /** 删除前等待实例进程退出的上限（超时即放弃归档，绝不归档活实例）。 */
+  static DELETE_STOP_TIMEOUT_MS = 5_000
+
   static installImpl: (profileDir: string) => void = (profileDir) => {
     // 优先 pnpm（本仓库的包管理语义：link:/peer 宽松）；不在 PATH 时回退 npm +
     // --legacy-peer-deps（我们的包声明官方 peer，npm 默认严格校验会 ERESOLVE——实测）。
@@ -334,6 +337,10 @@ export class ConsoleService extends TypertRemoteService {
    * 恢复；启动对账结果见 {@link reconcileResult}。
    */
   private readonly runtimeInstances = new Map<string, LaunchSpec>()
+  /** daemon 角色：本机控制端口是否真的在监听（false = 同机直连控制不可用）。 */
+  private controlServerUp = false
+  /** daemon 角色：控制端口绑定失败原因（空 = 正常）。 */
+  private controlServerError = ''
   /** daemon 角色：启动对账结果（{@link reconcileInstances} 写入）。 */
   private reconcileReport: Array<{ id: string; state: 'online' | 'offline' | 'orphan'; detail: string }> = []
   /** daemon 角色：启动对账任务（端口探测最长 2s/实例，异步；{@link reconcileReady} 可等）。 */
@@ -361,13 +368,15 @@ export class ConsoleService extends TypertRemoteService {
    * 与运行日志同一条 JSONL（`category: 'admin'`），复用现有查看器；
    * 判据：**只记改变状态的操作 + 失败/异常**，只读动作（查看/刷新/跳转）不记。
    */
-  private adminEvent(action: string, target: string, ok: boolean, actor: string, detail = ''): void {
+  private adminEvent(action: string, target: string, ok: boolean, actor: string, detail = '', state?: 'ok' | 'accepted'): void {
     const role = this.config.role === 'daemon' ? 'daemon' : 'console'
+    // 「已受理」≠ 成功：下发型操作（异步）只记受理，真实结果由执行面另记一条（review 阻塞 3）。
+    const verdict = !ok ? '失败' : (state === 'accepted' ? '已受理' : '成功')
     Logger.record(role, {
       level: ok ? 'info' : 'error',
       scope: 'admin-event',
       category: 'admin',
-      msg: `${actor} ${action} ${target} → ${ok ? '成功' : '失败'}${detail !== '' ? `（${detail}）` : ''}`,
+      msg: `${actor} ${action} ${target} → ${verdict}${detail !== '' ? `（${detail}）` : ''}`,
     })
   }
 
@@ -517,7 +526,7 @@ export class ConsoleService extends TypertRemoteService {
       /* 注册表不可读时不隐藏任何实例（宁可多显示，也不静默吞掉） */
     }
     // 加本机实例（console 端自己，channel 发现的是远端）。
-    const self = this.ctx.channel.relay?.agent
+    const self = this.ctx.channel.instanceId
     if (self !== undefined && !instances.some((i) => i.id === self)) {
       instances = [{ id: self, name: self, addr: '', status: 'online' as const }, ...instances]
     }
@@ -715,9 +724,9 @@ export class ConsoleService extends TypertRemoteService {
     req.on('data', (chunk) => { body += String(chunk) })
     req.on('end', () => {
       try {
-        const { instanceId, command } = JSON.parse(body || '{}') as { instanceId?: string; command?: 'stop' | 'start' | 'upgrade' | 'restart' }
+        const { instanceId, command } = JSON.parse(body || '{}') as { instanceId?: string; command?: 'stop' | 'start' | 'upgrade' | 'restart' | 'delete' | 'restore' }
         if (typeof instanceId !== 'string' || !instanceId) throw new Error('instanceId required')
-        if (!command || !['stop', 'start', 'upgrade', 'restart'].includes(command)) throw new Error(`unsupported command: ${String(command)}`)
+        if (!command || !['stop', 'start', 'upgrade', 'restart', 'delete', 'restore'].includes(command)) throw new Error(`unsupported command: ${String(command)}`)
         const result = this.controlInstanceAs(instanceId, command, {}, this.resolveActor(req))
         res.writeHead(result.ok ? 200 : 400, { 'content-type': 'application/json' })
         res.end(JSON.stringify(result.ok ? { ok: true, instanceId, command } : { ok: false, instanceId, command, error: result.error }))
@@ -770,7 +779,7 @@ export class ConsoleService extends TypertRemoteService {
           let result: unknown
           if (method === 'controlInstance') {
             const { instanceId, command, payload } = (frame.payload?.args ?? {}) as {
-              instanceId: string; command: 'stop' | 'start' | 'upgrade' | 'restart'; payload?: { version?: string }
+              instanceId: string; command: 'stop' | 'start' | 'upgrade' | 'restart' | 'delete' | 'restore'; payload?: { version?: string }
             }
             result = this.controlInstance(instanceId, command, payload ?? {})
           } else if (method === 'listInstances') {
@@ -790,6 +799,12 @@ export class ConsoleService extends TypertRemoteService {
               res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: { ok: false, error: { code: 'internal', message: err instanceof Error ? err.message : String(err), details: {} } } }))
             })
             return
+          } else if (method === 'deployInstance') {
+            // 部署（同步受理）：{ request }（DeployInstanceRequest）
+            const { request } = (frame.payload?.args ?? {}) as { request: DeployInstanceRequest }
+            result = this.deployInstance(request)
+          } else if (method === 'controlServerStatus') {
+            result = this.controlServerStatus()
           } else if (method === 'listRuntimePool') {
             result = this.listRuntimePool()
           } else if (method === 'listTemplates') {
@@ -803,9 +818,17 @@ export class ConsoleService extends TypertRemoteService {
             const { version } = (frame.payload?.args ?? {}) as { version: string }
             result = this.removeRuntimeVersion(version)
           } else if (method === 'deleteInstance') {
-            // 删除（同步结果）：拒绝原因要能回传（不能只说"已下发"）。
+            // 删除是 async（要等进程退出再归档）→ 异步回执；拒绝原因必须回传。
             const { instanceId } = (frame.payload?.args ?? {}) as { instanceId: string }
-            result = this.deleteInstance(instanceId)
+            void this.deleteInstance(instanceId).then((value) => {
+              const ok = (value as { ok?: boolean }).ok !== false
+              res.writeHead(ok ? 200 : 400, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: ok ? { ok: true, value } : { ok: false, error: { code: 'control-error', message: (value as { error?: string }).error ?? '删除失败', details: {} } } }))
+            }).catch((err) => {
+              res.writeHead(500, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: { ok: false, error: { code: 'internal', message: err instanceof Error ? err.message : String(err), details: {} } } }))
+            })
+            return
           } else if (method === 'restoreInstance') {
             // 恢复（CLI 入口）：归档移回 + 档案转回 active。
             const { instanceId } = (frame.payload?.args ?? {}) as { instanceId: string }
@@ -848,10 +871,23 @@ export class ConsoleService extends TypertRemoteService {
         }
       })
     })
+    // **只有真的 listening 才宣告就绪**：此前是"listen 后就打印就绪"的乐观日志，
+    // 端口被占（实测 daemon 的 3089 与官方 jsonrpc 面撞车）时上层完全看不出来。
+    server.on('listening', () => {
+      this.controlServerUp = true
+      this.log(`[dsh-console/daemon] 本机控制端口就绪 http://127.0.0.1:${port}`, { scope: 'daemon' })
+    })
+    server.on('error', (error: NodeJS.ErrnoException) => {
+      this.controlServerUp = false
+      this.controlServerError = `${error.code ?? 'error'}：${error.message}`
+      // 响亮报错（不静默吞）：控制端口不可用 = 同机直连控制这条路径失效，
+      // 必须让部署者立刻看见，并指明多半是端口冲突。
+      this.log(`[dsh-console/daemon] 🔴 本机控制端口 ${port} 绑定失败（${this.controlServerError}）——同机直连控制不可用；` +
+        `若为 EADDRINUSE 请给 daemon 的 controlPort 换一个空闲端口（官方 jsonrpc 面也可能占用该端口）`, { scope: 'daemon', level: 'error' })
+    })
     server.listen(port, '127.0.0.1')
     server.unref?.()
     this.ctx.effect(() => () => server.close())
-    this.log(`[dsh-console/daemon] 本机控制端口 http://127.0.0.1:${port}`, { scope: 'daemon' })
   }
 
   /** daemon 角色：处理控制指令（只认本机清单内的实例；指令载荷携带 instanceId）。 */
@@ -884,9 +920,14 @@ export class ConsoleService extends TypertRemoteService {
         this.daemonStop(instanceId)
         return { ok: true, detail: '已发停止' }
       case 'delete': {
-        // 删除（执行面）：停进程 → 目录归档 → 档案转墓碑。守卫在 daemonDeleteLocal 内。
-        const stopped = this.daemonDeleteLocal(instanceId, spec)
-        return stopped
+        // 删除（执行面）：停进程 → **确认退出** → 目录归档 → 档案转墓碑（守卫在 daemonDeleteLocal 内）。
+        // 异步执行（要等进程退出）：受理回执立即返回，真实结果落 admin 事件与档案。
+        void this.daemonDeleteLocal(instanceId, spec).then((outcome) => {
+          if (!outcome.ok) this.adminEvent('delete', instanceId, false, 'daemon', outcome.error ?? '')
+        }).catch((e: unknown) => {
+          this.adminEvent('delete', instanceId, false, 'daemon', e instanceof Error ? e.message : String(e))
+        })
+        return { ok: true, detail: '删除已受理（异步：停进程 → 归档）' }
       }
       case 'restore': {
         const r = restoreInstance(instanceId)
@@ -947,7 +988,7 @@ export class ConsoleService extends TypertRemoteService {
       profile: entry.profileDir,
       addr: entry.addr ?? undefined,
       port: entry.port ?? undefined,
-      env: { DSH_CHANNEL_ID: entry.id, DSH_RELAY_AGENT: entry.id },
+      env: { DSH_CHANNEL_ID: entry.id },
       version: entry.version ?? undefined,
     }
   }
@@ -1560,7 +1601,7 @@ export class ConsoleService extends TypertRemoteService {
     try {
       this.ctx.channel.emit('task', 'system.upgrade.result', {
         owner: 'admin',
-        sender: this.ctx.channel.relay?.agent ?? 'daemon',
+        sender: this.ctx.channel.instanceId ?? 'daemon',
         instanceId,
         version,
         ok,
@@ -1589,11 +1630,19 @@ export class ConsoleService extends TypertRemoteService {
     const logDir = join(roleDataRoot('daemon'), 'logs')
     mkdirSync(logDir, { recursive: true })
     const fd = openSync(join(logDir, `${instanceId}.log`), 'a')
-    // 拉起实例用**启动自己的 dsh**（process.argv[1]——daemon 是
-    // `node <dsh-bin> --profile daemon` 起的，argv[1] 即 dsh bin 路径），
-    // 保证与 daemon 同内核版本；PATH 里的全局 dsh 可能是旧版（rc.2 vs rc.1），
-    // 实例版本不一致会崩/错配。fallback：非 dsh 启动（测试/直调）→ 'dsh'。
-    const dshBin = ConsoleService.selfDshCommand()
+    // 拉起实例的 CLI：**实例档案里的 runtime 版本优先**（R7：创建时选的版本必须真的是它跑的内核），
+    // 回退到"启动自己的 dsh"（process.argv[1]——daemon 是 `node <dsh-bin> --profile daemon` 起的）。
+    // 为什么必须优先池：内核错配的失败信息毫无指向性（实测 rc.2/rc.1 错配报
+    // `ctx.userQuestions.registerProvider is not a function`，且以"实例起不来"呈现）。
+    const ownBin = ConsoleService.selfDshCommand()
+    const version = spec.version
+    let dshBin = ownBin
+    if (version !== undefined && version !== '' && runtimeReady(version)) {
+      const poolBin = join(runtimeDir(version), 'node_modules', '.bin', 'dsh')
+      if (existsSync(poolBin)) dshBin = poolBin
+      else this.log(`[dsh-console/daemon] 池内版本 ${version} 缺少 .bin/dsh，回退守护自身 CLI（${ownBin}）`, { scope: 'daemon', level: 'warn' })
+    }
+    this.log(`[dsh-console/daemon] ${instanceId} 启动 CLI = ${dshBin}（档案版本 ${version ?? '未登记'}）`, { scope: 'daemon' })
     const child = ConsoleService.spawnImpl(dshBin, ['--profile', spec.profile], {
       env: { ...process.env, DSH_HOME: spec.dshHome, ...spec.env },
       detached: true,
@@ -1702,21 +1751,40 @@ export class ConsoleService extends TypertRemoteService {
    * 删除实例（执行面）：守卫 → 停进程 → 目录归档 → 档案墓碑 → 从运行时清单移除。
    * 守卫先判（正式 web / 本机 daemon）——拒绝时**不改任何东西**并给出明确原因。
    */
-  private daemonDeleteLocal(instanceId: string, spec: LaunchSpec): ControlOutcome {
+  private async daemonDeleteLocal(instanceId: string, spec: LaunchSpec): Promise<ControlOutcome> {
     const reg = loadRegistry()
     const entry = findRegistryInstance(reg, instanceId)
     if (entry === undefined) return { ok: false, error: `实例 ${instanceId} 不在注册表，无法删除` }
     const denied = deleteGuard(entry)
     if (denied !== null) return { ok: false, error: denied }
     this.daemonStop(instanceId)
+    // **决策 6 的顺序**：先停进程、确认真的退出，再归档——否则活进程会继续往被移走的目录写，
+    // 也可能让紧随其后的新实例撞端口（review 实测：原实现停完立刻归档）。
+    const gone = await this.waitProcessGone(instanceId, spec)
+    if (!gone) {
+      return { ok: false, error: `实例 ${instanceId} 在 ${ConsoleService.DELETE_STOP_TIMEOUT_MS}ms 内未退出，已放弃归档（目录与档案保持原样）` }
+    }
     const archived = archiveInstance(entry)
     if (!archived.ok) return { ok: false, error: archived.error }
     this.runtimeInstances.delete(instanceId)
     this.ops.delete(instanceId)
     this.log(`[dsh-console/daemon] 已删除 ${instanceId}：目录归档到 ${archived.archivedAt ?? '(无目录)'}，档案转墓碑`, { scope: 'deploy' })
     this.adminEvent('delete', instanceId, true, 'daemon', `归档 ${archived.archivedAt ?? '无目录'}`)
-    void spec
     return { ok: true, detail: `已删除 ${instanceId}（归档 ${archived.archivedAt ?? '无目录'}，可用 restoreInstance 恢复）` }
+  }
+
+  /** 等待实例进程真的退出（子进程 exitCode / 端口释放），超时返回 false。 */
+  private async waitProcessGone(instanceId: string, spec: LaunchSpec): Promise<boolean> {
+    const deadline = Date.now() + ConsoleService.DELETE_STOP_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      const child = this.children.get(instanceId)
+      const childGone = child === undefined || child.exitCode !== null
+      const port = spec.port
+      const portGone = port === undefined ? true : await isPortFree(port)
+      if (childGone && portGone) return true
+      await sleep(100)
+    }
+    return false
   }
 
   private daemonStop(instanceId: string): void {
@@ -1836,7 +1904,7 @@ export class ConsoleService extends TypertRemoteService {
    * @returns 下发结果（ok=false 时 error 说明原因）。
    */
   @Remote
-  controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart', payload: { version?: string }): ControlResult {
+  controlInstance(instanceId: string, command: 'stop' | 'start' | 'upgrade' | 'restart' | 'delete' | 'restore', payload: { version?: string }): ControlResult {
     return this.controlInstanceAs(instanceId, command, payload, 'system')
   }
 
@@ -1846,7 +1914,7 @@ export class ConsoleService extends TypertRemoteService {
    */
   private controlInstanceAs(
     instanceId: string,
-    command: 'stop' | 'start' | 'upgrade' | 'restart',
+    command: 'stop' | 'start' | 'upgrade' | 'restart' | 'delete' | 'restore',
     payload: { version?: string },
     actor: string,
   ): ControlResult {
@@ -1857,23 +1925,21 @@ export class ConsoleService extends TypertRemoteService {
 
   private controlInstanceCore(
     instanceId: string,
-    command: 'stop' | 'start' | 'upgrade' | 'restart',
+    command: 'stop' | 'start' | 'upgrade' | 'restart' | 'delete' | 'restore',
     payload: { version?: string },
     actor: string,
   ): ControlResult {
     // 目标侧短路（本机即目标实例）：跨实例 RPC 到达这里时直接执行自退，
     // 不再 remoteControl 递归（否则管理端→实例→再调自己→死循环）。
-    // instance 角色用部署 env 的本机实例 id（DSH_CHANNEL_ID，旧名兼容读），
-    // 无守护场景直连本体也能识别自己）；console/daemon 用 relay.agent
-    // （daemon 不短路自己——避免误杀守护，本机清单分支在前面处理）。
-    const selfId = this.config.role === 'instance'
-      ? instanceIdFromEnv()
-      : this.ctx.channel.relay?.agent
+    // **只有 instance 角色**用本机实例 id（DSH_CHANNEL_ID，旧名兼容读）；
+    // console/daemon 一律 undefined——它们是控制面/执行面，把自己当目标会自杀
+    // （broker 退场前这里是 relay.agent，恒为 undefined；语义必须保持，实测有回归用例）。
+    const selfId = this.config.role === 'instance' ? instanceIdFromEnv() : undefined
     if (instanceId === selfId) {
       const action = resolveControlAction({ id: 'rpc', type: command, payload, ts: Date.now() })
       if (action === 'exit') {
         // RPC 帧无发送时间戳（官方协议不加字段）→ 用启动窗口兜底过滤积压帧
-        // （broker 兜底补投的旧 RPC）；当前调用（窗口外）照常执行。
+        // （积压的旧 RPC）；当前调用（窗口外）照常执行。
         if (Date.now() - this.startedAt < ConsoleService.STARTUP_CONTROL_GRACE_MS) {
           console.log(`[dsh-console/instance] 启动窗口内忽略 RPC 面 ${command} 指令（迟到的旧指令）`)
           return { ok: true }
@@ -1899,6 +1965,31 @@ export class ConsoleService extends TypertRemoteService {
         return { ok: false, error: `实例 ${instanceId} 无守护宿主（无法派发升级）` }
       }
       return this.dispatchToHost(target, { type: command, payload: { instanceId, ...payload } }, actor)
+    }
+    // delete / restore 是**直接动作**（不是"该不该退出/等待"的生命周期路由）→ 直接下发目标守护，
+    // 不经过 resolveControlRoute（它只认 start/stop/restart 的 exit/pending 语义）。
+    if (command === 'delete' || command === 'restore') {
+      // **本机守护就是执行面**：不要求"宿主信息"，本地执行（与 @Remote deleteInstance/restoreInstance 同实现）。
+      if (this.config.role === 'daemon') {
+        if (command === 'restore') {
+          const r = restoreInstance(instanceId)
+          if (!r.ok) return { ok: false, error: r.error }
+          const entry = findRegistryInstance(loadRegistry(), instanceId)
+          if (entry !== undefined) this.runtimeInstances.set(instanceId, this.specFromEntry(entry))
+          return { ok: true, detail: `已恢复 ${instanceId}（目录 ${r.home ?? ''}，已重新纳入本机清单，待拉起）` }
+        }
+        const spec = this.instanceSpec(instanceId)
+        if (spec === undefined) return { ok: false, error: `实例 ${instanceId} 不在本机清单` }
+        void this.daemonDeleteLocal(instanceId, spec).then((o) => {
+          if (!o.ok) this.adminEvent('delete', instanceId, false, 'daemon', o.error ?? '')
+        }).catch((e: unknown) => this.adminEvent('delete', instanceId, false, 'daemon', e instanceof Error ? e.message : String(e)))
+        return { ok: true, detail: '删除已受理（本机守护执行：停进程 → 确认退出 → 归档）' }
+      }
+      const targetHost = this.ctx.channel.hostOf(instanceId) ?? (this.config.launch?.[instanceId] as { host?: string } | undefined)?.host
+      if (targetHost !== undefined && targetHost !== '') {
+        return this.dispatchToHost(targetHost, { type: command, payload: { instanceId } }, actor)
+      }
+      return { ok: false, error: `实例 ${instanceId} 无守护宿主信息，无法下发 ${command}` }
     }
     const online = this.isInstanceOnline(instanceId)
     const daemonAgent = this.ctx.channel.hostOf(instanceId) ?? this.config.launch?.[instanceId]?.host
@@ -1937,13 +2028,15 @@ export class ConsoleService extends TypertRemoteService {
    * @param instanceId - 目标实例 id。
    */
   @Remote
-  deleteInstance(instanceId: string): ControlResult {
-    const result = this.deleteInstanceCore(instanceId)
-    this.adminEvent('delete', instanceId, result.ok, 'system', result.ok ? '' : (result.error ?? ''))
+  async deleteInstance(instanceId: string): Promise<ControlResult> {
+    const result = await this.deleteInstanceCore(instanceId)
+    // 执行面本地删除（daemon 角色）是**真结果**；派发给守护则是「已下发」（异步）
+    const dispatched = result.ok && (result.detail ?? '').startsWith('已下发')
+    this.adminEvent('delete', instanceId, result.ok, 'system', result.ok ? (result.detail ?? '') : (result.error ?? ''), dispatched ? 'accepted' : undefined)
     return result
   }
 
-  private deleteInstanceCore(instanceId: string): ControlResult {
+  private async deleteInstanceCore(instanceId: string): Promise<ControlResult> {
     const reg = loadRegistry()
     const entry = findRegistryInstance(reg, instanceId)
     if (entry === undefined) return { ok: false, error: `实例 ${instanceId} 不在注册表，无法删除` }
@@ -1955,12 +2048,22 @@ export class ConsoleService extends TypertRemoteService {
     if (denied !== null) return { ok: false, error: denied }
     if (this.config.role === 'daemon') {
       const spec = this.instanceSpec(instanceId)
-      const outcome = this.daemonDeleteLocal(instanceId, spec ?? { dshHome: entry.home, profile: entry.profileDir })
+      const outcome = await this.daemonDeleteLocal(instanceId, spec ?? { dshHome: entry.home, profile: entry.profileDir })
       return outcome.ok ? { ok: true, detail: outcome.detail } : { ok: false, error: outcome.error }
     }
-    // 非 daemon 角色：派发给实例所属守护（host 从档案取；缺失则显式失败）。
-    const host = entry.host === hostId() ? `host-${this.config.hostId ?? entry.host}` : entry.host
-    return this.dispatchToHost(host, { type: 'delete', payload: { instanceId } }, 'system')
+    // 非 daemon 角色：路由到实例所属守护。host 取值优先级 = launch 配置的 host（部署时登记的
+    // **守护 agent 名**，如 host-master）→ channel 归属 → 档案 host。⚠️ 注册表的 host 是**机器标识**
+    // （hostname，如 DELONON-THINK），拼成 host-<hostname> 会派发到不存在的守护（review 实测）。
+    const launchSpec = this.config.launch?.[instanceId] as { host?: string } | undefined
+    const host = launchSpec?.host ?? this.ctx.channel.hostOf(instanceId) ?? entry.host
+    if (host === undefined || host === '') {
+      return { ok: false, error: `实例 ${instanceId} 无守护宿主信息（launch 配置缺失），无法派发删除` }
+    }
+    // 「已下发」不等于成功：异步执行的完成态看实例列表/墓碑，措辞不许写成"成功"（review 第 3 条）。
+    const dispatched = this.dispatchToHost(host, { type: 'delete', payload: { instanceId } }, 'system')
+    return dispatched.ok
+      ? { ok: true, detail: `已下发守护 ${host} 执行删除（异步；完成态见「已删除」列表）` }
+      : dispatched
   }
 
   /**
@@ -1985,7 +2088,21 @@ export class ConsoleService extends TypertRemoteService {
 
   private restoreInstanceCore(instanceId: string): ControlResult {
     const r = restoreInstance(instanceId)
-    return r.ok ? { ok: true, detail: `已恢复 ${instanceId}（目录 ${r.home ?? ''}，待拉起）` } : { ok: false, error: r.error }
+    if (!r.ok) return { ok: false, error: r.error }
+    // 恢复后**重新纳入守护运行时清单**：否则守护的内存清单里没有它，紧接着的 start/delete 会
+    // 回「不在本机清单」，必须重启守护才行（自测踩到）。
+    const entry = findRegistryInstance(loadRegistry(), instanceId)
+    if (this.config.role === 'daemon' && entry !== undefined) {
+      this.runtimeInstances.set(instanceId, this.specFromEntry(entry))
+      this.log(`[dsh-console/daemon] ${instanceId} 已恢复并重新纳入本机清单（待拉起）`, { scope: 'deploy' })
+    }
+    return { ok: true, detail: `已恢复 ${instanceId}（目录 ${r.home ?? ''}，待拉起）` }
+  }
+
+  /** 本机控制端口状态（typert @Remote）：是否真的在监听 + 失败原因。 */
+  @Remote
+  controlServerStatus(): { up: boolean; error: string } {
+    return { up: this.controlServerUp, error: this.controlServerError }
   }
 
   /**
@@ -2068,7 +2185,7 @@ export class ConsoleService extends TypertRemoteService {
   }
 
   private upgradeInstancesCore(instanceIds: string[], version: string): UpgradeBatchResult {
-    const selfId = this.ctx.channel.relay?.agent
+    const selfId = this.ctx.channel.instanceId
     const results: UpgradeItemResult[] = instanceIds.map((instanceId) => {
       if (isHostAgent(instanceId)) {
         return { instanceId, ok: false, error: '守护主机本体不支持升级（v1）：请升级其下实例' }
@@ -2133,8 +2250,12 @@ export class ConsoleService extends TypertRemoteService {
       return { ok: true, ...(loopback.commandId !== undefined ? { commandId: loopback.commandId } : {}) }
     }
     if (instanceId === undefined) return { ok: false, error: `${command.type} 缺少 instanceId` }
+    if (command.type === 'delete' || command.type === 'restore') {
+      // delete/restore 不经 controlInstance 的窄联合（那是 stop/start/restart 的生命周期语义）
+      return this.remoteLifecycle(hostId, command.type, instanceId)
+    }
     if (command.type !== 'stop' && command.type !== 'start' && command.type !== 'restart') {
-      return { ok: false, error: `${command.type} 需要 hub 模式（多机台账派发）；同机 local 模式只直连 stop/start/restart` }
+      return { ok: false, error: `${command.type} 需要 hub 模式（多机台账派发）；同机 local 模式只直连 stop/start/restart/delete/restore` }
     }
     return this.remoteControl(hostId, { instanceId, command: command.type })
   }
@@ -2143,6 +2264,21 @@ export class ConsoleService extends TypertRemoteService {
    * 经 callRemote 调目标实例/守护的 console.controlInstance（typert 跨实例 RPC，
    * 目标侧本地执行，返回回执）。直连优先、broker 兜底；不可达 → 降级 sendControl。
    */
+  /**
+   * 经直连 RPC 下发 delete/restore（这两个动作不属于 stop/start/restart 的生命周期语义，
+   * 因此不共用 remoteControl 的窄联合）。语义同 dispatchToHost：ok = 已下发，异步完成。
+   */
+  private remoteLifecycle(targetId: string, command: 'delete' | 'restore', instanceId: string): ControlResult {
+    const result = this.ctx.channel.callRemote<ControlResult>(targetId, {
+      namespace: 'console',
+      method: 'controlInstance',
+      args: { instanceId, command, payload: {} },
+    }, 15_000)
+    result.catch(() => { /* 回执异步：失败经实例状态/墓碑呈现 */ })
+    this.log(`[dsh-console] 控制 ${instanceId} ${command} → 直连 RPC 下发守护 ${targetId}`, { scope: 'control' })
+    return { ok: true, detail: `已下发守护 ${targetId} 执行 ${command}（异步；完成态见列表/墓碑）` }
+  }
+
   private remoteControl(targetId: string, args: { instanceId: string; command: 'stop' | 'start' | 'restart' }): ControlResult {
     const result = this.ctx.channel.callRemote<ControlResult>(targetId, {
       namespace: 'console',
@@ -2152,7 +2288,7 @@ export class ConsoleService extends TypertRemoteService {
     }, 15_000)
     // 同步返回（v1）：发起后即视为成功（回执异步——真结果经 UI 刷新/事件呈现）。
     // 目标不可达（无 addr 且无 broker）→ 降级 sendControl（原行为）。
-    if (!this.ctx.channel.get(targetId)?.addr && this.ctx.channel.relay === undefined) {
+    if (!this.ctx.channel.get(targetId)?.addr) {
       // 吸收 callRemote 的异步拒绝（降级路径不再等待回执）。
       result.catch(() => { /* 降级路径：sendControl 已发，忽略回执 */ })
       this.ctx.channel.sendControl(targetId, { type: args.command, payload: { instanceId: args.instanceId } })

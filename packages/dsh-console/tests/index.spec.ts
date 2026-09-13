@@ -5,6 +5,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
+import { createServer } from 'node:http'
 import type { ChildProcess } from 'node:child_process'
 import * as childProcess from 'node:child_process'
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, statSync } from 'node:fs'
@@ -348,6 +349,7 @@ describe('daemon 角色（主机守护）', () => {
     })
     ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
     await new Promise((r) => setTimeout(r, 20))
+    // 有档案版本且池内有该版本 → 用**池内 CLI** 启动（R7：实例按引用版本跑，而不是守护/PATH 的 CLI）
     expect(spawnSpy).toHaveBeenCalledWith('dsh', ['--profile', 'web'], expect.objectContaining({
       env: expect.objectContaining({ DSH_HOME: '~/.dsh-web3', DSH_RELAY_AGENT: 'web3' }),
       detached: true,
@@ -492,7 +494,10 @@ describe('daemon 角色（主机守护）', () => {
       dshHome: '/tmp/.dsh-web6-deploy', port: 3086, token: 'tok-web6', env: { DSH_RELAY_AGENT: 'web6' },
     })
     await new Promise((r) => setTimeout(r, 30))
-    expect(spawnSpy).toHaveBeenCalledWith('dsh', ['--profile', 'web'], expect.objectContaining({
+    expect(spawnSpy).toHaveBeenCalledWith(
+      join(process.env.HOME ?? '', '.dsh-runtimes', '0.1.2-rc.1', 'node_modules', '.bin', 'dsh'),
+      ['--profile', 'web'],
+      expect.objectContaining({
       env: expect.objectContaining({ DSH_HOME: '/tmp/.dsh-web6-deploy', DSH_RELAY_AGENT: 'web6' }),
       detached: true,
     }))
@@ -1703,7 +1708,7 @@ describe('删除实例（批 4）：归档可恢复 + 默认实例拒删', () =>
     const home = seedInstance('instance-a')
     mockSpawn(fakeChild())
     const ctx = await bootDaemon({})
-    const del = ctx.console.deleteInstance('instance-a')
+    const del = await ctx.console.deleteInstance('instance-a')
     expect(del.ok).toBe(true)
     expect(existsSync(home)).toBe(false)
     expect(findInstance(loadRegistry(), 'instance-a')!.status).toBe('deleted')
@@ -1723,11 +1728,11 @@ describe('删除实例（批 4）：归档可恢复 + 默认实例拒删', () =>
     saveRegistry(reg)
     mockSpawn(fakeChild())
     const ctx = await bootDaemon({})
-    const rWeb = ctx.console.deleteInstance('web')
+    const rWeb = await ctx.console.deleteInstance('web')
     expect(rWeb.ok).toBe(false)
     expect(rWeb.error).toMatch(/3080|禁止删除/)
     expect(findInstance(loadRegistry(), 'web')!.status).toBe('active')
-    const rDaemon = ctx.console.deleteInstance('daemon')
+    const rDaemon = await ctx.console.deleteInstance('daemon')
     expect(rDaemon.ok).toBe(false)
     expect(rDaemon.error).toMatch(/daemon.*禁止删除|执行面/)
     expect(existsSync(daemonHome)).toBe(true)
@@ -1737,7 +1742,7 @@ describe('删除实例（批 4）：归档可恢复 + 默认实例拒删', () =>
   it('不在注册表的实例：删除显式失败（不静默通过）', async () => {
     mockSpawn(fakeChild())
     const ctx = await bootDaemon({})
-    const r = ctx.console.deleteInstance('nope')
+    const r = await ctx.console.deleteInstance('nope')
     expect(r.ok).toBe(false)
     expect(r.error).toMatch(/不在注册表/)
   })
@@ -1756,7 +1761,7 @@ describe('已删除实例（墓碑）列表（批 7）', () => {
     saveRegistry(reg)
     mockSpawn(fakeChild())
     const ctx = await bootDaemon({})
-    expect(ctx.console.deleteInstance('instance-gone').ok).toBe(true)
+    expect((await ctx.console.deleteInstance('instance-gone')).ok).toBe(true)
     const tombstones = ctx.console.listDeletedInstances()
     expect(tombstones.map((t) => t.id)).toEqual(['instance-gone'])
     expect(tombstones[0].deletedAt).toBeTruthy()
@@ -1790,9 +1795,9 @@ describe('管理事件（批 6）：category=admin + 日志滚动 + 查看器筛
     const reg = loadRegistry()
     upsertInstance(reg, { id: 'instance-ev', host: 'master', home, profileDir: 'dev', layout: 'home', version: '0.1.2-rc.1' })
     saveRegistry(reg)
-    expect(ctx.console.deleteInstance('instance-ev').ok).toBe(true)
+    expect((await ctx.console.deleteInstance('instance-ev')).ok).toBe(true)
     // 幂等失败也要留痕（不是只记成功）
-    expect(ctx.console.deleteInstance('instance-ev').ok).toBe(false)
+    expect((await ctx.console.deleteInstance('instance-ev')).ok).toBe(false)
     const admins = readRecords().filter((r) => r.category === 'admin')
     expect(admins.length).toBeGreaterThanOrEqual(2)
     expect(admins.some((r) => r.msg.includes('delete') && r.msg.includes('instance-ev') && r.msg.includes('成功'))).toBe(true)
@@ -1973,5 +1978,92 @@ describe('templateHome 兼容两种布局（端到端暴露的语义二义）', 
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
+  })
+})
+
+describe('控制端口：绑定结果必须是真的（不许乐观日志）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+  })
+
+  it('空闲端口 → controlServerStatus 报 up:true', async () => {
+    // 先探一个空闲端口（controlPort=0 是 falsy：配置判读上等于"未配置"，服务不会启）
+    const probe = createServer(() => {})
+    await new Promise<void>((r) => probe.listen(0, '127.0.0.1', () => r()))
+    const freePort = (probe.address() as { port: number }).port
+    await new Promise<void>((r) => probe.close(() => r()))
+    mockSpawn(fakeChild())
+    const ctx = await bootDaemon({ controlPort: freePort })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(ctx.console.controlServerStatus().up).toBe(true)
+  })
+
+  it('端口被占用 → 报 up:false 且带 EADDRINUSE（此前只会打一行乐观的"就绪"）', async () => {
+    // 先占住一个端口
+    const squatter = createServer(() => {})
+    await new Promise<void>((r) => squatter.listen(0, '127.0.0.1', () => r()))
+    const port = (squatter.address() as { port: number }).port
+    try {
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({ controlPort: port })
+      await new Promise((r) => setTimeout(r, 100))
+      const st = ctx.console.controlServerStatus()
+      expect(st.up).toBe(false)
+      expect(st.error).toMatch(/EADDRINUSE/)
+    } finally {
+      await new Promise<void>((r) => squatter.close(() => r()))
+    }
+  })
+})
+
+
+describe('删除路由（review 阻塞项回归）：console 角色 → 派发到 launch 配置的守护名', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+  })
+
+  it('用 launch 的 host（守护 agent 名）而不是 host-<hostname>；且异步删除不谎报成功', async () => {
+    mockSpawn(fakeChild())
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, { launch: { web9: { host: 'host-master', addr: 'http://127.0.0.1:3089' } } })
+    // 注册表里的 host 是**机器标识**，与守护 agent 名不同（review 实测踩到）
+    const home = join(dirname(process.env.DSH_REGISTRY!), 'instance-web9')
+    mkdirSync(join(home, 'profiles', 'dev'), { recursive: true })
+    const reg = loadRegistry()
+    upsertInstance(reg, { id: 'web9', host: 'DELONON-THINK', home, profileDir: 'dev', layout: 'home', version: '0.1.2-rc.1' })
+    saveRegistry(reg)
+    // 守护必须在 channel 里有 addr，才走直连 RPC（否则走本地回环 → 无接收者 → 显式失败）
+    ctx.channel.register({ id: 'host-master', name: 'host-master', addr: 'http://127.0.0.1:3089', status: 'online' }, 'tok-master')
+    const channel = ctx.channel as unknown as { callRemote: (...a: unknown[]) => Promise<unknown>; sendControl: (...a: unknown[]) => unknown }
+    const remote = vi.spyOn(channel, 'callRemote').mockResolvedValue({ ok: true, value: { ok: true } })
+    const r = await ctx.console.deleteInstance('web9')
+    expect(r.ok).toBe(true)
+    expect(r.detail ?? '').toMatch(/已下发/)
+    // 目标 = launch 的 host-master（不是 host-DELONON-THINK）
+    expect(remote.mock.calls[0][0]).toBe('host-master')
+    // 不许谎报成功：管理事件必须记「已受理」而不是「成功」
+    const logFile = Logger.resolvePath('console')!
+    const admins = readFileSync(logFile, 'utf8').split('\n').filter((l) => l.includes('admin-event'))
+    expect(admins.some((l) => l.includes('已受理'))).toBe(true)
+    expect(admins.some((l) => l.includes('→ 成功'))).toBe(false)
+    remote.mockRestore()
+  })
+
+  it('守护不可达（无 addr、无本机接收者）→ 显式失败，不谎报成功', async () => {
+    mockSpawn(fakeChild())
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, { launch: { web9: { host: 'host-nope' } } })
+    const home = join(dirname(process.env.DSH_REGISTRY!), 'instance-web9b')
+    mkdirSync(join(home, 'profiles', 'dev'), { recursive: true })
+    const reg = loadRegistry()
+    upsertInstance(reg, { id: 'web9', host: 'DELONON-THINK', home, profileDir: 'dev', layout: 'home' })
+    saveRegistry(reg)
+    const r = await ctx.console.deleteInstance('web9')
+    expect(r.ok).toBe(false)
+    expect(r.error ?? '').toMatch(/无本机接收者|无守护宿主/)
+    expect(existsSync(home)).toBe(true) // 目录与档案原样
+    expect(findInstance(loadRegistry(), 'web9')!.status).toBe('active')
   })
 })

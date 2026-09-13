@@ -72,17 +72,15 @@ declare module '@deepseek-ai/cordis' {
 /** 通道角色：local 进程内（缺省）/ hub 收注册与派发 / worker 出站拉取。 */
 export type ChannelMode = 'local' | 'hub' | 'worker'
 
-/** 插件配置：实例令牌 + 心跳超时 + 可选 relay（社区 broker 底座）+ 多机出站回路。 */
+/** 插件配置：实例令牌 + 心跳超时 + 多机出站回路（直连 + hub/worker；broker 已退场）。 */
 export interface Config {
   /** 实例令牌映射：{instanceId: token}——bootstrap 时注入 agent，注册/心跳校验。 */
   tokens: Record<string, string>
   /** 心跳超时（ms），超时判定离线。默认 30000。 */
   heartbeatTimeoutMs: number
-  /** 可选：dsh-agent-relay broker 接入（实例联通底座）——配置即启用。 */
-  relay?: RelayConfig
   /** 通道角色（缺省 local；配置 console 地址时缺省 worker）。 */
   mode?: ChannelMode
-  /** 本实例 id（worker 身份；缺省回落 relay.agent / env 的 DSH_CHANNEL_ID）。 */
+  /** 本实例 id（worker 身份；缺省回落 env 的 DSH_CHANNEL_ID）。 */
   id?: string
   /** hub（console 实例）基地址，如 http://10.0.0.1:3082——worker 出站目标。 */
   console?: string
@@ -187,24 +185,11 @@ export interface RegisterAck {
   rejected?: Array<{ id: string; reason: string }>
 }
 
-/** Relay broker 接入配置（仅作跨实例传输兜底——实例发现不依赖 broker，
- * 权威源是管理端 launch/register；peers 无地址信息，轮询填充会让直连失效）。 */
-export interface RelayConfig {
-  /** broker 基地址（如 http://127.0.0.1:19121）。 */
-  brokerUrl: string
-  /** 本实例在 broker 的 agent 名（唯一稳定名，如 web2）。 */
-  agent: string
-  /** 共享密钥（HMAC 签名）。 */
-  secret: string
-  /** recv 增量游标持久化文件（长驻进程重启防重放积压指令；缺省不落盘）。 */
-  stateFile?: string
-}
 
 /** 运行时 schema。 */
 export const Config = z.object({
   tokens: z.dict(z.string()).default({}),
   heartbeatTimeoutMs: z.number().default(30000),
-  relay: z.any().default(undefined),
   mode: z.any().default(undefined),
   id: z.any().default(undefined),
   console: z.any().default(undefined),
@@ -292,34 +277,10 @@ export class ChannelService extends TypertRemoteService {
       this.typertGateway = g.typertGateway
       ctx.effect(() => () => { this.typertGateway = undefined })
     })
-    // Relay broker 接入：解析配置（config 优先，env 兜底——DSH_RELAY_*）。
-    // broker 仅作跨实例传输兜底（无 addr 目标/直连失败），不做实例发现。
-    const relay = config.relay ?? envRelayConfig()
-    if (relay !== undefined) {
-      this.relay = relay
-      // 游标持久化：重启后从 stateFile 恢复，避免重读 broker 积压消息。
-      if (relay.stateFile) {
-        try {
-          if (existsSync(relay.stateFile)) {
-            const saved = JSON.parse(readFileSync(relay.stateFile, 'utf8')) as { since?: string }
-            if (typeof saved.since === 'string') this.relaySince = saved.since
-          }
-        } catch {
-          // 文件缺失/损坏：从零开始（首轮全量，属正常冷启动）。
-        }
-      }
-      // 启动即保活注册 + 立即 recv 一次（首轮消费 broker 积压，避免迟到的旧
-      // 控制指令在启动窗口后才被拉到）；周期 5s（recv 响应需快于 callRemote
-      // 回执超时 15s——30s 周期会让跨实例 RPC 回执必然超时）。
-      void this.relayRegister()
-      void this.relayRecvControls()
-      const relayTimer = setInterval(() => this.relayTick(), 5_000)
-      relayTimer.unref?.()
-      ctx.effect(() => () => clearInterval(relayTimer))
-    }
-    // 多机回路（2026-09 定）：hub 服务注册与派发；worker 出站注册 + 长轮询取指令。
-    this.mode = resolveMode(config, relay)
-    this.selfId = resolveSelfId(config, relay)
+    // 传输面 = 同机直连（loopback / addr 可达）+ hub/worker 出站拉取；**broker 已退场**
+    // （2026-09，见 console 实例模型 note）：不留可选后端，也不留扩展点。
+    this.mode = resolveMode(config)
+    this.selfId = resolveSelfId(config)
     if (this.mode === 'worker' && (config.console === undefined || this.selfId === undefined)) {
       throw new Error('dsh-channel: worker 模式需要 console 地址与实例 id（config.id 或 DSH_CHANNEL_ID）')
     }
@@ -351,112 +312,6 @@ export class ChannelService extends TypertRemoteService {
     if (this.mode === 'worker') {
       const stop = this.startWorker()
       ctx.effect(() => stop)
-    }
-  }
-
-  /** 当前 relay 配置（未接入为 undefined）。 */
-  readonly relay: RelayConfig | undefined
-
-  /** recv 增量游标（relay 控制指令接收）。 */
-  private relaySince = ''
-
-  /** 周期任务：保活注册 + 控制指令/回执接收（broker 仅兜底传输，不做发现）。 */
-  private relayTick(): void {
-    void this.relayRegister()
-    void this.relayRecvControls()
-  }
-
-  /** 向 broker 注册/保活（POST /register，HMAC 签名）。 */
-  private async relayRegister(): Promise<void> {
-    const relay = this.relay
-    if (relay === undefined) return
-    const body = JSON.stringify({ agent: relay.agent })
-    try {
-      await relayFetch(relay, 'POST', '/register', body)
-    } catch {
-      // broker 不可达：下次周期重试（保活失败不致命）。
-    }
-  }
-
-  /** 向远端实例发控制指令（经 broker POST /messages，type=control）。 */
-  private async relaySendControl(instanceId: string, command: ControlCommand): Promise<void> {
-    const relay = this.relay
-    if (relay === undefined) return
-    // broker 的 normalizeEnvelope 只接受 type message|ack——控制指令用
-    // kind='request' 承载，指令本体放 body.command。
-    const body = JSON.stringify({
-      id: randomUUID(),
-      to: instanceId,
-      body: { command },
-      type: 'message',
-      kind: 'request',
-      replyTo: null,
-      ack: false,
-    })
-    try {
-      await relayFetch(relay, 'POST', '/messages', body)
-    } catch {
-      // broker 不可达：指令投递失败不致命。
-    }
-  }
-
-  /** 拉取自己的控制指令消息（GET /messages?since=），触发 onControl。 */
-  private async relayRecvControls(): Promise<void> {
-    const relay = this.relay
-    if (relay === undefined) return
-    try {
-      const res = await relayFetch(
-        relay,
-        'GET',
-        `/messages?since=${encodeURIComponent(this.relaySince)}&limit=50`,
-        '',
-      )
-      const data = await res.json() as {
-        messages?: Array<{ id: string; from: string; type?: string; body?: { command?: ControlCommand; rpc?: InvokeRemoteRequest & { id: string }; rpcReply?: RemoteResult<unknown> & { id: string } } }>
-        cursor?: string | null
-      }
-      // 先处理全部消息，后推进游标落盘：崩溃在处理中途 → 游标未推进 → 重启重读
-      // （重复投递由消费方幂等吸收）——保证 at-least-once，不丢指令。
-      for (const msg of data.messages ?? []) {
-        const body = msg.body
-        if (body === undefined) continue
-        if (body.rpc !== undefined) {
-          // 目标侧：执行跨实例 RPC（经本地 typert gateway），回执给调用方。
-          void this.handleRemoteRpc(msg.from, body.rpc)
-          continue
-        }
-        if (body.rpcReply !== undefined) {
-          // 调用方侧：收到回执 → resolve 关联的 callRemote Promise。
-          const pending = this.pendingRpc.get(body.rpcReply.id)
-          if (pending !== undefined) {
-            this.pendingRpc.delete(body.rpcReply.id)
-            if (body.rpcReply.ok) {
-              pending.resolve({ ok: true, value: body.rpcReply.value })
-            } else {
-              pending.resolve({ ok: false, error: body.rpcReply.error ?? { code: 'rpc-error', message: 'target failed', details: {} } })
-            }
-          }
-          continue
-        }
-        if (body.command !== undefined) {
-          for (const handler of this.controlHandlers) {
-            handler(body.command, msg.from)
-          }
-        }
-      }
-      if (data.cursor) {
-        this.relaySince = data.cursor
-        if (relay.stateFile) {
-          try {
-            mkdirSync(dirname(relay.stateFile), { recursive: true })
-            writeFileSync(relay.stateFile, JSON.stringify({ since: data.cursor }))
-          } catch {
-            // 落盘失败不致命：下次成功写入前仍从上次内存游标继续。
-          }
-        }
-      }
-    } catch {
-      // broker 不可达：本轮跳过（下次重试）。
     }
   }
 
@@ -591,13 +446,9 @@ export class ChannelService extends TypertRemoteService {
   sendControl<P = unknown>(instanceId: string, command: Omit<ControlCommand<P>, 'id' | 'ts'>, actor: string = 'system'): ControlDispatchResult {
     if (this.mode !== 'hub' || instanceId === this.selfId) {
       const full: ControlCommand<P> = { ...command, id: randomUUID(), ts: Date.now() }
-      // 无 hub 的进程内/同机场景：relay 兜底（原行为）或本地回环。
-      if (this.relay !== undefined && this.mode !== 'hub' && instanceId !== this.relay.agent) {
-        void this.relaySendControl(instanceId, full as ControlCommand)
-        return { ok: true, commandId: full.id }
-      }
+      // 无 hub 的同进程/同机场景：本地回环（handler 结论经 outcome 回传）。
       if (this.controlHandlers.size === 0) {
-        return { ok: false, error: `目标 ${instanceId} 无本机接收者（channel 非 hub 模式，且无 relay）` }
+        return { ok: false, error: `目标 ${instanceId} 无本机接收者（channel 非 hub 模式）` }
       }
       let outcome: ControlOutcome | undefined
       for (const handler of this.controlHandlers) {
@@ -627,7 +478,7 @@ export class ChannelService extends TypertRemoteService {
 
   // --- 多机：身份、归属与注册订阅 ---
 
-  /** 本实例 id（worker 身份；未配置且无 relay/`DSH_CHANNEL_ID` 时为 undefined）。 */
+  /** 本实例 id（worker 身份；未配置且无 `DSH_CHANNEL_ID` 时为 undefined）。 */
   get instanceId(): string | undefined {
     return this.selfId
   }
@@ -809,13 +660,17 @@ export class ChannelService extends TypertRemoteService {
         reject: (e) => { clearTimeout(timer); reject(e) },
         timer,
       })
-      // 传输双路径（broker 可选，直连优先）：目标 addr 可达 → 直连 HTTP RPC；
-      // 直连失败（网络/HTTP 错误）→ 降级 broker 兜底；无 addr（daemon 出站等）→ broker。
+      // 传输面只剩**直连**（broker 已退场）：无可达 addr 时显式失败——多机的
+      // 控制/回执走 hub 台账 + worker 出站长轮询（见实例模型 note），不做静默兜底。
       const target = this.instances.get(instanceId)
       const directAddr = target?.addr && target.status === 'online' ? target.addr : undefined
-      const send = directAddr !== undefined
-        ? this.directRpc(directAddr, { id, ...request }).catch(() => this.relaySendRpc(instanceId, { id, ...request }))
-        : this.relaySendRpc(instanceId, { id, ...request })
+      if (directAddr === undefined) {
+        clearTimeout(timer)
+        this.pendingRpc.delete(id)
+        reject(new Error(`channel.callRemote(${instanceId}, ${request.namespace}.${request.method})：目标无可直连 addr（broker 已退场；多机走 hub/worker 出站拉取）`))
+        return
+      }
+      const send = this.directRpc(directAddr, { id, ...request })
       send.catch((e) => {
         clearTimeout(timer)
         this.pendingRpc.delete(id)
@@ -856,59 +711,6 @@ export class ChannelService extends TypertRemoteService {
       pending.resolve({ ok: true, value: result.value })
     } else {
       pending.resolve({ ok: false, error: result.error ?? new RemoteError('rpc-error', 'target failed', {}) })
-    }
-  }
-
-  /** 发送跨实例 RPC 帧（经 broker POST /messages，kind=request + body.rpc=InvokeRemoteRequest）。 */
-  private async relaySendRpc(instanceId: string, rpc: InvokeRemoteRequest & { id: string }): Promise<void> {
-    const relay = this.relay
-    if (relay === undefined) throw new Error('channel.callRemote: relay 未配置（跨实例 RPC 需 broker）')
-    const body = JSON.stringify({
-      id: randomUUID(),
-      to: instanceId,
-      body: { rpc },
-      type: 'message',
-      kind: 'request',
-      replyTo: null,
-      ack: false,
-    })
-    await relayFetch(relay, 'POST', '/messages', body)
-  }
-
-  /** 目标侧：执行跨实例 RPC 帧（经本地 typert gateway），回执给调用方。 */
-  private async handleRemoteRpc(from: string, rpc: InvokeRemoteRequest & { id: string }): Promise<void> {
-    if (this.typertGateway === undefined) {
-      await this.relaySendRpcReply(from, { id: rpc.id, ok: false, error: new RemoteError('gateway-unavailable', 'typert gateway 未就绪', {}) })
-      return
-    }
-    try {
-      const value = await this.typertGateway.invoke({ namespace: rpc.namespace, method: rpc.method, args: rpc.args })
-      await this.relaySendRpcReply(from, { id: rpc.id, ok: true, value })
-    } catch (error) {
-      await this.relaySendRpcReply(from, {
-        id: rpc.id,
-        ok: false,
-        error: new RemoteError('rpc-error', error instanceof Error ? error.message : String(error), {}),
-      })
-    }
-  }
-
-  /** 发送跨实例 RPC 回执（目标侧执行后回发）。 */
-  private async relaySendRpcReply(to: string, reply: RemoteResult<unknown> & { id: string }): Promise<void> {    const relay = this.relay
-    if (relay === undefined) return
-    const body = JSON.stringify({
-      id: randomUUID(),
-      to,
-      body: { rpcReply: reply },
-      type: 'message',
-      kind: 'request',
-      replyTo: null,
-      ack: false,
-    })
-    try {
-      await relayFetch(relay, 'POST', '/messages', body)
-    } catch {
-      // 回执投递失败：调用方侧超时兜底。
     }
   }
 
@@ -1240,28 +1042,6 @@ function toIdentity(entry: InstanceEntry): InstanceIdentity {
   return identity
 }
 
-/** 从环境变量解析 relay 配置（DSH_RELAY_BROKER_URL/AGENT/SECRET/POLL_PEERS_MS/STATE_FILE）。 */
-function envRelayConfig(): RelayConfig | undefined {
-  const brokerUrl = process.env.DSH_RELAY_BROKER_URL
-  const agent = instanceIdFromEnv()
-  const secret = process.env.DSH_RELAY_SECRET
-  if (!brokerUrl || !agent || !secret) return undefined
-  const stateFile = process.env.DSH_RELAY_STATE_FILE
-  return {
-    brokerUrl,
-    agent,
-    secret,
-    stateFile: stateFile || undefined,
-  }
-}
-
-/** HMAC-SHA256 请求签名（dsh-agent-relay wire 协议 v1：method\npath\nts\nbody）。 */
-export function signRequest(secret: string, method: string, path: string, tsSeconds: number, rawBody = ''): string {
-  return createHmac('sha256', secret)
-    .update(`${method}\n${path}\n${tsSeconds}\n${rawBody}`)
-    .digest('hex')
-}
-
 /**
  * 主机守护 agent 名规则：**规范形态 `host-<id>`，`<id>` 是字符串**（当前取值多为
  * 数字串，如 hostId `'1'` → `host-1`，但 `host-lab1` 同样合法）。实例/守护的共享
@@ -1283,37 +1063,16 @@ export function hostAgentId(hostId: string): string {
   return `host-${hostId}`
 }
 
-/** 带 HMAC 鉴权头发起 relay 请求（node 内置 fetch）。 */
-function relayFetch(
-  relay: RelayConfig,
-  method: 'GET' | 'POST',
-  path: string,
-  rawBody: string,
-): Promise<Response> {
-  const ts = Math.floor(Date.now() / 1000)
-  return fetch(`${relay.brokerUrl}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      'x-relay-agent': relay.agent,
-      'x-relay-timestamp': String(ts),
-      'x-relay-signature': signRequest(relay.secret, method, path, ts, rawBody),
-    },
-    body: method === 'POST' ? rawBody : undefined,
-  })
-}
-
 /** hub 派发指令时的发送方标识（worker 侧 onControl 的 from）。 */
 export const HUB_SENDER = 'console'
 
 /**
  * 解析通道角色：显式 `mode` 优先；给出 `console` 地址即 worker（出站拉取）；
- * 否则 local（进程内 + relay 兜底）。
+ * 否则 local（进程内直连）。
  */
-export function resolveMode(config: Config, relay: RelayConfig | undefined): ChannelMode {
+export function resolveMode(config: Config): ChannelMode {
   if (config.mode !== undefined) return config.mode
   if (config.console !== undefined) return 'worker'
-  void relay
   return 'local'
 }
 
@@ -1330,10 +1089,11 @@ export function instanceIdFromEnv(env: NodeJS.ProcessEnv = process.env): string 
   return undefined
 }
 
-/** 解析本实例 id：config.id → relay.agent → env（DSH_CHANNEL_ID / 兼容 DSH_RELAY_AGENT）。 */
-export function resolveSelfId(config: Config, relay: RelayConfig | undefined): string | undefined {
+/**
+ * 解析本实例 id：config.id → env（DSH_CHANNEL_ID / 兼容旧名 DSH_RELAY_AGENT）。
+ */
+export function resolveSelfId(config: Config): string | undefined {
   if (config.id !== undefined && config.id !== '') return config.id
-  if (relay !== undefined) return relay.agent
   return instanceIdFromEnv()
 }
 
