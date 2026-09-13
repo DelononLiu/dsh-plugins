@@ -53,7 +53,7 @@ resolve() {
     echo "[$name] ✗ 布局无效：无 $home/profiles/$prof" >&2; return 1
   }
   local port; port="$(read_port "$home" "$prof")"
-  local relay="$name"; [[ "$name" == "daemon" ]] && relay="host1"
+  local relay="$name"; [[ "$name" == "daemon" ]] && relay="host-master"
   echo "$home|$prof|$port|$relay"
 }
 

@@ -31,3 +31,37 @@
             contextWindow: 1048576
           - id: nvidia/nemotron-3-ultra-550b-a55b:free
             contextWindow: 1000000
+
+# 总控（master）：实例矩阵权威源。launch 的 **host 键 = 守护 agent 名**（规范形态
+# `host-<id>`，id 是字符串）；本机守护 = `host-master`。键与守护自报名必须同形，
+# 否则 console 按键路由时判定「目标守护未注册」。
+- id: dsh-console
+  config:
+    role: console
+    launch:
+      host-master:
+        host: host-master
+        name: 本机
+        ip: 127.0.0.1
+        addr: http://127.0.0.1:3089
+      web2:
+        host: host-master
+        addr: http://127.0.0.1:3082
+        dshHome: /home/long2015/.dsh-web2
+        profile: web2
+        env:
+          DSH_RELAY_AGENT: web2
+      web3:
+        host: host-master
+        addr: http://127.0.0.1:3083
+        dshHome: /home/long2015/.dsh-web3
+        profile: web3
+        env:
+          DSH_RELAY_AGENT: web3
+      web4:
+        host: host-master
+        addr: http://127.0.0.1:3084
+        dshHome: /home/long2015/.dsh-web4
+        profile: web4
+        env:
+          DSH_RELAY_AGENT: web4

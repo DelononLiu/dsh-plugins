@@ -56,7 +56,8 @@ read_instance_port() {
   ' "$patch"
 }
 # 解析实例：<name> → 校验布局 → 输出 "home|profile|port(空=daemon|relay"
-# relay：daemon 特判 host1；其它 = 实例名（web3 → DSH_RELAY_AGENT=web3）。
+# relay：daemon 特判总控守护 `host-master`（守护 agent 名规范形态 `host-<id>`，
+# id 是字符串）；其它 = 实例名（web3 → DSH_RELAY_AGENT=web3）。
 # 返回 0=有效（echo 元数据），1=无效（已打印原因）。
 resolve_instance() {
   local name="$1"
@@ -80,7 +81,7 @@ resolve_instance() {
     port="$(read_instance_port "$home" "$prof" 2>/dev/null || true)"
   fi
   local relay="$name"
-  [[ "$name" == "daemon" ]] && relay="host1"
+  [[ "$name" == "daemon" ]] && relay="host-master"
   echo "$home|$prof|$port|$relay"
 }
 
