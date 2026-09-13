@@ -40,7 +40,7 @@ const css = `
 .dsh-console-row.sel{border-color:var(--dsw-alias-brand-primary)}
 .dsh-console-row .dot{width:8px;height:8px;border-radius:50%;flex:none}
 .dsh-console-row .dot.on{background:var(--dsw-alias-state-success-primary);box-shadow:0 0 0 4px rgba(74,222,128,.12)}
-.dot.pend{background:var(--dsw-alias-state-warning-primary);animation:dshPulse 1.2s ease-in-out infinite}
+.dot.pend{background:var(--dsw-alias-state-warn-primary);animation:dshPulse 1.2s ease-in-out infinite}
 @keyframes dshPulse{0%,100%{opacity:1}50%{opacity:.35}}
 .dsh-console-row .dot.off{background:var(--dsw-alias-label-tertiary)}
 .dsh-console-row .grow{flex:1;min-width:0}
@@ -94,7 +94,7 @@ const css = `
 .dsh-console-level{font-size:12px;font-weight:500;flex:none;padding:2px 8px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;min-width:48px}
 .dsh-console-level.debug{background:color-mix(in srgb,var(--dsw-alias-label-tertiary) 10%,transparent);color:var(--dsw-alias-label-tertiary);border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary) 30%,transparent)}
 .dsh-console-level.info{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent);color:var(--dsw-alias-state-success-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-success-primary) 30%,transparent)}
-.dsh-console-level.warn{background:color-mix(in srgb,var(--dsw-alias-state-warning-primary) 10%,transparent);color:var(--dsw-alias-state-warning-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-warning-primary) 30%,transparent)}
+.dsh-console-level.warn{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 10%,transparent);color:var(--dsw-alias-state-warn-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary) 30%,transparent)}
 .dsh-console-level.error{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 30%,transparent)}
 .dsh-console-level.null{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 10%,transparent);color:var(--dsw-alias-label-secondary);border:1px solid color-mix(in srgb,var(--dsw-alias-label-secondary) 30%,transparent)}
 .dsh-console-caption{font-size:12px;color:var(--dsw-alias-label-secondary);font-family:var(--ds-font-family-code);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -108,7 +108,7 @@ const css = `
 .dsh-console-log-time{flex:none;color:var(--dsw-alias-label-tertiary)}
 .dsh-console-log-lv{flex:none;min-width:30px;font-weight:600;text-align:left}
 .dsh-console-log-lv.info{color:var(--dsw-alias-state-success-primary)}
-.dsh-console-log-lv.warn{color:var(--dsw-alias-state-warning-primary)}
+.dsh-console-log-lv.warn{color:var(--dsw-alias-state-warn-primary)}
 .dsh-console-log-lv.error{color:var(--dsw-alias-state-error-primary)}
 .dsh-console-log-body{color:var(--dsw-alias-label-primary)}
 .dsh-console-log-line.err .dsh-console-log-body{color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 80%,var(--dsw-alias-label-primary))}

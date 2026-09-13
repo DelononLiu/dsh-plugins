@@ -75,6 +75,17 @@ if { git diff HEAD --name-only; git diff --cached --name-only; git ls-files --ot
   bash scripts/verify-skills.sh || echo "→ 闸门失败，先修再推（闸门自测：bash scripts/tests/verify-skills.test.sh）"
 else echo "未改 skills，跳过"; fi
 
+# UI 语义变量：仓库引用的 --dsw-alias-state-* 必须在官方主题里有定义（写错 token = 静默无色，无 fallback 时尤其）
+# 官方 checkout 不在本机时跳过；基线 tag 取 profiles/*/dsh.lock.json 的 kernel 版本
+if [ -f /home/long2015/Code/deepseek-harness/package.json ]; then
+  TAG="dsh-v$(node -p "require('./profiles/web2/dsh.lock.json').kernel.split('@').pop()")"
+  git -C /home/long2015/Code/deepseek-harness show "$TAG:packages/client/ui-theme/src/styles/design-platform.css" \
+    | grep -o -- '--dsw-alias-state-[a-z-]*' | sort -u > /tmp/official-state-tokens.txt
+  grep -rho -- '--dsw-alias-state-[a-z-]*' packages/*/src/client/*.css.ts packages/*/src/client/*.ts | sort -u \
+    | comm -13 /tmp/official-state-tokens.txt - | sed 's/^/BROKEN TOKEN: /' || true
+  echo "（无 BROKEN TOKEN 行 = 全部有定义）"
+else echo "官方 checkout 不在本机，跳过 UI 变量核对"; fi
+
 # 变更范围确认
 git diff main...HEAD --stat   # worktree 合入前；main 直提用 git diff HEAD --stat
 ```
