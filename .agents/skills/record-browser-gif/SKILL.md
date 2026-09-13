@@ -87,13 +87,15 @@ Before either workflow below pushes, verify that the assets branch contains medi
 For an existing assets branch, work in a shallow single-branch scratch clone so the publication cannot touch your working tree:
 
 ```sh
-git clone --branch <assets-branch> --single-branch --depth 1 <repo-url> /tmp/assets-checkout
-NAME=<文件名>   # 尖括号占位在路径位置会被 shell 当重定向
+AB=assets分支名   # 下面三处按实际值替换（别写尖括号占位：shell 会把它当重定向）
+URL=仓库地址
+NAME=文件名
+git clone --branch "$AB" --single-branch --depth 1 "$URL" /tmp/assets-checkout
 cp /absolute/path/to/demo.gif "/tmp/assets-checkout/$NAME.gif"
 cd /tmp/assets-checkout
-git add <name>.gif
-git commit -m "assets: <what it shows> gif (#<pr>)"
-git push origin <assets-branch>
+git add "$NAME.gif"
+git commit -m "assets: <说明> gif (#PR号)"
+git push origin "$AB"
 ```
 
 For a new series, make a fresh shallow scratch clone (`git clone --depth 1 <repo-url> /tmp/assets-checkout`), create the orphan branch with `git switch --orphan <assets-branch>`, then add the GIF, commit, and push the same way.

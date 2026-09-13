@@ -17,7 +17,7 @@ profiles/   发行包 profile 模板：web=开发+正式 / web2=单插件测试�
 presets/    团队自定义 agent preset 源（<id>/{agent.cordis.yml,preset.yml}），安装=铺到目标环境 $DSH_HOME/.agent-presets/<id>/
 scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）
 docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
-.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（自研流程/检查 skills + vendored 官方 harness / mattpocock，清单与来源见 .agents/skills/README.md；`scripts/verify-skills.sh` 是 skills 自身的机械闸门：frontmatter / 内联命令块语法 / 相对链接可解析）
+.agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（自研流程/检查 skills + vendored 官方 harness / mattpocock，清单与来源见 .agents/skills/README.md；`scripts/verify-skills.sh` 是 skills 自身的机械闸门：frontmatter / 内联命令块语法 / 尖括号占位符位置（重定向风险） / 相对链接可解析）
 ```
 
 ## 命令

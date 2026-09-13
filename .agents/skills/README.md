@@ -16,7 +16,7 @@
 | dsh-subagent-model-test | 本仓库原创 | subagent 模型能力验证（确定性工具链冒烟 + 派发稳定性 + ACL 会话机制；备胎模型验收用） |
 | record-browser-gif | 官方 harness | 工具直接拷（含 encode_gif.py；依赖 harness 环境浏览器能力） |
 | browser-skill | 社区（Tencent BrowserSkill） | 字节抽取 bsk 内嵌 SKILL.md → agent skill 形态（`bash` 调 `bsk` CLI；不依赖 dsh 插件）；要求 `bsk` 在 PATH 上 + bsk daemon 在跑 + 浏览器扩展已连 |
-| grilling | mattpocock/skills（productivity） | 拷问协议保留原样 + **追加本项目高危种子清单**（内核基线/双实例/实例隔离/3080/回滚/文档同步/UI 抄官方/概念模型/验证闸门，含查证命令） |
+| grilling | mattpocock/skills（productivity） | 拷问协议保留原样 + **追加本项目 13 条高危种子**（内核基线/双实例/实例隔离/3080/数据面权威源/状态写入者冲突/内存态/增量闸门/回滚/文档同步/UI 抄官方/概念模型/验证闸门，各带查证命令） |
 | grill-me | mattpocock/skills（productivity） | 直接拷——`/grilling` 的一行入口（`disable-model-invocation`，需用户显式触发） |
 | grill-with-docs | mattpocock/skills（engineering） | 直接拷——带文档上下文的 grilling 变体 |
 | to-spec | mattpocock/skills | 直接拷——把当前对话综合成 spec 并发布；**依赖 issue tracker 配置**（见下"未装依赖"） |
@@ -31,7 +31,7 @@
 ### 未装依赖（引用但不影响本批工作）
 
 - `to-spec` / `code-review` 提示 `run /setup-matt-pocock-skills if docs/agents/issue-tracker.md is missing`——需 issue tracker 配置（本仓库用 Agent Notes + docs/architecture 体系，未配置；用到时按提示补 `setup-matt-pocock-skills`）。
-- `diagnosing-bugs` 结尾原本 hand off 到 `/improve-codebase-architecture`（未装）——**适配后改为**：架构类结论落 Agent Note（`.agents/notes/proposed/architecture/`），复发类结论回灌 `grilling` 高危种子清单；该 skill 装上后可再接管前者。
+- `diagnosing-bugs` 的架构类结论落 Agent Note（`.agents/notes/proposed/architecture/`），复发类结论回灌 `grilling` 高危种子清单；装上 `improve-codebase-architecture`（当前未装）后可由它接管前者。
 
 官方/mattpocock skills 保留各自版权声明（MIT © 2026 DeepSeek / © 2026 Matt Pocock）；`browser-skill` 保留 Tencent BrowserSkill 版权（MIT）。本仓库的适配改动均归本仓库 MIT（见根 LICENSE）。上游更新时按 vendoring policy 同步。
 
@@ -72,11 +72,11 @@
 - [x] dsh-pre-push-checks：typecheck/diff 卫生/残留术语/双实例 → SKILL.md 内联确切命令
 - [x] dsh-code-review：变更事实命令段（范围/note/依赖/卫生）内联；结论判断留模型
 - [x] dsh-prose-standard / dsh-trim-cot-leakage：探测命令内联 → 保持 probe + 语义判读
-- [x] grilling：13 条高危种子**每条**带查证命令 + 判读规则（"命令报错 ≠ clean"）
+- [x] grilling：13 条高危种子**每条**带查证命令 + 统一判读规则（"命令没能执行 ≠ clean"）
 - [x] diagnosing-bugs：Phase 0 闸门内联快照 / 现场坐标 / **活体写者两采样探针** / 陈旧产物
-- [x] dsh-incident-forensics：A–F 每步内联确切命令（A1 快照 / A2 现场坐标 / A3 陈旧与时间戳 / B 副本隔离）
-- [x] dsh-pre-push-checks：增「自改清单 + 产物同步」命令段
-- [x] 全部 skills：`bash scripts/verify-skills.sh` 机械校验 frontmatter / 命令块语法 / 相对链接（占位符块另给"不可照抄"警告）
+- [x] dsh-incident-forensics：A1–A4 与 B 内联命令块（快照 / 现场坐标 / 陈旧与时间戳 / 副本隔离），C–F 为行内确切命令
+- [x] dsh-pre-push-checks：增「自改清单 + 产物同步 + UI 语义变量核对（`--dsw-alias-state-*` 与官方基线主题做差集）」命令段
+- [x] 全部 skills：`bash scripts/verify-skills.sh` 机械校验 frontmatter / 命令块语法 / **尖括号占位符位置（重定向风险）** / 相对链接（含占位符的块另给"需先替换"警告）
 - [ ] mattpocock skills 其余未适配批次：用到时按本原则补内联命令
 
 ## 功能测试（2026-09 立，语法检查之外的第二层）
@@ -90,7 +90,6 @@
 - **确定性部分**（可 CI）：`bash scripts/tests/skills-functional.test.sh` —— 断言现场真的坏、篡改真的抹掉了
   症状、HEAD 真的能恢复证据，并**从 SKILL.md 抽出真命令块实跑**（陈旧判据能红能绿、活体写者探针能红能绿、
   快照非破坏性）。
-- **结论层**（要模型）：把 skill 交给一个子 agent 照走一遍，结论对照 GROUND-TRUTH。**第一轮实测就有价值**：
-  三个 skill 结论全部正确，但暴露 17 处缺陷（Phase 0 的"无并发写者"零命令、`git diff` 被误标成"我的改动"、
-  A3 硬编码 `lib/index.js` 导致每个包都报 STALE、grilling 9 条种子里 6 条无命令却已被勾选"每条都有"…），
-  全部已修。
+- **结论层**（要模型）：把 skill 交给一个子 agent 照走一遍，结论对照 GROUND-TRUTH。这一层才查得出语法闸门
+  看不见的缺陷——命令缺失、`git diff` 被当成"我的改动"、判据恒真或恒假、种子里根本没有命令。发现问题的
+  记录与方法论准入理由见 [Agent Note：AICoding 方法论吸纳](../notes/implemented/process/2026-09-13-aicoding-methodology.md)。

@@ -53,13 +53,15 @@ ps -eo pid,ppid,lstart,cmd | grep -F "$(pwd)" | grep -v grep || true
 # 3) 现象是否稳定 + 是否只在你的改动之后出现：把**同一条** repro 跑两遍并留下两次输出。
 #    现场有多个入口时**逐个都跑**——入口选错会得到相反结论（实测：一个入口稳定"通过"，
 #    另一个入口才照得出问题）。
-<repro-command>; echo "run1 exit=$?"; sleep 2; <repro-command>; echo "run2 exit=$?"
+REPRO=复现命令   # 例如 "node app/main.mjs src"；下面跑两遍比对
+$REPRO; echo "run1 exit=$?"; sleep 2; $REPRO; echo "run2 exit=$?"
 ```
 
 - [ ] **现场改动清单归属清楚** —— `git status` / `git stash list` / `refs/forensics` 里的每一条都能归到
       "我这次改的"或"明确的别人/历史"，**归属不明的即污染**。注意：`git diff` 显示的改动**可能是别人的**
       （多 agent 并存是常态），不要把工作区差异默认当成自己的清单。
       **`refs/forensics/*` 已有条目 = 别人已经在这个现场取过证/动过手**：先找上一次取证的结论，别重做一遍。
+      （刚刚自己建的除外——按 `$TS` 里的 PID 认得出。）
 - [ ] **无并发写者** —— 上面第 2 组命令多次指纹一致，且没有指向本目录的活进程。本仓库常态是多 worktree
       并行：**正在被别人改的目录不是现场，是流沙**。
       这条是**必要不充分**：指纹一致只说明采样窗口内没人写（写者可能刚停机）——**问 1 才是主判据**。
@@ -211,7 +213,7 @@ Required before declaring done:
 - [ ] All `[DEBUG-...]` instrumentation removed (`grep` the prefix)
 - [ ] Throwaway prototypes deleted (or moved to a clearly-marked debug location)
 - [ ] Forensics snapshots from Phase 0 dealt with — `git for-each-ref refs/forensics`：bug 已定论则
-      `git update-ref -d refs/forensics/<ts>` 删除，仍需保留证据则留着并在报告里点名
+      `git update-ref -d "refs/forensics/$TS"` 删除，仍需保留证据则留着并在报告里点名
 - [ ] The hypothesis that turned out correct is stated in the commit / PR message — so the next debugger learns
 
 **Then ask: what would have prevented this bug?** If the answer involves architectural change (no good test seam, tangled callers, hidden coupling), record it as an Agent Note (`.agents/notes/proposed/architecture/`) — or hand off to the `improve-codebase-architecture` skill if it is installed. If the answer is "a hazard we keep hitting" (wrong instance, kernel-package double-instance, stale build artifacts), **add it to the hazard seeds in [`../grilling/SKILL.md`](../grilling/SKILL.md)** so the next plan gets grilled on it — that is the only mechanism that stops the same class of bug recurring. Make the recommendation **after** the fix is in, not before — you have more information now than when you started.

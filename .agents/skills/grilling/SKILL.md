@@ -13,11 +13,13 @@ Do not enact the plan until I confirm we have reached a shared understanding.
 
 ## 本项目必问的高危种子（dsh-plugins）
 
-先自由拷问设计树；以下种子是**本仓库反复复发**的高危面，按复发频率排序。每条都要么被代码/文档回答（**去跑命令，别问我**），要么作为一个问题问出来。与本次改动无关的种子跳过，但**跳过要有理由**。
+先自由拷问设计树；以下种子是**本仓库反复复发**的高危面（初版按复发频率排序，新种子一律追加在末尾，见"收尾"）。每条都要么被代码/文档回答（**去跑命令，别问我**），要么作为一个问题问出来。与本次改动无关的种子跳过，但**跳过要有理由**。
 
 **每条种子先跑它的查证命令**，把实测输出当作提问前提。命令块里的路径都是本仓库语境；换成别的仓库时按注释改。
 
-**命令判读规则**：命令**报错**（stderr 非空、退出码非 0）≠ clean——那说明命令没跑成，先修命令再谈结论。空 stdout 也只在命令确实跑过之后才算 clean。
+**命令判读规则**：命令**没能执行**（解释器报错、路径不存在、`command not found`）≠ clean——先修命令再谈结论。
+反过来，`grep`/`find` 的退出码 1 与空 stdout 是**判读结果**（"没有匹配"），不是命令失败；
+真正的判据是命令**确实跑过**（有对应 stderr 之外的执行痕迹）＋逐条判读规则。
 
 ### 1. 内核基线假设
 
@@ -78,13 +80,13 @@ grep -n 'port?: number' -B3 packages/*/src/index.ts | head -20      # 配置里�
 ```
 
 判读：
-- 端口**必须**从目标实例自己的 `profiles/<profile>/cordis.patch.yml` 的 `webserver.port` 读
+- 端口**必须**从目标实例自己的 `$DSH_HOME/profiles/$PROFILE/cordis.patch.yml` 的 `webserver.port` 读
   （与 `scripts/dsh-profile.sh` 同源）。**用 addr 反解端口就是"猜"**，与配置不一致时必须报黄，不能给假绿灯。
-- **仓库模板 ≠ 实例运行配置**：真正生效的是 `~/.dsh-<名>/profiles/<名>/cordis.patch.yml`（3080 禁令下不要读它）。
+- **仓库模板 ≠ 实例运行配置**：真正生效的是 `~/.dsh-<名>/profiles/<名>/cordis.patch.yml`（3080 禁令下**只读不改**）。
   模板里只有 web2 带 `webserver.port`，别据此断言"web3 没有端口"。
 - **字段存在 ≠ 被填过**：`LaunchSpec.port`（`packages/dsh-console/src/index.ts`）确实是可选字段，
-  但管理端 launch 矩阵里一条都没填、端口只活在 `addr` 字符串里——所以结论仍是"别反解"，但要修的是
-  **填 port 字段并保留 addr 兜底**，不是"配置无法承载 port"。
+  但管理端 launch 矩阵里一条都没填、端口只活在 `addr` 字符串里 → **不能反解 addr**；
+  正解是填 `port` 字段并保留 `addr` 兜底。
 
 ### 4. 3080 禁令
 
@@ -125,7 +127,7 @@ grep -n 'setStatus(\|heartbeat(\|declare(\|offlineOverride' packages/dsh-console
 
 ### 7. 内存态 / 持久化幻觉
 
-新写的数据落在内存还是磁盘？进程内实现重启即失忆（本仓库 console 档案与 inbox 均为内存态 v1）。
+新写的数据落在内存还是磁盘？进程内实现重启即失忆（本仓库 console 的档案与 inbox 都是内存态）。
 
 ```sh
 sed -n '1,20p' packages/dsh-console/src/index.ts          # 包注释里会写"进程内实现/持久化后续"
@@ -180,9 +182,9 @@ git -C /home/long2015/Code/deepseek-harness show "$TAG:packages/client/ui-theme/
 grep -rho -- '--dsw-alias-state-[a-z-]*' packages/*/src/client/*.css.ts packages/*/src/client/*.ts | sort -u
 ```
 
-判读：上面两组 token 做差集——**仓库用了但官方主题没定义的，就是坏引用**。
-本仓库实见：console 三处写 `--dsw-alias-state-warning-primary`（官方只有 `state-warn-primary`）→ 黄灯
-今天就是无色的；`dsh-focus-session` 用的是正确名（同仓库有先例可抄）。
+判读：上面两组 token 做差集——**仓库用了但官方主题没定义的，就是坏引用**。写错名字不会报错也不会
+有兜底色：官方是 `--dsw-alias-state-warn-primary`（不是 `warning-`），写错即静默无色。正确写法可抄
+`dsh-focus-session` 那几处。
 
 默认直接照抄官方（DOM 结构 / CSS 机制 / 属性值），不手写近似——
 见 `../../notes/implemented/process/2026-08-22-ui-official-alignment.md`。
@@ -213,7 +215,8 @@ grep -n '机械检查' -A 20 .agents/skills/dsh-pre-push-checks/SKILL.md   # 仓
   （该 skill 的 C 步就是从这里取假设来源）。事故结论若指向新的高危面，回灌到本清单（同一提交内更新），
   否则正反两链会各自漂移。
 - 回灌时**只加能带命令的种子**；只写得出一句"要注意 X"的，属于纯判断，别伪装成闸门。
-  **编号只追加、不改既有编号与顺序**——反向链按编号引用本清单，改号会让两链对不上。
+  **编号只追加、不改既有编号与顺序**——反向链按名引用这份清单（"模块重复副本""陈旧产物"…），
+  改号或重排会让两边的引用对不上。
 - **写范围受限时**（只读调用、评审）：无法回灌就把待回灌条目整理成"危害一句 + 查证命令 + 判读规则"
   输出给调用方，不要静默跳过。
 

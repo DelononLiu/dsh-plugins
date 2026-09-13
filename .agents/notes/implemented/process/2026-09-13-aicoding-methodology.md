@@ -28,6 +28,7 @@ Status: implemented
 - **Layer 4（挂载点）**：正向链的验证阶段不新造流程，而是挂到既有闸门——`dsh-pre-push-checks`
   增加"自改清单与快照"两项；`scripts/verify-skills.sh` 成为 skill 自身的机械闸门（frontmatter、
   命令块语法、相对链接、路径位置占位符）；`scripts/verify-kernel-upgrade.sh` 保持为内核升级的专用闸门。
+  `dsh-pre-push-checks` 另有 UI 语义变量核对（仓库引用的 `--dsw-alias-state-*` 与官方基线主题做差集）。
   **闸门本身分两层测**：语法层是确定性脚本（可 CI），结论层靠"造真故障 + 模型照 skill 走一遍 + 对照
   GROUND-TRUTH"（`scripts/tests/skills-functional.test.sh` + `scripts/tests/fixtures/skills-fn/`）。
 
@@ -70,5 +71,5 @@ Status: implemented
   "每条都有"。**结论层必须拿真故障考，且考完要回改 skill**；只跑语法闸门会给出虚假的"全绿"。
 - 反向链的命令自带一个反直觉纪律：**命令报错（stderr 非空/退出码非 0）≠ clean**——那说明命令没跑成。
   实测 `grep ... || echo clean` 会把"路径不存在"洗成 clean，正好绕过它自己的判读规则。
-- 收尾：正反两链的种子清单是同一份；`grilling` 的种子清单增补后，`dsh-incident-forensics` 的
-  A 步骤不再重新发明怀疑顺序。
+- 收尾：正反两链共用同一份种子清单——`dsh-incident-forensics` C 步的假设来源就是 `grilling` 的高危种子，
+  事故结论回灌同一清单。

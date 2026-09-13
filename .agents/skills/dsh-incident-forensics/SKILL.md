@@ -54,6 +54,7 @@ ps -eo pid,ppid,lstart,cmd | grep -F "$(pwd)" | grep -v grep || true
 ```
 
 `refs/forensics/*` 已有条目 = **别人已经对这里取过证/动过手**：先找上一次取证的结论，别重做一遍。
+（刚自己建的那个除外——`$TS` 里带 PID，认得出。）
 
 判读注意：`grep -F` 是**子串**匹配——现场目录名恰好是别的目录前缀时会误报，argv 里不含路径的写者
 （`cd` 进去再裸跑）仍会漏；`grep -v grep || true` 之后的空输出 = **没有匹配**，不是"命令没跑成"。
@@ -151,8 +152,8 @@ tail -n 80 "$HOME/.dsh-实例名/profiles/实例名/"*.log 2>/dev/null || ls "$H
 
 - **恢复**（回到**已知良好**状态，适用于"曾经好的东西坏了"）——**注意：A1 的快照是事故当时（污染态），
   不是良好态**，别拿它当恢复源：
-  - 良好基线取 `HEAD`，或改动前的那个提交/版本：`git archive <良好-ref> | tar -x -C "$BASE"`（副本里跑）；
-  - 若确要把事故现场整体搬回工作区（例如为了继续观察），用 `git stash apply refs/forensics/<ts>`，
+  - 良好基线取 `HEAD`，或改动前的那个提交/版本：`git archive "$GOOD_REF" | tar -x -C "$BASE"`（`GOOD_REF` = 良好基线 ref）（副本里跑）；
+  - 若确要把事故现场整体搬回工作区（例如为了继续观察），用 `git stash apply "refs/forensics/$TS"`，
     **并且**手动解开 A1 的 `/tmp/forensics-untracked-*.tgz`——快照里没有未跟踪文件；
   - 产物类问题重建（`pnpm build`）；内核/依赖类按
     [`../dsh-kernel-upgrade/SKILL.md`](../dsh-kernel-upgrade/SKILL.md) 的回滚路径；
@@ -178,7 +179,7 @@ tail -n 80 "$HOME/.dsh-实例名/profiles/实例名/"*.log 2>/dev/null || ls "$H
         （`$BASE` 是 B 步 `mktemp -d` 出来的那个）；
       - **保留** `/tmp/forensics-untracked-*.tgz`（未跟踪文件的唯一副本）、
         `/tmp/forensics-redstate-*.txt`（红态证据）与仍需的证据快照 ref；
-      - 其余快照 ref 在报告里点名后 `git update-ref -d refs/forensics/<ts>` 清理；
+      - 其余快照 ref 在报告里点名后 `git update-ref -d "refs/forensics/$TS"` 清理；
       - 结论写进 commit message 或 `.agents/notes/`（行为/流程类结论）。
 
 ## 什么时候停下取证
