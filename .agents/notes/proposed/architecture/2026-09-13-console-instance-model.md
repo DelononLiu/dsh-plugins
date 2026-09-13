@@ -87,7 +87,72 @@ gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与
 | 6 | 管理事件（结构化日志 `category`）+ 跨守护 `readLog` 改 async | R5 | 批 1–4 | **整批回滚**（契约变更，同批同铺） |
 | 7 | UI 收口：创建向导（名称/模板/版本/端口/主机）+ 跳转回归 + tombstone 筛选 | R3、R1 | 批 2、3 | 前端单提交回退 |
 
+## 实施进度
+
+| 批 | 状态 | 提交 |
+| --- | --- | --- |
+| 1 注册表 + 双布局发现（含显式导入） | ✅ 完成 | `03b1452` `d422d14` |
+| 2 模板改名 master/dev/explorer + minimal | ✅ 完成 | `05577fc` |
+| 3 runtime 池（模块/存储迁移/创建引用/升级切引用/UI 版本页签） | ✅ 完成 | `0be43a8` `b25d392` `(3c)` |
+| 4 删除（归档 + tombstone + 默认实例拒绝 + CLI 恢复） | ✅ 完成 | `(4)` |
+| 5 broker 退场 | ⏳ 5a 术语/id 载体改名 ✅、5b-1 删 `brokerStatus` 公共面+消费面 ✅、5b-2 配置面与文档 ✅；**5b-3 channel 内部 broker 传输路径未删** | `de05f4e` `b925f68` `de3fb80` |
+| 6 管理事件 + 静默失败收口 | ✅ 完成（6a 管理事件；6b `readLog` 改 async + 回环结论回传） | `3ce8fdc` `(6b)` |
+| 7 UI 收口（tombstone 筛选 ✅ + 跳转回归待用户 UI 自验） | ✅ 完成 | `(7)` |
+
+## 实施中发现的台账项（回灌，不静默吞掉）
+
+1. ~~**`deployInstance` 的 `ok` 只代表"已下发"，落地失败时仍返回 ok**~~ → **批 6b 已修**：channel 的
+   同进程回环此前丢弃 `onControl` handler 返回的 `ControlOutcome`，现已回传（`ControlDispatchResult.outcome`），
+   console 据此把守护的拒绝变成 `ok: false`（只认真正的 ControlOutcome，避免把 handler 的其它返回值当结论）。
+   跨守护 `readLog` 也从 "fire-and-forget + 空返回" 改为 await + 返回结果/错误（`LogReadResult.error`）。
+5. **daemon 的 controlPort 3089 被官方 `dsh-sdk-jsonrpc-server` 占用**（端到端实测：向 3089 发
+   我们的 client-request 帧，回的是官方 jsonrpc 的 `unknown method`，连 `listInstances` 都不认）。
+   我们的控制服务会打印"本机控制端口 http://127.0.0.1:3089"（**乐观日志**，未校验 bind 结果）→
+   "同机直连 controlPort" 这条路径实际不可用。归属**新批次（批 8）**：端口让位/复用官方 RPC 面，
+   或把该服务做成显式失败（bind 失败必须报错，不能只打印一行乐观日志）。
+4. **删除后 channel 实例表不会自动收敛**（批 7 实测：删除的实例仍出现在实例列表 = 幽灵行）。
+   已在 `listInstances()` 按注册表过滤墓碑（注册表是权威源）；注册表不可读时**不隐藏任何实例**
+   （宁可多显示，也不静默吞掉）。
+3. **全量测试有并发抖动**：`pnpm -r test` 首次运行时 dsh-user 报 2 项失败（`socket hang up`），
+   第二次全量运行全绿、单包复跑 29/29——是并行跑包时端口/socket 争用导致的**假红**。
+   判读纪律：全量失败先单包复跑确认，别把它当回归（已同步进 `dsh-pre-push-checks`）。
+2. `roleDataRoot('daemon')` 在无 `DSH_HOME` 时回落到 `~/.dsh`（正式 3080 home）——已由 `grilling`
+   种子清单里那条"无 DSH_HOME 时 fallback 踩 3080 红线"的命令覆盖，实施时按该判据核对。
+
+## 端到端实机验收（2026-09-13，13/13 通过）
+
+脚本 `packages/dsh-console/tests/e2e-acceptance.mjs`（**手动运行**，不进 CI：会向真实池导入版本、
+在临时 DSH_HOME 下真建实例并真拉起进程、跑完删除）。用真实代码 + 真实文件系统 + 真实 spawn 跑通：
+池导入/重复拒绝/自检 → 模板清单 → 创建（模板 dev + 内核 0.1.2-rc.1，含真实依赖安装 44s）→
+三件套 + `cordis.yml` + 官方包软链到池 + 注册表登记 → 被引用版本禁止删除 → 实例进程真拉起 →
+删除（归档 + 墓碑）→ 恢复（目录移回）。
+
+验收暴露并修掉的 4 个实机缺陷（单测 mock 掉了文件系统与 spawn，全都看不见）：
+
+1. 模板不带 `node_modules` 与 `cordis.yml` → 建出来的实例起不来（补依赖安装 + cordis.yml）。
+2. 模板用 `link:` 协议，npm 不支持（EUNSUPPORTEDPROTOCOL）→ 拷贝后规范化为 `file:`。
+3. 我们的包声明官方 peer，npm 默认严格校验 ERESOLVE → 安装**优先 pnpm**，回退 npm + `--legacy-peer-deps`。
+4. `templateHome` 语义二义：`listTemplates` 当"模板目录"、`ensureInstanceHome` 当"含 profiles/ 的 home"
+   → 清单为空、创建静默走后备骨架。已统一为一个 helper，**兼容两种布局**。
+
+## UI 自验（验收测试，2026-09-13）
+
+在真实 GUI（web2 3082，管理端 console）逐项走查，证据来自语义树观察（截图本模型不可读）。
+**通过项**：控制台入口可开；页签 总览/实例/主机/**版本**/日志；版本页签显示池路径 + 导入入口 +
+池内 `0.1.2-rc.1`（无引用可删）；实例页签 跳转⧉/停止/重启/⋯/「新建实例」/「已删除」筛选；
+创建向导字段 = 名称/端口/目标守护(`host-master`)/**模板(`dev explorer master minimal`)**/**内核版本(`0.1.2-rc.1`)**；
+⋯ 菜单 = 「升级到 0.1.2-rc.1」+「删除实例…」；日志页签 = 来源/级别/搜索/**只看管理事件** + 行数统计。
+
+**自验发现并修掉的两个 UI 缺陷**（纯看代码/单测都发现不了）：
+
+1. 页脚仍写死 `broker OK`（broker 已退场）→ 改为 `{实例数} 实例 · {runtime 数} 个 runtime`。
+2. 实例列表只有 3 个（channel 发现 + 自身），**注册表里 6 个**——`listInstances` 没有并入注册表
+   → 现并入注册表内（非墓碑）实例，未向本管理端注册者记 `offline`（不做乐观在线）。
+   复验：页脚 `6 实例 · 1 个 runtime`、总览"实例总数 6（在线 3 / 离线 3）"、daemon/web 出现在列表。
+
 ## Alternatives
+
+
 
 - **布局一次性全迁移**：要停 6 个实例、改脚本发现规则、改 AGENTS.md 矩阵、迁档案 → 否决，共存 + 迁移 backlog。
 - **目录扫描 + 自动回写**：一个"查看"命令产生写入副作用 → 否决，改显式导入（代价是忘导入就"看不见"）。

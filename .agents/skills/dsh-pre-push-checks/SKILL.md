@@ -109,3 +109,13 @@ git diff main...HEAD --stat   # worktree 合入前；main 直提用 git diff HEA
 ## 失败处理
 
 任何自检失败：停下修复或说明阻塞，不要"先推了再说"。环境相关问题：记录确切命令/失败/平台差异，证明非环境问题后再重试。
+
+## 假红判读：全量测试的并发抖动（2026-09 实测）
+
+`pnpm -r test` 并行跑各包时会偶发 socket/端口争用（实测 dsh-user 报 2 项 `socket hang up` 失败，
+第二次全量运行与单包复跑均全绿）。**先单包复跑再判断是不是回归**：
+
+```sh
+PKG=dsh-user                     # ← 换成失败的那个包名
+pnpm --filter "$PKG" test        # 过 = 抖动（假红），仍红 = 真回归
+```

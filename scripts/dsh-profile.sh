@@ -31,10 +31,6 @@ REGISTRY_CLI="$SCRIPT_DIR/dsh-registry.mjs"
 # 内核 0.1.2-rc.1 独立 CLI（测试环境不与正式 ~/.dsh 共用内核；覆盖用 DSH_BIN）。
 DSH_BIN="${DSH_BIN:-/home/long2015/dsh-alpha5-cli/node_modules/.bin/dsh}"
 
-# broker 共享配置（daemon 与实例 patch 的 test-secret-relay-2026 一致；仅 relay 部署用）。
-RELAY_BROKER_URL="http://127.0.0.1:19121"
-RELAY_SECRET="test-secret-relay-2026"
-
 # 启动后就绪等待上限（秒）：轮询「进程在 + 端口监听」；超时打印日志尾部并非零退出。
 READY_TIMEOUT="${READY_TIMEOUT:-20}"
 
@@ -57,9 +53,9 @@ read_instance_port() {
   ' "$patch"
 }
 # 解析实例：<name> → 读注册表（唯一权威，不扫描）→ 校验布局 → 输出
-# "home|profile|port(空=headless)|relay"
-# relay：daemon 特判总控守护 `host-master`（守护 agent 名规范形态 `host-<id>`，
-# id 是字符串）；其它 = 实例名（web3 → DSH_RELAY_AGENT=web3）。
+# "home|profile|port(空=headless)|chanId"
+# chanId = 本实例 id 的 env 载体（DSH_CHANNEL_ID，channel 读它认身份）：daemon 特判总控守护
+# `host-master`（守护 agent 名规范形态 `host-<id>`）；其它 = 实例名（web3 → DSH_CHANNEL_ID=web3）。
 # 返回 0=有效（echo 元数据），1=无效（已打印原因）。
 resolve_instance() {
   local name="$1"
@@ -87,9 +83,9 @@ resolve_instance() {
     live_port="$(read_instance_port "$home" "$prof" 2>/dev/null || true)"
   fi
   [[ -n "$live_port" ]] || live_port="$port"
-  local relay="$name"
-  [[ "$name" == "daemon" ]] && relay="host-master"
-  echo "$home|$prof|$live_port|$relay"
+  local chanId="$name"
+  [[ "$name" == "daemon" ]] && chanId="host-master"
+  echo "$home|$prof|$live_port|$chanId"
 }
 
 # 自操作防护：目标 home == 当前环境 DSH_HOME → 拒绝（stop/restart 会杀掉承载
@@ -115,7 +111,7 @@ guard_no_self_operate() {
 # 注意：前缀项必须写成 `PREFIX.*`——锚定的 `^PREFIX=` 只匹配完全同名变量
 #（旧过滤器写成 `^(…|CLAUDE_|XDG_|DBUS_)='`，于是 CLAUDE_CODE_XXX / XDG_RUNTIME_DIR
 # 全部漏过，连 DSH_SESSION_* 也被继承）。
-ENV_DENY_EXACT_RE='^(DSH_HOME|DSH_RELAY_AGENT|DSH_RELAY_BROKER_URL|DSH_RELAY_SECRET|DSH_SESSION_ID|DSH_SESSION_JSONL|DSH_SHELL|DSH_WEB_URL|DSH_WEB_MODE|PWD|OLDPWD|SHLVL|_|PATH|HOME|USER|LOGNAME|SHELL|LANG|LC_ALL|TERM|HOSTNAME|NAME|MAIL|HOSTTYPE|MACHTYPE|OSTYPE|PAGER|GIT_PAGER|NO_COLOR|COLORTERM|COLUMNS|LINES|HISTFILE|HISTCONTROL|HISTSIZE|LS_COLORS|TMPDIR|GOPROXY|VIPSHOME|WSLENV|WSL_DISTRO_NAME|WSL_INTEROP|PULSE_SERVER|WAYLAND_DISPLAY|DISPLAY)='
+ENV_DENY_EXACT_RE='^(DSH_HOME|DSH_CHANNEL_ID|DSH_RELAY_AGENT|DSH_RELAY_BROKER_URL|DSH_RELAY_SECRET|DSH_SESSION_ID|DSH_SESSION_JSONL|DSH_SHELL|DSH_WEB_URL|DSH_WEB_MODE|PWD|OLDPWD|SHLVL|_|PATH|HOME|USER|LOGNAME|SHELL|LANG|LC_ALL|TERM|HOSTNAME|NAME|MAIL|HOSTTYPE|MACHTYPE|OSTYPE|PAGER|GIT_PAGER|NO_COLOR|COLORTERM|COLUMNS|LINES|HISTFILE|HISTCONTROL|HISTSIZE|LS_COLORS|TMPDIR|GOPROXY|VIPSHOME|WSLENV|WSL_DISTRO_NAME|WSL_INTEROP|PULSE_SERVER|WAYLAND_DISPLAY|DISPLAY)='
 ENV_DENY_PREFIX_RE='^(DSH_SESSION_|CLAUDE|VSCODE|COPILOT|OPENWIKI|WSL|XDG_|DBUS_|GIT_|SSH_|PULSE_|WAYLAND_)'
 
 # 收集可继承的 env（stdout：`VAR=value` 行）。
@@ -134,10 +130,10 @@ port_listening() {
 }
 
 # 启动实例并等待就绪（port 监听；headless 只看进程存活），超时打印日志尾部。
-# 参数：<name> <home> <profile> <port|空=headless> <relay> [额外 env VAR=value ...]
+# 参数：<name> <home> <profile> <port|空=headless> <chanId> [额外 env VAR=value ...]
 # 返回 0=就绪，1=超时未就绪。
 launch_instance() {
-  local name="$1" home="$2" profile="$3" port="$4" relay="$5"; shift 5
+  local name="$1" home="$2" profile="$3" port="$4" chanId="$5"; shift 5
   local log="/tmp/dsh-$name.log"
   echo "[$name] 启动：DSH_HOME=$home dsh --profile $profile（port ${port:-headless}）"
   # 启动环境 = 调用方 env（`env` 只叠加、不清除）→ 必须先踢掉会话/宿主作用域变量，
@@ -150,9 +146,7 @@ launch_instance() {
   [[ -n "$port" ]] && launch_args+=(--no-open)
   env -u DSH_SESSION_ID -u DSH_SESSION_JSONL -u DSH_SHELL -u DSH_WEB_URL -u DSH_WEB_MODE \
     DSH_HOME="$home" \
-    "DSH_RELAY_AGENT=$relay" \
-    "DSH_RELAY_BROKER_URL=$RELAY_BROKER_URL" \
-    "DSH_RELAY_SECRET=$RELAY_SECRET" \
+    "DSH_CHANNEL_ID=$chanId" \
     "$@" \
     nohup "$DSH_BIN" "${launch_args[@]}" > "$log" 2>&1 &
   local deadline=$((SECONDS + READY_TIMEOUT)) pid http_code=""
@@ -218,21 +212,20 @@ is_running() {
 start_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
-  IFS='|' read -r home profile port relay <<< "$info"
+  IFS='|' read -r home profile port chanId <<< "$info"
   local pid; pid="$(is_running "$home" || true)"
   if [[ -n "$pid" ]]; then
     echo "[$name] 已在运行 pid=$pid（$home）"
     return 0
   fi
-  # relay 三件套由 launch_instance 注入（仅通信插件部署：web2/3/4/daemon 经 broker 联调；
-  # 作传输兜底——实例发现权威源是管理端 launch 配置，不依赖 broker）。
-  launch_instance "$name" "$home" "$profile" "$port" "$relay"
+  # 实例 id 由 launch_instance 注入（DSH_CHANNEL_ID；broker 已退场，多机走 hub/worker 出站拉取）。
+  launch_instance "$name" "$home" "$profile" "$port" "$chanId"
 }
 
 stop_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
-  IFS='|' read -r home profile port relay <<< "$info"
+  IFS='|' read -r home profile port chanId <<< "$info"
   guard_no_self_operate "$name" "$home" || return 1
   local pid; pid="$(is_running "$home" || true)"
   if [[ -n "$pid" ]]; then
@@ -254,7 +247,7 @@ stop_one() {
 restart_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
-  IFS='|' read -r home profile port relay <<< "$info"
+  IFS='|' read -r home profile port chanId <<< "$info"
   local pid; pid="$(is_running "$home" || true)"
   local -a inherit=()
   if [[ -n "$pid" ]]; then
@@ -267,7 +260,7 @@ restart_one() {
     echo "[$name] 继承旧进程 env：${names:-（无）}（${#inherit[@]} 项；已过滤 $(( ${total:-0} - ${#inherit[@]} )) 项会话/宿主变量）"
   fi
   stop_one "$name"
-  launch_instance "$name" "$home" "$profile" "$port" "$relay" ${inherit[@]+"${inherit[@]}"}
+  launch_instance "$name" "$home" "$profile" "$port" "$chanId" ${inherit[@]+"${inherit[@]}"}
 }
 
 # 注册表内的实例名（唯一权威；不含墓碑，按名排序）。运行时**不扫描目录**。
@@ -286,8 +279,8 @@ status() {
       echo "  $name: 不可用 —— $(printf '%s' "$info" | head -1)"
       continue
     fi
-    local home profile port relay
-    IFS='|' read -r home profile port relay <<< "$info"
+    local home profile port chanId
+    IFS='|' read -r home profile port chanId <<< "$info"
     local pid; pid="$(is_running "$home" || true)"
     local port_txt="port=headless"
     if [[ -n "$port" ]]; then

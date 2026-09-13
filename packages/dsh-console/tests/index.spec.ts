@@ -7,11 +7,15 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import * as childProcess from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, statSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ChannelService from 'dsh-channel'
+import { currentRuntimeVersion, importRuntime, linkRuntimeInto } from '../src/runtimes.js'
+import { findInstance, loadRegistry, saveRegistry, upsertInstance } from '../src/registry.js'
+import * as logView from '../src/client/logView.js'
+import { listArchives as modelArchives } from '../src/lifecycle.js'
 import ConsoleService, {
   applyOverrideStatus,
   resolveControlAction,
@@ -43,6 +47,10 @@ afterAll(() => {
 beforeEach(() => {
   testDshHome = mkdtempSync(join(tmpdir(), 'dsh-console-test-home-'))
   process.env.DSH_HOME = testDshHome
+  // 注册表是实例清单的权威源，且是**主机级**文件（不是 per-instance）——测试必须把它
+  // 指向临时文件，否则会把实例档案写进真实 ~/.dsh-home/registry.json。
+  process.env.DSH_REGISTRY = join(testDshHome, 'registry.json')
+  process.env.DSH_HOST_ID = 'master'
 })
 afterEach(() => {
   if (savedDshHome !== undefined) process.env.DSH_HOME = savedDshHome
@@ -1048,7 +1056,7 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
   }
 
   const daemonReadLog = (ctx: Context) => (target: { instanceId: string }, opts: { tail?: number; maxBytes?: number }): LogReadResult =>
-    (ctx.console as unknown as { readLog: (t: { instanceId: string }, o: { tail?: number; maxBytes?: number }) => LogReadResult }).readLog(target, opts)
+    (ctx.console as unknown as { readLog: (t: { instanceId: string }, o: { tail?: number; maxBytes?: number }) => Promise<LogReadResult> }).readLog(target, opts)
 
   it('logPathFor：daemon 角色读 DSH_HOME/logs/<id>.log（白名单校验）', async () => {
     await withDshHome(async (home) => {
@@ -1089,13 +1097,13 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
       const ctx = await bootDaemon(home)
       const readLog = daemonReadLog(ctx)
       // tail=3：最后 3 条 record（纯文本无 ISO 前缀 → ts 空、msg 保留）
-      const r = readLog({ instanceId: 'web3' }, { tail: 3 })
+      const r = await readLog({ instanceId: 'web3' }, { tail: 3 })
       expect(r.records.map((rec) => rec.msg)).toEqual(['line-497', 'line-498', 'line-499'])
       expect(r.records[0].role).toBe('instance')   // 实例 stdout 文件 → role='instance'
       expect(r.records[0].level).toBe(null)
       expect(r.total).toBe(500)
       // 白名单外实例 → 空 records（whitelist guard，不读真实路径）
-      const r2 = readLog({ instanceId: 'nope' }, { tail: 3 })
+      const r2 = await readLog({ instanceId: 'nope' }, { tail: 3 })
       expect(r2.records).toEqual([])
       expect(r2.total).toBe(0)
       expect(r2.truncated).toBe(false)
@@ -1111,7 +1119,7 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
       const ctx = await bootDaemon(home)
       const readLog = daemonReadLog(ctx)
       // 100 字节 maxBytes vs 1000 字节内容 → truncated=true
-      const r = readLog({ instanceId: 'web3' }, { maxBytes: 100 })
+      const r = await readLog({ instanceId: 'web3' }, { maxBytes: 100 })
       expect(r.truncated).toBe(true)
       // 1 个非空行 → 1 条 record（total 仍按非空行计，与截断标志独立）
       expect(r.records).toHaveLength(1)
@@ -1126,9 +1134,9 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
       const ctx = new Context()
       await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
       await ctx.plugin(ConsoleService, {})
-      const readLog = (opts: { tail?: number }): LogReadResult =>
-        (ctx.console as unknown as { readLog: (t: { kind: 'daemon' }, o: { tail?: number }) => LogReadResult }).readLog({ kind: 'daemon' }, opts)
-      const r = readLog({ tail: 2 })
+      const readLog = async (opts: { tail?: number }): Promise<LogReadResult> =>
+        (ctx.console as unknown as { readLog: (t: { kind: 'daemon' }, o: { tail?: number }) => Promise<LogReadResult> }).readLog({ kind: 'daemon' }, opts)
+      const r = await readLog({ tail: 2 })
       expect(r.records.map((rec) => rec.msg)).toEqual(['c2', 'c3'])
       expect(r.records[0].role).toBe('console')   // console.log → role='console'
       expect(r.records[0].level).toBe(null)
@@ -1142,8 +1150,8 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
       await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
       await ctx.plugin(ConsoleService, { role: 'instance' })
       const readLog = (target: { instanceId: string }): LogReadResult =>
-        (ctx.console as unknown as { readLog: (t: { instanceId: string }, o: Record<string, never>) => LogReadResult }).readLog(target, {})
-      const r = readLog({ instanceId: 'web3' })
+        (ctx.console as unknown as { readLog: (t: { instanceId: string }, o: Record<string, never>) => Promise<LogReadResult> }).readLog(target, {})
+      const r = await readLog({ instanceId: 'web3' })
       expect(r.records).toEqual([])
       expect(r.total).toBe(0)
       ctx[Symbol.dispose]?.()
@@ -1160,7 +1168,7 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
         `${jsonLine}\n[2024-06-01T12:00:00.000Z] 老文本记录\n无前缀的裸文本\n`)
       const ctx = await bootDaemon(home)
       const readLog = daemonReadLog(ctx)
-      const r = readLog({ instanceId: 'web3' }, { tail: 0 })
+      const r = await readLog({ instanceId: 'web3' }, { tail: 0 })
       expect(r.total).toBe(3)
       expect(r.records).toHaveLength(3)
       // JSON 行：字段原样保留（ts/role/level/scope/msg）
@@ -1188,7 +1196,7 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
       writeFileSync(join(home, 'logs', 'web3.log'), `${jsonLine}\n[${ts}] ${msg}\n`)
       const ctx = await bootDaemon(home)
       const readLog = daemonReadLog(ctx)
-      const r = readLog({ instanceId: 'web3' }, { tail: 0 })
+      const r = await readLog({ instanceId: 'web3' }, { tail: 0 })
       // total = 非空行数（2）；镜像行被去重 → records 只留结构化那条。
       expect(r.total).toBe(2)
       expect(r.records).toHaveLength(1)
@@ -1206,8 +1214,8 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
       await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
       await ctx.plugin(ConsoleService, {})
       const readLog = (opts: { tail?: number }): LogReadResult =>
-        (ctx.console as unknown as { readLog: (t: { kind: 'daemon' }, o: { tail?: number }) => LogReadResult }).readLog({ kind: 'daemon' }, opts)
-      const r = readLog({ tail: 0 })
+        (ctx.console as unknown as { readLog: (t: { kind: 'daemon' }, o: { tail?: number }) => Promise<LogReadResult> }).readLog({ kind: 'daemon' }, opts)
+      const r = await readLog({ tail: 0 })
       expect(r.total).toBe(2)
       expect(r.records).toHaveLength(2)
       expect(r.records[0]).toMatchObject({ role: 'console', level: 'error', scope: 'daemon', msg: '升级失败，自动回滚' })
@@ -1226,8 +1234,8 @@ describe('日志（@Remote readLog / listLogFiles）', () => {
       await ctx.plugin(ChannelService, { tokens: { instA: 'tok-a' } })
       await ctx.plugin(ConsoleService, {})
       const readLog = (opts: { tail?: number }): LogReadResult =>
-        (ctx.console as unknown as { readLog: (t: { kind: 'daemon' }, o: { tail?: number }) => LogReadResult }).readLog({ kind: 'daemon' }, opts)
-      const r = readLog({ tail: 2 })
+        (ctx.console as unknown as { readLog: (t: { kind: 'daemon' }, o: { tail?: number }) => Promise<LogReadResult> }).readLog({ kind: 'daemon' }, opts)
+      const r = await readLog({ tail: 2 })
       expect(r.total).toBe(5)
       expect(r.records).toHaveLength(2)
       expect(r.records.map((rec) => rec.msg)).toEqual(['记录-3', '记录-4'])
@@ -1394,9 +1402,15 @@ describe('多机 P1b（部署清单持久化 / 对账 / 回执真实结果 / 审
       dshHome: '/tmp/.dsh-web6-persist', port: 3086, token: 'tok-web6',
     })
     await new Promise((r) => setTimeout(r, 20))
-    const listFile = join(process.env.DSH_HOME!, 'instances.json')
-    expect(existsSync(listFile)).toBe(true)
-    expect(JSON.parse(readFileSync(listFile, 'utf8')).instances.web6.port).toBe(3086)
+    // 实例档案落**注册表**（唯一权威；此前是 daemon 私有的 instances.json）
+    const regFile = process.env.DSH_REGISTRY!
+    expect(existsSync(regFile)).toBe(true)
+    const entry = JSON.parse(readFileSync(regFile, 'utf8')).instances['master/web6']
+    expect(entry.port).toBe(3086)
+    expect(entry.home).toBe('/tmp/.dsh-web6-persist')
+    expect(entry.profileDir).toBe('web')
+    expect(entry.version).toBe('0.1.2-rc.1')
+    expect(entry.layout).toBe('home')
     // 新守护（同 DSH_HOME）恢复清单：白名单/端口定位/上报都能看见部署出来的实例
     const ctx2 = await bootDaemon({})
     mkdirSync(join(process.env.DSH_HOME!, 'logs'), { recursive: true })
@@ -1467,5 +1481,497 @@ describe('多机 P1b（部署清单持久化 / 对账 / 回执真实结果 / 审
     // @Remote 面（无身份）→ system
     const viaRemote = ctx.console.controlInstance('webA', 'start')
     expect(ctx.channel.commandStatus(viaRemote.commandId!)?.actor).toBe('system')
+  })
+})
+
+describe('runtime 池：创建引用 + 升级 = 切引用（批 3）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+    ConsoleService.upgradeApplyError = undefined
+  })
+
+  /** 造一份官方 CLI 安装（含一个自研包，验证它不被链接）。 */
+  function fakeCli(dir: string, version: string): string {
+    const nm = join(dir, 'node_modules')
+    for (const name of ['dsh', 'dsh-base', 'dsh-web-app']) {
+      mkdirSync(join(nm, '@deepseek-ai', name), { recursive: true })
+      writeFileSync(join(nm, '@deepseek-ai', name, 'package.json'), JSON.stringify({ name: `@deepseek-ai/${name}`, version }))
+    }
+    mkdirSync(join(nm, 'dsh-console'), { recursive: true })
+    writeFileSync(join(nm, 'dsh-console', 'package.json'), JSON.stringify({ name: 'dsh-console', version: '0.0.0' }))
+    return dir
+  }
+
+  function importIntoPool(tmp: string, version: string): void {
+    process.env.DSH_RUNTIMES = join(tmp, 'runtimes')
+    const r = importRuntime({ version, source: fakeCli(join(tmp, `cli-${version}`), version) })
+    expect(r.ok).toBe(true)
+  }
+
+  it('创建实例：官方包软链到池、自研包保持实例内、档案记版本', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-rt-create-'))
+    try {
+      importIntoPool(tmp, '0.1.2-rc.1')
+      const dshHome = join(dirname(process.env.DSH_REGISTRY!), 'instance-a') // 新布局根 = 注册表所在目录
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({})
+      const r = ctx.console.deployInstance({
+        host: 'host1', instanceId: 'instance-a', version: '0.1.2-rc.1', profile: 'dev',
+        dshHome, port: 3090, token: 'tok-a',
+      })
+      expect(r.ok).toBe(true)
+      const profileDir = join(dshHome, 'profiles', 'dev')
+      expect(lstatSync(join(profileDir, 'node_modules', '@deepseek-ai', 'dsh')).isSymbolicLink()).toBe(true)
+      expect(currentRuntimeVersion(profileDir)).toBe('0.1.2-rc.1')
+      // 池里只有官方半区：池内若有自研包也不该被搬进实例
+      expect(existsSync(join(profileDir, 'node_modules', 'dsh-console'))).toBe(false)
+      const entry = JSON.parse(readFileSync(process.env.DSH_REGISTRY!, 'utf8')).instances['master/instance-a']
+      expect(entry.version).toBe('0.1.2-rc.1')
+    } finally {
+      delete process.env.DSH_RUNTIMES
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('新布局实例必须引用池内版本：版本不在池 → 显式失败（不建半成品）', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-rt-nopool-'))
+    try {
+      process.env.DSH_RUNTIMES = join(tmp, 'runtimes')
+      const dshHome = join(dirname(process.env.DSH_REGISTRY!), 'instance-b')
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({})
+      const r = ctx.console.deployInstance({
+        host: 'host1', instanceId: 'instance-b', version: '0.1.2-rc.1', profile: 'dev',
+        dshHome, port: 3091, token: 'tok-b',
+      })
+      // 批 6b 后：同进程回环会把守护的拒绝结论回传，因此 ok 就是真实结论
+      expect(r.ok).toBe(false)
+      expect(r.error).toMatch(/必须引用池内 runtime 版本/)
+      // 并且没有半成品
+      expect(existsSync(join(dshHome, 'profiles', 'dev', 'package.json'))).toBe(false)
+      expect(existsSync(process.env.DSH_REGISTRY!)).toBe(false) // 未落地 → 档案里不该有任何条目
+    } finally {
+      delete process.env.DSH_RUNTIMES
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('升级 = 切引用：不拷目录、不落快照，只把软链指向新版本并同步档案', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-rt-switch-'))
+    vi.useFakeTimers()
+    try {
+      importIntoPool(tmp, '0.1.2-rc.1')
+      importIntoPool(tmp, '0.1.1-rc.2')
+      const profileDir = join(tmp, 'inst', 'profiles', 'dev')
+      mkdirSync(join(profileDir, 'node_modules', '@deepseek-ai'), { recursive: true })
+      expect(linkRuntimeInto(profileDir, '0.1.2-rc.1').ok).toBe(true)
+      const spawnSpy = mockSpawn(fakeChild())
+      const ctx = await bootDaemon({})
+      ;(ctx.console as unknown as { runtimeInstances: Map<string, { dshHome: string; profile: string; version?: string }> })
+        .runtimeInstances.set('inst-a', { dshHome: join(tmp, 'inst'), profile: 'dev', version: '0.1.2-rc.1' })
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'inst-a', version: '0.1.1-rc.2' } })
+      await vi.advanceTimersByTimeAsync(16_000)
+      expect(currentRuntimeVersion(profileDir)).toBe('0.1.1-rc.2')
+      // 切引用模式不落快照目录（回滚点 = 旧引用），也不重拷发行包
+      expect(existsSync(join(tmp, 'inst', '.dsh-upgrade-snapshots'))).toBe(false)
+      expect(spawnSpy).toHaveBeenCalled()
+      // 档案同步：注册表里的版本 = 切换后的引用
+      const entry = JSON.parse(readFileSync(process.env.DSH_REGISTRY!, 'utf8')).instances['master/inst-a']
+      expect(entry.version).toBe('0.1.1-rc.2')
+    } finally {
+      vi.useRealTimers()
+      delete process.env.DSH_RUNTIMES
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('升级失败 → 切回旧引用（回滚 = 切软链），事件带 rolledBack', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-rt-rollback-'))
+    try {
+      importIntoPool(tmp, '0.1.2-rc.1')
+      importIntoPool(tmp, '0.1.1-rc.2')
+      const profileDir = join(tmp, 'inst', 'profiles', 'dev')
+      mkdirSync(join(profileDir, 'node_modules', '@deepseek-ai'), { recursive: true })
+      linkRuntimeInto(profileDir, '0.1.2-rc.1')
+      mockSpawn(fakeChild())
+      const reg0 = loadRegistry()
+      upsertInstance(reg0, { id: 'inst-a', host: 'master', home: join(tmp, 'inst'), profileDir: 'dev', layout: 'home', version: '0.1.2-rc.1' })
+      saveRegistry(reg0)
+      ConsoleService.upgradeApplyError = new Error('注入的切换失败')
+      const ctx = await bootDaemon({})
+      ;(ctx.console as unknown as { runtimeInstances: Map<string, { dshHome: string; profile: string; version?: string }> })
+        .runtimeInstances.set('inst-a', { dshHome: join(tmp, 'inst'), profile: 'dev', version: '0.1.2-rc.1' })
+      const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+      ctx.channel.subscribe('task', (e) => events.push({ type: e.type, payload: e.payload as Record<string, unknown> }))
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'inst-a', version: '0.1.1-rc.2' } })
+      await new Promise((r) => setTimeout(r, 60))
+      expect(currentRuntimeVersion(profileDir)).toBe('0.1.2-rc.1')
+      const result = events.find((e) => e.type === 'system.upgrade.result')
+      expect(result!.payload.ok).toBe(false)
+      expect(result!.payload.rolledBack).toBe(true)
+      const entry = JSON.parse(readFileSync(process.env.DSH_REGISTRY!, 'utf8')).instances['master/inst-a']
+      expect(entry.version).toBe('0.1.2-rc.1')
+    } finally {
+      delete process.env.DSH_RUNTIMES
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('目标版本不在池 → 显式失败（不静默改引用）', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-rt-notarget-'))
+    try {
+      importIntoPool(tmp, '0.1.2-rc.1')
+      const profileDir = join(tmp, 'inst', 'profiles', 'dev')
+      mkdirSync(join(profileDir, 'node_modules', '@deepseek-ai'), { recursive: true })
+      linkRuntimeInto(profileDir, '0.1.2-rc.1')
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({})
+      ;(ctx.console as unknown as { runtimeInstances: Map<string, { dshHome: string; profile: string; version?: string }> })
+        .runtimeInstances.set('inst-a', { dshHome: join(tmp, 'inst'), profile: 'dev', version: '0.1.2-rc.1' })
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'inst-a', version: '9.9.9' } })
+      await new Promise((r) => setTimeout(r, 60))
+      expect(currentRuntimeVersion(profileDir)).toBe('0.1.2-rc.1')
+    } finally {
+      delete process.env.DSH_RUNTIMES
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('listTemplates：读 templateHome 下的 profiles/*（模板清单不硬编码在 UI）', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-templates-'))
+    try {
+      const root = join(tmp, 'profiles')
+      for (const name of ['master', 'dev', 'explorer', 'minimal', 'junk-no-pkg']) {
+        mkdirSync(join(root, name), { recursive: true })
+      }
+      for (const name of ['master', 'dev', 'explorer', 'minimal']) {
+        writeFileSync(join(root, name, 'package.json'), '{}\n')
+      }
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({ templateHome: tmp })
+      expect(ctx.console.listTemplates()).toEqual(['dev', 'explorer', 'master', 'minimal'])
+      // 无 templateHome（老部署）→ 空清单，不抛
+      const ctx2 = await bootDaemon({})
+      expect(ctx2.console.listTemplates()).toEqual([])
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('runtime 池 @Remote 面：listRuntimePool 列出池内版本与引用关系；导入/删除走同一入口', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-pool-remote-'))
+    try {
+      process.env.DSH_RUNTIMES = join(tmp, 'runtimes')
+      expect(importRuntime({ version: '0.1.2-rc.1', source: fakeCli(join(tmp, 'cli'), '0.1.2-rc.1') }).ok).toBe(true)
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({})
+      const view = ctx.console.listRuntimePool()
+      expect(view.versions.map((v) => v.version)).toEqual(['0.1.2-rc.1'])
+      expect(view.versions[0].ok).toBe(true)
+      expect(view.versions[0].inUseBy).toEqual([])
+      // 重复导入 = 池不可变 → 拒绝
+      const dup = ctx.console.importRuntimeVersion('0.1.2-rc.1')
+      expect(dup.ok).toBe(false)
+      expect(dup.error).toMatch(/已存在|不可变/)
+      // 无引用 → 可删
+      expect(ctx.console.removeRuntimeVersion('0.1.2-rc.1').ok).toBe(true)
+      expect(ctx.console.listRuntimePool().versions).toEqual([])
+    } finally {
+      delete process.env.DSH_RUNTIMES
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('删除实例（批 4）：归档可恢复 + 默认实例拒删', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+  })
+
+  /** 造一个已登记的新布局实例（目录 + 注册表条目）。 */
+  function seedInstance(id: string, over: Record<string, unknown> = {}): string {
+    const home = join(dirname(process.env.DSH_REGISTRY!), `instance-${id}`)
+    mkdirSync(join(home, 'profiles', 'dev'), { recursive: true })
+    writeFileSync(join(home, 'profiles', 'dev', 'package.json'), '{"x":1}\n')
+    const reg = loadRegistry()
+    upsertInstance(reg, { id, host: 'master', home, profileDir: 'dev', layout: 'home', version: '0.1.2-rc.1', ...over })
+    saveRegistry(reg)
+    return home
+  }
+
+  it('删除 = 目录归档 + 档案墓碑；restore 把目录移回并转回 active', async () => {
+    const home = seedInstance('instance-a')
+    mockSpawn(fakeChild())
+    const ctx = await bootDaemon({})
+    const del = ctx.console.deleteInstance('instance-a')
+    expect(del.ok).toBe(true)
+    expect(existsSync(home)).toBe(false)
+    expect(findInstance(loadRegistry(), 'instance-a')!.status).toBe('deleted')
+    expect(modelArchives('instance-a')).toHaveLength(1)
+    const back = ctx.console.restoreInstance('instance-a')
+    expect(back.ok).toBe(true)
+    expect(existsSync(join(home, 'profiles', 'dev', 'package.json'))).toBe(true)
+    expect(findInstance(loadRegistry(), 'instance-a')!.status).toBe('active')
+  })
+
+  it('正式 web（3080）与本机 daemon 的删除请求被拒，且不改动任何东西', async () => {
+    const webHome = join(process.env.HOME ?? '', '.dsh')
+    const daemonHome = seedInstance('daemon', { role: 'daemon' })
+    // 同一次读取里加第二条再存盘（两次独立 load/save 会互相覆盖）
+    const reg = loadRegistry()
+    upsertInstance(reg, { id: 'web', host: 'master', home: webHome, profileDir: 'web', layout: 'legacy', role: 'console' })
+    saveRegistry(reg)
+    mockSpawn(fakeChild())
+    const ctx = await bootDaemon({})
+    const rWeb = ctx.console.deleteInstance('web')
+    expect(rWeb.ok).toBe(false)
+    expect(rWeb.error).toMatch(/3080|禁止删除/)
+    expect(findInstance(loadRegistry(), 'web')!.status).toBe('active')
+    const rDaemon = ctx.console.deleteInstance('daemon')
+    expect(rDaemon.ok).toBe(false)
+    expect(rDaemon.error).toMatch(/daemon.*禁止删除|执行面/)
+    expect(existsSync(daemonHome)).toBe(true)
+    expect(findInstance(loadRegistry(), 'daemon')!.status).toBe('active')
+  })
+
+  it('不在注册表的实例：删除显式失败（不静默通过）', async () => {
+    mockSpawn(fakeChild())
+    const ctx = await bootDaemon({})
+    const r = ctx.console.deleteInstance('nope')
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/不在注册表/)
+  })
+})
+
+describe('已删除实例（墓碑）列表（批 7）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+  })
+
+  it('默认不在实例列表，墓碑里能查到（含归档路径与删除时间）', async () => {
+    const home = join(dirname(process.env.DSH_REGISTRY!), 'instance-gone')
+    mkdirSync(join(home, 'profiles', 'dev'), { recursive: true })
+    const reg = loadRegistry()
+    upsertInstance(reg, { id: 'instance-gone', host: 'master', home, profileDir: 'dev', layout: 'home', version: '0.1.2-rc.1' })
+    saveRegistry(reg)
+    mockSpawn(fakeChild())
+    const ctx = await bootDaemon({})
+    expect(ctx.console.deleteInstance('instance-gone').ok).toBe(true)
+    const tombstones = ctx.console.listDeletedInstances()
+    expect(tombstones.map((t) => t.id)).toEqual(['instance-gone'])
+    expect(tombstones[0].deletedAt).toBeTruthy()
+    expect(tombstones[0].archivePath).toMatch(/\.archive\/instance-gone-\d+$/)
+    expect(tombstones[0].version).toBe('0.1.2-rc.1')
+    // 实例列表（活跃）里不再出现
+    expect(ctx.console.listInstances().instances.map((i) => i.id)).not.toContain('instance-gone')
+  })
+})
+
+describe('管理事件（批 6）：category=admin + 日志滚动 + 查看器筛选', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+    delete process.env.DSH_LOG_MAX_BYTES
+  })
+
+  function readRecords(): Array<{ category?: string; level: string; msg: string }> {
+    // 路径按角色取（bootDaemon = daemon 角色 → daemon.log），不写死文件名
+    const file = Logger.resolvePath('daemon')!
+    if (!existsSync(file)) return []
+    // 文件里既有 JSONL 记录也有纯文本镜像行（Logger.append）——只取能解析的 JSONL
+    return readFileSync(file, 'utf8').split('\n').filter((l) => l.length > 0)
+      .flatMap((l) => { try { return [JSON.parse(l) as { category?: string; level: string; msg: string }] } catch { return [] } })
+  }
+
+  it('状态变更操作落 category=admin 事件（含目标与结果）', async () => {
+    mockSpawn(fakeChild())
+    const ctx = await bootDaemon({})
+    const home = join(dirname(process.env.DSH_REGISTRY!), 'instance-ev')
+    mkdirSync(join(home, 'profiles', 'dev'), { recursive: true })
+    const reg = loadRegistry()
+    upsertInstance(reg, { id: 'instance-ev', host: 'master', home, profileDir: 'dev', layout: 'home', version: '0.1.2-rc.1' })
+    saveRegistry(reg)
+    expect(ctx.console.deleteInstance('instance-ev').ok).toBe(true)
+    // 幂等失败也要留痕（不是只记成功）
+    expect(ctx.console.deleteInstance('instance-ev').ok).toBe(false)
+    const admins = readRecords().filter((r) => r.category === 'admin')
+    expect(admins.length).toBeGreaterThanOrEqual(2)
+    expect(admins.some((r) => r.msg.includes('delete') && r.msg.includes('instance-ev') && r.msg.includes('成功'))).toBe(true)
+    expect(admins.some((r) => r.level === 'error' && r.msg.includes('失败'))).toBe(true)
+  })
+
+  it('只读动作（查看实例/版本池）不产生管理事件', async () => {
+    mockSpawn(fakeChild())
+    const ctx = await bootDaemon({})
+    ctx.console.listInstances()
+    ctx.console.listRuntimePool()
+    expect(readRecords().filter((r) => r.category === 'admin')).toEqual([])
+  })
+
+  it('日志超上限即滚动到 <file>.1（默认 100MB 可配）', () => {
+    process.env.DSH_LOG_MAX_BYTES = '200'
+    Logger.record('console', { level: 'info', scope: 'test', msg: 'x'.repeat(300) })
+    const file = Logger.resolvePath('console')!
+    expect(existsSync(file)).toBe(true)
+    expect(statSync(file).size).toBeGreaterThan(200) // 已写入（本次不滚动）
+    Logger.record('console', { level: 'info', scope: 'test', msg: 'y'.repeat(50) })
+    // 第二次写入前先滚动：旧内容进 .1，新文件只有第二条
+    expect(existsSync(`${file}.1`)).toBe(true)
+    expect(readFileSync(`${file}.1`, 'utf8')).toContain('x'.repeat(50))
+    expect(readFileSync(file, 'utf8')).toContain('y'.repeat(50))
+  })
+
+  it('查看器：categoryOnly 只留管理事件', () => {
+    const records = [
+      { ts: '2026-01-01T00:00:00.000Z', role: 'console' as const, level: 'info' as const, scope: 'deploy', msg: '普通日志' },
+      { ts: '2026-01-01T00:00:01.000Z', role: 'console' as const, level: 'info' as const, scope: 'admin-event', category: 'admin', msg: 'system delete a → 成功' },
+    ]
+    const out = logView.filterRecords(records, { minLevel: 'all', query: '', errorsOnly: false, categoryOnly: 'admin' })
+    expect(out).toHaveLength(1)
+    expect(out[0].category).toBe('admin')
+  })
+})
+
+describe('跨守护读日志（批 6b）：结果与失败都回传，不再空返回', () => {
+  it('console 角色转发到守护 → 返回守护的结果；失败 → 带 error；无宿主信息 → 明确原因', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, { launch: { web9: { host: 'host9', addr: 'http://127.0.0.1:3099' } } })
+    const svc = ctx.console as unknown as { readLog(t: unknown, o: unknown): Promise<LogReadResult> }
+    const channel = ctx.channel as unknown as { callRemote: (...a: unknown[]) => Promise<unknown> }
+    const spy = vi.spyOn(channel, 'callRemote').mockResolvedValueOnce({
+      ok: true,
+      value: { records: [{ ts: '2026-01-01T00:00:00.000Z', role: 'instance', level: 'info', scope: 'web9', msg: 'from-daemon' }], total: 1, truncated: false },
+    })
+    const ok = await svc.readLog({ kind: 'instance', instanceId: 'web9' }, { tail: 10 })
+    expect(ok.records.map((r) => r.msg)).toEqual(['from-daemon'])
+    expect(ok.error).toBe(undefined)
+    expect(spy).toHaveBeenCalled()
+
+    // 转发失败：必须是"读失败"而不是"没有日志"
+    spy.mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:3099'))
+    const failed = await svc.readLog({ kind: 'instance', instanceId: 'web9' }, { tail: 10 })
+    expect(failed.records).toEqual([])
+    expect(failed.error).toMatch(/ECONNREFUSED/)
+
+    // 守护返回失败包装
+    spy.mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: '守护内部错误' } })
+    const wrapped = await svc.readLog({ kind: 'instance', instanceId: 'web9' }, { tail: 10 })
+    expect(wrapped.error).toMatch(/守护内部错误/)
+
+    // 无 launch 宿主信息 → 点明原因
+    const noSpec = await svc.readLog({ kind: 'instance', instanceId: 'nope' }, { tail: 10 })
+    expect(noSpec.error).toMatch(/无守护宿主信息/)
+    spy.mockRestore()
+  })
+})
+
+describe('创建流程：模板 → 装依赖 → 链接池（端到端验收发现的缺口）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+    delete process.env.DSH_RUNTIMES
+  })
+
+  it('模板声明依赖时会先安装，再链接池（顺序不能反：install 会覆盖池软链）', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-create-order-'))
+    try {
+      process.env.DSH_RUNTIMES = join(tmp, 'runtimes')
+      // 池里放一个官方版本
+      const cliNm = join(tmp, 'cli', 'node_modules')
+      for (const name of ['dsh', 'dsh-base']) {
+        mkdirSync(join(cliNm, '@deepseek-ai', name), { recursive: true })
+        writeFileSync(join(cliNm, '@deepseek-ai', name, 'package.json'), JSON.stringify({ name: `@deepseek-ai/${name}`, version: '0.1.2-rc.1' }))
+      }
+      expect(importRuntime({ version: '0.1.2-rc.1', source: join(tmp, 'cli') }).ok).toBe(true)
+      // 模板：带自研依赖的三件套（模拟 profiles/dev）
+      const templateHome = join(tmp, 'templates')
+      const tpl = join(templateHome, 'profiles', 'dev')
+      mkdirSync(tpl, { recursive: true })
+      writeFileSync(join(tpl, 'package.json'), JSON.stringify({ name: 'dsh-profile-dev', dependencies: { 'dsh-desk': 'link:/tmp/nope' } }))
+      writeFileSync(join(tpl, 'cordis.patch.yml'), '[]\n')
+      mkdirSync(join(tpl, 'node_modules', 'dsh-desk'), { recursive: true }) // 真装出来的样子
+      const calls: Array<{ dir: string; linked: boolean }> = []
+      ConsoleService.installImpl = (dir) => {
+        // 安装时必须还没有池软链（顺序断言）
+        const linkedAlready = existsSync(join(dir, 'node_modules', '@deepseek-ai', 'dsh'))
+          && lstatSync(join(dir, 'node_modules', '@deepseek-ai', 'dsh')).isSymbolicLink()
+        calls.push({ dir, linked: linkedAlready })
+      }
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({ templateHome })
+      const dshHome = join(dirname(process.env.DSH_REGISTRY!), 'instance-order')
+      const r = ctx.console.deployInstance({ host: 'host1', instanceId: 'instance-order', version: '0.1.2-rc.1', profile: 'dev', dshHome, port: 3092, token: 't' })
+      expect(r.ok).toBe(true)
+      expect(calls).toHaveLength(1)
+      expect(calls[0].linked).toBe(false) // 装依赖时尚未链接池
+      // 装完后池链接生效
+      expect(currentRuntimeVersion(join(dshHome, 'profiles', 'dev'))).toBe('0.1.2-rc.1')
+      // profile 根入口列表必须存在（模板不带它，缺了实例起不来）
+      expect(existsSync(join(dshHome, 'profiles', 'dev', 'cordis.yml'))).toBe(true)
+    } finally {
+      ConsoleService.installImpl = (profileDir) => {
+        execFileSync('npm', ['install', '--no-audit', '--no-fund', '--loglevel', 'error'], { cwd: profileDir, stdio: 'pipe' })
+      }
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('依赖装不上 → 显式失败，不留"目录在但起不来"的半成品', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-create-instfail-'))
+    try {
+      process.env.DSH_RUNTIMES = join(tmp, 'runtimes')
+      const cliNm = join(tmp, 'cli', 'node_modules', '@deepseek-ai', 'dsh')
+      mkdirSync(cliNm, { recursive: true })
+      writeFileSync(join(cliNm, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.2-rc.1' }))
+      importRuntime({ version: '0.1.2-rc.1', source: join(tmp, 'cli') })
+      const tpl = join(tmp, 'templates', 'profiles', 'dev')
+      mkdirSync(tpl, { recursive: true })
+      writeFileSync(join(tpl, 'package.json'), JSON.stringify({ name: 'dsh-profile-dev', dependencies: { 'dsh-desk': 'link:/tmp/nope' } }))
+      writeFileSync(join(tpl, 'cordis.patch.yml'), '[]\n')
+      ConsoleService.installImpl = () => { throw new Error('npm ERR! 网络不可达') }
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({ templateHome: join(tmp, 'templates') })
+      const dshHome = join(dirname(process.env.DSH_REGISTRY!), 'instance-fail')
+      const r = ctx.console.deployInstance({ host: 'host1', instanceId: 'instance-fail', version: '0.1.2-rc.1', profile: 'dev', dshHome, port: 3093, token: 't' })
+      expect(r.ok).toBe(false)
+      expect(r.error).toMatch(/依赖安装失败/)
+    } finally {
+      ConsoleService.installImpl = (profileDir) => {
+        execFileSync('npm', ['install', '--no-audit', '--no-fund', '--loglevel', 'error'], { cwd: profileDir, stdio: 'pipe' })
+      }
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('templateHome 兼容两种布局（端到端暴露的语义二义）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+    delete process.env.DSH_RUNTIMES
+  })
+
+  it('templateHome 指向模板目录（工程 profiles/）或含 profiles/ 的 home，模板清单都对', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-tpl-base-'))
+    try {
+      mockSpawn(fakeChild())
+      // (a) 工程 profiles/ 直接作为 templateHome（子目录即模板）
+      const asDir = join(tmp, 'profiles')
+      for (const n of ['dev', 'minimal']) {
+        mkdirSync(join(asDir, n), { recursive: true })
+        writeFileSync(join(asDir, n, 'package.json'), '{}')
+      }
+      const ctx1 = await bootDaemon({ templateHome: asDir })
+      expect(ctx1.console.listTemplates()).toEqual(['dev', 'minimal'])
+      // (b) 老配置：含 profiles/ 的 home
+      const asHome = join(tmp, 'web3-home')
+      mkdirSync(join(asHome, 'profiles', 'web3'), { recursive: true })
+      writeFileSync(join(asHome, 'profiles', 'web3', 'package.json'), '{}')
+      const ctx2 = await bootDaemon({ templateHome: asHome })
+      expect(ctx2.console.listTemplates()).toEqual(['web3'])
+      // (c) 未配置 → 空清单（不抛）
+      const ctx3 = await bootDaemon({})
+      expect(ctx3.console.listTemplates()).toEqual([])
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

@@ -20,24 +20,38 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
-import { hostAgentId, isHostAgent, signRequest, type ControlCommand, type ControlOutcome, type InstanceIdentity, type WorkerInstanceReport, type WorkerReport } from 'dsh-channel'
+import { hostAgentId, instanceIdFromEnv, isHostAgent, signRequest, type ControlCommand, type ControlOutcome, type InstanceIdentity, type WorkerInstanceReport, type WorkerReport } from 'dsh-channel'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
-import { spawn, exec, type ChildProcess } from 'node:child_process'
-import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn, exec, type ChildProcess } from 'node:child_process'
+import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, resolve, sep } from 'node:path'
 import { join } from 'node:path'
 import { connect } from 'node:net'
+import {
+  findInstance as findRegistryInstance,
+  hostId,
+  instancesUsingVersion,
+  listInstances as listRegistryInstances,
+  loadRegistry,
+  registryPath,
+  saveRegistry,
+  upsertInstance,
+  type InstanceEntry,
+} from './registry.js'
+import { currentRuntimeVersion, linkRuntimeInto, runtimeReady } from './runtimes.js'
+import { importRuntime, listRuntimes, poolRoot, removeRuntime, verifyRuntime } from './runtimes.js'
+import { archiveInstance, deleteGuard, restoreInstance } from './lifecycle.js'
 
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则）——唯一来源，
 // index 本地引用经 import type，re-export 供外部消费。
 import type {
   BootstrapResult, ControlResult, ConsoleInstanceView, DeployInstanceRequest, HostRecord, InstanceRecord, InstanceType,
   LogFileList, LogFileMeta, LogLevel, LogReadOptions, LogReadResult, LogRecord, LogTarget,
-  UpgradeBatchResult, UpgradeItemResult, UpgradeStatus, UpgradeStep,
+  RuntimePoolView, UpgradeBatchResult, UpgradeItemResult, UpgradeStatus, UpgradeStep,
 } from './types.ts'
 export type * from './types.ts'
 export type { BootstrapResult, ControlResult, ConsoleInstanceView, HostRecord, InstanceRecord, InstanceType } from './types.ts'
@@ -80,8 +94,10 @@ export interface LaunchSpec {
   profile: string
   /** 端口（记录/校验用，可选）。 */
   port?: number
-  /** 额外环境变量（如 DSH_RELAY_AGENT/SECRET/BROKER_URL）。 */
+  /** 额外环境变量（如 DSH_CHANNEL_ID/CONSOLE_ADDR；旧名 DSH_RELAY_AGENT 仍兼容读）。 */
   env?: Record<string, string>
+  /** 引用的 runtime 池版本（内核版本；空 = 实例自带安装，见 runtime 池模型）。 */
+  version?: string
 }
 
 /** 插件角色（部署位置）：console=管理端 / daemon=主机守护 / instance=实例自退。 */
@@ -260,6 +276,26 @@ export class ConsoleService extends TypertRemoteService {
   static portFreeImpl: (port: number) => Promise<boolean> = isPortFree
   /** 测试钩子：快照后/应用前抛错，验证升级失败自动回滚（生产不设置）。 */
   static upgradeApplyError?: Error
+  /**
+   * 实例依赖安装实现（可注入，测试用）：默认在实例 profile 目录跑 `npm install`。
+   * 模板只带三件套（package.json + patch + lock），**不含 node_modules**——不装依赖
+   * 的实例起不来（实机验收发现）。装完再链接池，保证官方作用域由池覆盖。
+   */
+  static installImpl: (profileDir: string) => void = (profileDir) => {
+    // 优先 pnpm（本仓库的包管理语义：link:/peer 宽松）；不在 PATH 时回退 npm +
+    // --legacy-peer-deps（我们的包声明官方 peer，npm 默认严格校验会 ERESOLVE——实测）。
+    try {
+      execFileSync('pnpm', ['install', '--prefer-offline', '--reporter=silent'], { cwd: profileDir, stdio: 'pipe' })
+      return
+    } catch (pnpmError) {
+      try {
+        execFileSync('npm', ['install', '--no-audit', '--no-fund', '--legacy-peer-deps', '--loglevel', 'error'], { cwd: profileDir, stdio: 'pipe' })
+        return
+      } catch (npmError) {
+        throw new Error(`pnpm 与 npm 均失败：pnpm=${pnpmError instanceof Error ? pnpmError.message : String(pnpmError)}；npm=${npmError instanceof Error ? npmError.message : String(npmError)}`)
+      }
+    }
+  }
 
   /**
    * 解析本进程启动用的 dsh 命令（daemon 拉起实例时用它，保证同内核版本）。
@@ -320,6 +356,21 @@ export class ConsoleService extends TypertRemoteService {
    * @param msg - 日志正文。
    * @param extra - 结构化附加字段（level 覆盖推导；scope 标记模块/域，缺省 'console'）。
    */
+  /**
+   * 管理事件落盘（结构性事实，不是调试日志）：状态变更操作与其失败异常。
+   * 与运行日志同一条 JSONL（`category: 'admin'`），复用现有查看器；
+   * 判据：**只记改变状态的操作 + 失败/异常**，只读动作（查看/刷新/跳转）不记。
+   */
+  private adminEvent(action: string, target: string, ok: boolean, actor: string, detail = ''): void {
+    const role = this.config.role === 'daemon' ? 'daemon' : 'console'
+    Logger.record(role, {
+      level: ok ? 'info' : 'error',
+      scope: 'admin-event',
+      category: 'admin',
+      msg: `${actor} ${action} ${target} → ${ok ? '成功' : '失败'}${detail !== '' ? `（${detail}）` : ''}`,
+    })
+  }
+
   private log(msg: string, extra?: { level?: LogLevel; scope?: string; instanceId?: string }): void {
     console.log(msg)
     const role = this.config.role ?? 'console'
@@ -452,10 +503,37 @@ export class ConsoleService extends TypertRemoteService {
   @Remote
   listInstances(): ConsoleInstanceView {
     let instances = this.ctx.channel.list()
+    // 过滤已删除实例（墓碑）：注册表是权威源，channel 的实例表不会因删除自动收敛
+    // ——不过滤就会把删掉的实例当活跃实例显示（幽灵行，实测踩到）。
+    try {
+      const reg = loadRegistry()
+      const deleted = new Set(
+        listRegistryInstances(reg, { includeDeleted: true })
+          .filter((i) => i.status === 'deleted')
+          .map((i) => i.id),
+      )
+      if (deleted.size > 0) instances = instances.filter((i) => !deleted.has(i.id))
+    } catch {
+      /* 注册表不可读时不隐藏任何实例（宁可多显示，也不静默吞掉） */
+    }
     // 加本机实例（console 端自己，channel 发现的是远端）。
     const self = this.ctx.channel.relay?.agent
     if (self !== undefined && !instances.some((i) => i.id === self)) {
       instances = [{ id: self, name: self, addr: '', status: 'online' as const }, ...instances]
+    }
+    // 注册表是实例清单的**权威源**：并入注册表内（非墓碑）但尚未向 channel 注册的实例。
+    // 否则 UI 只显示 channel 发现过的实例（UI 自验实测：注册表 6 个、界面只 3 个）。
+    // 状态记 offline（未注册 = 本管理端看不到它的心跳；不做乐观在线）。
+    {
+      const seen = new Set(instances.map((i) => i.id))
+      try {
+        const reg = loadRegistry()
+        for (const e of listRegistryInstances(reg)) {
+          if (seen.has(e.id)) continue
+          instances = [...instances, { id: e.id, name: e.name, addr: e.addr ?? '', status: 'offline' as const }]
+          seen.add(e.id)
+        }
+      } catch { /* 注册表不可读：保持 channel 视图（不让 UI 空掉） */ }
     }
     const now = Date.now()
     // 应用离线覆盖（stop/restart 后即时显示 offline，绕开 broker TTL 滞后）；过期项清除。
@@ -702,8 +780,36 @@ export class ConsoleService extends TypertRemoteService {
             result = this.listLogFiles()
           } else if (method === 'readLog') {
             // 守护日志面：{ target, opts }（LogTarget 判别联合 + 读取选项）。
+            // async @Remote（跨实例转发要 await）→ 异步回执。
             const { target, opts } = (frame.payload?.args ?? {}) as { target: LogTarget; opts: LogReadOptions }
-            result = this.readLog(target, opts)
+            void this.readLog(target, opts).then((value) => {
+              res.writeHead(200, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: { ok: true, value } }))
+            }).catch((err) => {
+              res.writeHead(400, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: { ok: false, error: { code: 'internal', message: err instanceof Error ? err.message : String(err), details: {} } } }))
+            })
+            return
+          } else if (method === 'listRuntimePool') {
+            result = this.listRuntimePool()
+          } else if (method === 'listTemplates') {
+            result = this.listTemplates()
+          } else if (method === 'listDeletedInstances') {
+            result = this.listDeletedInstances()
+          } else if (method === 'importRuntimeVersion') {
+            const { version, source } = (frame.payload?.args ?? {}) as { version: string; source?: string }
+            result = this.importRuntimeVersion(version, source)
+          } else if (method === 'removeRuntimeVersion') {
+            const { version } = (frame.payload?.args ?? {}) as { version: string }
+            result = this.removeRuntimeVersion(version)
+          } else if (method === 'deleteInstance') {
+            // 删除（同步结果）：拒绝原因要能回传（不能只说"已下发"）。
+            const { instanceId } = (frame.payload?.args ?? {}) as { instanceId: string }
+            result = this.deleteInstance(instanceId)
+          } else if (method === 'restoreInstance') {
+            // 恢复（CLI 入口）：归档移回 + 档案转回 active。
+            const { instanceId } = (frame.payload?.args ?? {}) as { instanceId: string }
+            result = this.restoreInstance(instanceId)
           } else if (method === 'getUpgradeStatus') {
             // 升级状态查询：async @Remote——Promise 结果异步回执。
             const { instanceId } = (frame.payload?.args ?? {}) as { instanceId: string }
@@ -777,6 +883,18 @@ export class ConsoleService extends TypertRemoteService {
       case 'stop':
         this.daemonStop(instanceId)
         return { ok: true, detail: '已发停止' }
+      case 'delete': {
+        // 删除（执行面）：停进程 → 目录归档 → 档案转墓碑。守卫在 daemonDeleteLocal 内。
+        const stopped = this.daemonDeleteLocal(instanceId, spec)
+        return stopped
+      }
+      case 'restore': {
+        const r = restoreInstance(instanceId)
+        if (!r.ok) return { ok: false, error: r.error }
+        this.runtimeInstances.delete(instanceId)
+        this.log(`[dsh-console/daemon] 已恢复 ${instanceId}（目录移回 ${r.home ?? ''}）；重启守护或重新 deploy 后拉起`, { scope: 'deploy' })
+        return { ok: true, detail: `已恢复 ${instanceId}（待拉起）` }
+      }
       case 'restart':
         if (!this.opBegin(instanceId, 'restarting')) {
           this.log(`[dsh-console/daemon] ${instanceId} 有操作进行中，忽略 restart`, { scope: 'control' })
@@ -814,34 +932,62 @@ export class ConsoleService extends TypertRemoteService {
     return merged
   }
 
-  /** 部署清单文件（daemon 角色；记录 deploy 出来的实例，重启后据此恢复）。 */
+  /**
+   * 实例清单文件 = **注册表**（唯一权威，`~/.dsh-home/registry.json`；`$DSH_REGISTRY` 可覆盖）。
+   * 此前是 daemon 私有的 `instances.json`——与脚本、console 各持一份，版本/布局双轨后必然分叉。
+   */
   private deployedInstancesFile(): string {
-    return join(roleDataRoot('daemon'), 'instances.json')
+    return registryPath()
   }
 
-  /** 读部署清单到运行时清单（daemon 启动时调用；文件缺失/损坏即空）。 */
-  private loadDeployedInstances(): void {
-    try {
-      const file = this.deployedInstancesFile()
-      if (!existsSync(file)) return
-      const saved = JSON.parse(readFileSync(file, 'utf8')) as { instances?: Record<string, LaunchSpec> }
-      for (const [id, spec] of Object.entries(saved.instances ?? {})) {
-        if (spec !== null && typeof spec === 'object') this.runtimeInstances.set(id, spec)
-      }
-      this.log(`[dsh-console/daemon] 部署清单恢复 ${this.runtimeInstances.size} 个实例（${file}）`, { scope: 'deploy' })
-    } catch (error) {
-      this.log(`[dsh-console/daemon] 部署清单读取失败（按空清单继续）：${error instanceof Error ? error.message : String(error)}`, { scope: 'deploy' })
+  /** 注册表条目 → 启动规格（env/token 不进注册表：从实例 patch + 实例 id 重建）。 */
+  private specFromEntry(entry: InstanceEntry): LaunchSpec {
+    return {
+      dshHome: entry.home,
+      profile: entry.profileDir,
+      addr: entry.addr ?? undefined,
+      port: entry.port ?? undefined,
+      env: { DSH_CHANNEL_ID: entry.id, DSH_RELAY_AGENT: entry.id },
+      version: entry.version ?? undefined,
     }
   }
 
-  /** 落盘部署清单（deploy 成功后调用；失败不致命，仅丢失重启恢复能力）。 */
+  /** 读注册表到运行时清单（daemon 启动时调用；文件缺失/损坏即空清单）。 */
+  private loadDeployedInstances(): void {
+    try {
+      const reg = loadRegistry()
+      for (const entry of listRegistryInstances(reg)) {
+        // 只恢复本机实例：注册表可含其它主机的条目（多机），本机守护不认领。
+        if (entry.host !== hostId() && entry.host !== 'localhost') continue
+        this.runtimeInstances.set(entry.id, this.specFromEntry(entry))
+      }
+      this.log(`[dsh-console/daemon] 注册表恢复 ${this.runtimeInstances.size} 个实例（${registryPath()}）`, { scope: 'deploy' })
+    } catch (error) {
+      this.log(`[dsh-console/daemon] 注册表读取失败（按空清单继续）：${error instanceof Error ? error.message : String(error)}`, { scope: 'deploy' })
+    }
+  }
+
+  /** 落盘运行时清单到注册表（upsert；失败不致命，仅丢失重启恢复能力）。 */
   private persistDeployedInstances(): void {
     try {
-      const file = this.deployedInstancesFile()
-      mkdirSync(dirname(file), { recursive: true })
-      writeFileSync(file, JSON.stringify({ version: 1, instances: Object.fromEntries(this.runtimeInstances) }, null, 2))
+      const reg = loadRegistry()
+      for (const [id, spec] of this.runtimeInstances) {
+        const prev = findRegistryInstance(reg, id)
+        upsertInstance(reg, {
+          id,
+          host: prev?.host ?? hostId(),
+          home: spec.dshHome,
+          profileDir: spec.profile,
+          port: spec.port ?? null,
+          addr: spec.addr ?? null,
+          version: spec.version ?? prev?.version ?? null,
+          template: prev?.template ?? spec.profile,
+          layout: prev?.layout ?? 'home',
+        })
+      }
+      saveRegistry(reg)
     } catch (error) {
-      this.log(`[dsh-console/daemon] 部署清单落盘失败：${error instanceof Error ? error.message : String(error)}`, { scope: 'deploy' })
+      this.log(`[dsh-console/daemon] 注册表落盘失败：${error instanceof Error ? error.message : String(error)}`, { scope: 'deploy' })
     }
   }
 
@@ -947,13 +1093,14 @@ export class ConsoleService extends TypertRemoteService {
       profile,
       addr: req.addr,
       port,
-      env: { ...env, DSH_RELAY_AGENT: env?.DSH_RELAY_AGENT ?? instanceId },
+      env: { ...env, DSH_CHANNEL_ID: env?.DSH_CHANNEL_ID ?? instanceId },
+      version,
     }
     // 动态加入运行时清单（instanceSpec 后续命中）。
     this.runtimeInstances.set(instanceId, spec)
     // 令牌注入：patch 实例化由 daemon 落地时写（见 ensureInstanceHome）。
     try {
-      this.ensureInstanceHome(dshHome, profile, instanceId, token ?? '', port)
+      this.ensureInstanceHome(dshHome, profile, instanceId, token ?? '', port, version)
     } catch (error) {
       this.runtimeInstances.delete(instanceId)
       this.log(`[dsh-console/daemon] ${instanceId} 建 dshHome 失败: ${error instanceof Error ? error.message : String(error)}`, { scope: 'deploy' })
@@ -972,6 +1119,7 @@ export class ConsoleService extends TypertRemoteService {
     } finally {
       this.opEnd(instanceId)
     }
+    this.adminEvent('deploy', instanceId, true, 'daemon', `port=${String(port)}`)
     return { ok: true, detail: `${instanceId} 已部署并拉起` }
   }
 
@@ -997,10 +1145,46 @@ export class ConsoleService extends TypertRemoteService {
    * @param token - 实例令牌（channel patch 注入，注册/心跳校验）。
    * @param port - webserver 端口（可选）。
    */
-  private ensureInstanceHome(dshHome: string, profile: string, instanceId: string, token: string, port?: number): void {
+  /**
+   * 模板基目录解析（**兼容两种布局**，避免配置语义二义——实测踩到：模板清单为空、
+   * 创建静默走后备骨架）：
+   * - `<templateHome>/profiles` 存在 → 它是**含 profiles/ 的 home**（老配置，如 \`~/.dsh-web3\`）；
+   * - 否则把 `templateHome` 本身当作**模板目录**（工程 \`profiles/\`，每个子目录一个模板）。
+   * 返回 null = 未配置。
+   */
+  private templatesBase(): string | null {
+    const t = this.config.templateHome
+    if (t === undefined || t === '') return null
+    const asHome = join(t, 'profiles')
+    return existsSync(asHome) ? asHome : t
+  }
+
+  /** 模板目录里可用的模板名（每个含 package.json 的子目录）。 */
+  private templateNames(): string[] {
+    const base = this.templatesBase()
+    if (base === null) return []
+    try {
+      return readdirSync(base, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && existsSync(join(base, d.name, 'package.json')))
+        .map((d) => d.name)
+        .sort()
+    } catch {
+      return []
+    }
+  }
+
+  private ensureInstanceHome(dshHome: string, profile: string, instanceId: string, token: string, port?: number, version?: string): void {
     const homeProfile = join(dshHome, 'profiles', profile)
-    const template = this.config.templateHome
-    const templateProfile = template !== undefined && template !== '' ? join(template, 'profiles', profile) : ''
+    const templatesBase = this.templatesBase()
+    const templateProfile = templatesBase !== null ? join(templatesBase, profile) : ''
+    // 新布局实例（`~/.dsh-home/instance-*`，以注册表所在目录为新布局根）**必须**引用池；
+    // 老布局/任意 dshHome 的历史部署保持旧语义（版本仅登记，不强制在池）——老实例不动。
+    const newLayoutRoot = dirname(registryPath())
+    const isNewLayout = homeProfile.startsWith(`${newLayoutRoot}${sep}`)
+    const inPool = version !== undefined && version !== '' && runtimeReady(version)
+    if (isNewLayout && !inPool) {
+      throw new Error(`新布局实例必须引用池内 runtime 版本（收到 ${String(version ?? '')}，池内：${listRuntimes().join(', ') || '空'}）`)
+    }
     if (templateProfile !== '' && existsSync(templateProfile) && !existsSync(homeProfile)) {
       // 复制模板 profile（含 node_modules/package.json/cordis.yml/patch 骨架）。
       mkdirSync(dshHome, { recursive: true })
@@ -1022,11 +1206,60 @@ export class ConsoleService extends TypertRemoteService {
       const cordisPath = join(homeProfile, 'cordis.yml')
       if (!existsSync(cordisPath)) writeFileSync(cordisPath, '[]\n')
     }
+    // profile 根入口列表（模板不带它；缺了实例起不来——boot $DSH_HOME/profiles/<名> 需要）。
+    const rootCordis = join(homeProfile, 'cordis.yml')
+    if (!existsSync(rootCordis)) writeFileSync(rootCordis, '[]\n')
     // patch 实例化：端口/身份/令牌（覆盖模板 patch 的实例化值）。
     const patchLines = ['# 实例 patch（deploy 生成）：身份/端口/令牌。']
     if (port !== undefined) patchLines.push(`- id: webserver\n  config: { host: '127.0.0.1', port: ${port} }`)
     if (token !== '') patchLines.push(`- { "id": "dsh-channel", "config": { "tokens": { "${instanceId}": "${token}" } } }`)
     writeFileSync(join(homeProfile, 'cordis.patch.yml'), patchLines.join('\n') + '\n')
+    // 依赖落地：模板只带三件套，实例要能跑就得把 package.json 里的自研/社区依赖装上。
+    // **顺序**：先装依赖，再链接池——否则 npm install 会把池的软链覆盖成真目录。
+    const pkgPath = join(homeProfile, 'package.json')
+    let declaredDeps = 0
+    try {
+      if (existsSync(pkgPath)) {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { dependencies?: Record<string, string> }
+        declaredDeps = Object.keys(pkg.dependencies ?? {}).length
+      }
+    } catch {
+      declaredDeps = 0
+    }
+    // 依赖协议规范化：模板里的 \`link:\` 是 pnpm 专有协议，npm 会直接报
+    // EUNSUPPORTEDPROTOCOL（实测）。\`file:\` 两种包管理器都认，且语义一致（本地目录）。
+    if (declaredDeps > 0) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { dependencies?: Record<string, string> }
+        let changed = 0
+        for (const [name, spec] of Object.entries(pkg.dependencies ?? {})) {
+          if (spec.startsWith('link:')) {
+            pkg.dependencies![name] = `file:${spec.slice('link:'.length)}`
+            changed += 1
+          }
+        }
+        if (changed > 0) {
+          writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+          this.log(`[dsh-console/daemon] ${instanceId} 依赖协议规范化：${changed} 个 link: → file:`, { scope: 'deploy' })
+        }
+      } catch { /* 解析失败就原样交给安装器报错 */ }
+    }
+    if (declaredDeps > 0) {
+      try {
+        ConsoleService.installImpl(homeProfile)
+        this.log(`[dsh-console/daemon] ${instanceId} 已安装 ${declaredDeps} 个模板声明依赖`, { scope: 'deploy' })
+      } catch (e) {
+        // 装不上就是装不上：显式失败，不留"目录在但起不来"的半成品
+        throw new Error(`实例依赖安装失败（${declaredDeps} 个声明依赖）：${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    // 引用 runtime 池：把官方包软链到池（自研/社区包仍随实例安装）。
+    // 创建即建立引用 → 之后升级 = 切软链，不再重拷发行包。
+    if (inPool) {
+      const linked = linkRuntimeInto(homeProfile, version!)
+      if (!linked.ok) throw new Error(linked.error ?? `建立 runtime 引用失败（${String(version)}）`)
+      this.log(`[dsh-console/daemon] ${instanceId} 引用 runtime ${String(version)}（软链 ${String(linked.linked ?? 0)} 个官方包）`, { scope: 'deploy' })
+    }
   }
 
   /** 尝试占用实例操作锁；已被占用返回 false（调用方忽略新指令）。 */
@@ -1080,20 +1313,54 @@ export class ConsoleService extends TypertRemoteService {
         this.log(`[dsh-console/daemon] 升级 ${instanceId} 失败：实例 home 不存在（${homeProfile}）`, { scope: 'upgrade' })
         return
       }
-      // 1. 快照（升级前状态 = 回滚点）。
-      this.writeUpgradeStatus(spec, instanceId, { step: 'snapshot', done: false, version, message: '开始升级：快照当前发行包…' })
+      // 两种升级路径（见 console 实例模型 note）：
+      // - **切引用**（实例引用 runtime 池时）：只改官方包软链，秒级且回滚 = 切回旧引用，不拷目录；
+      // - 重拷发行包（老实例 / 未引用池）：保持既有事务语义（快照 → 对齐守护发行包源 → 回滚）。
+      const switchFrom = currentRuntimeVersion(homeProfile)
+      const switchTo = version !== '' && runtimeReady(version) ? version : null
+      const useSwitch = switchFrom !== null && switchTo !== null && switchFrom !== switchTo
+      if (version !== '' && switchFrom !== null && switchTo === null) {
+        // 明确失败而不是抛异常：本方法由 `void` 调用且外层无 catch，抛出会变成未处理的
+        // promise rejection（守护进程带着未处理异常继续跑）。
+        const message = `目标 runtime 版本未在池：${version}（先导入该版本再升级）`
+        this.log(`[dsh-console/daemon] 升级 ${instanceId} 失败：${message}`, { scope: 'upgrade' })
+        this.recordUpgradeResult(homeProfile, instanceId, false, version, message, false)
+        this.writeUpgradeStatus(spec, instanceId, { step: 'done', done: true, ok: false, error: message, version, message })
+        this.emitUpgradeResult(instanceId, version, false, message, false)
+        return
+      }
+      // 1. 快照（升级前状态 = 回滚点）。切引用模式下回滚点就是旧引用，不需要拷贝。
+      this.writeUpgradeStatus(spec, instanceId, {
+        step: 'snapshot',
+        done: false,
+        version,
+        message: useSwitch ? `记录当前引用（${switchFrom}）…` : '开始升级：快照当前发行包…',
+      })
       const snapRoot = join(spec.dshHome, '.dsh-upgrade-snapshots', instanceId)
-      const snapshot = this.saveReleaseSnapshot(snapRoot, homeProfile)
+      const snapshot = useSwitch ? '' : this.saveReleaseSnapshot(snapRoot, homeProfile)
       let applied = false
       try {
-        // 2. reconcile 到守护发行包源。
+        // 2. 应用：切引用 or 对齐守护发行包源。
         this.writeUpgradeStatus(spec, instanceId, { step: 'snapshot', done: true, version, message: '快照完成（保留为回滚点）' })
-        this.writeUpgradeStatus(spec, instanceId, { step: 'align', done: false, version, message: '对齐守护发行包源…' })
-        this.applyReleaseFromTemplate(homeProfile, instanceId, spec, version)
+        this.writeUpgradeStatus(spec, instanceId, {
+          step: 'align',
+          done: false,
+          version,
+          message: useSwitch ? `切换到 runtime ${String(switchTo)}…` : '对齐守护发行包源…',
+        })
+        if (useSwitch) {
+          const switched = linkRuntimeInto(homeProfile, switchTo)
+          if (!switched.ok) throw new Error(switched.error ?? '切引用失败')
+        } else {
+          this.applyReleaseFromTemplate(homeProfile, instanceId, spec, version)
+        }
         if (ConsoleService.upgradeApplyError) throw ConsoleService.upgradeApplyError
         applied = true
-        this.log(`[dsh-console/daemon] 升级 ${instanceId}：发行包已对齐守护源（version=${version || '当前'}），滚动重启`, { scope: 'upgrade' })
-        this.writeUpgradeStatus(spec, instanceId, { step: 'align', done: true, version, message: '发行包已对齐守护源' })
+        this.log(
+          `[dsh-console/daemon] 升级 ${instanceId}：${useSwitch ? `runtime 引用 ${String(switchFrom)} → ${String(switchTo)}` : `发行包已对齐守护源（version=${version || '当前'}）`}，滚动重启`,
+          { scope: 'upgrade' },
+        )
+        this.writeUpgradeStatus(spec, instanceId, { step: 'align', done: true, version, message: useSwitch ? '引用已切换' : '发行包已对齐守护源' })
         // 3. 滚动重启 + 健康探测。
         this.writeUpgradeStatus(spec, instanceId, { step: 'restart', done: false, version, message: '滚动重启实例…' })
         await this.restartAfterUpgrade(instanceId, spec)
@@ -1103,18 +1370,31 @@ export class ConsoleService extends TypertRemoteService {
         this.writeUpgradeStatus(spec, instanceId, { step: 'health', done: true, version, message: '健康检查通过' })
         this.recordUpgradeResult(homeProfile, instanceId, true, version)
         this.writeUpgradeStatus(spec, instanceId, { step: 'done', done: true, ok: true, version, message: '升级完成' })
+        // 档案同步：引用版本落注册表（升级后档案与实际引用必须一致）。
+        if (useSwitch) {
+          spec.version = switchTo ?? undefined
+          this.runtimeInstances.set(instanceId, spec)
+          this.persistDeployedInstances()
+        }
+        this.adminEvent('upgrade', instanceId, true, 'daemon', `version=${version || '当前'}${useSwitch ? '（切引用）' : ''}`)
         this.emitUpgradeResult(instanceId, version, true)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        this.log(`[dsh-console/daemon] 升级 ${instanceId} 失败（${message}），自动回滚快照`, { scope: 'upgrade' })
-        // 4. 失败自动回滚：恢复最近快照；发行包已被替换过 → 回滚后重启（旧进程已停）。
+        this.log(`[dsh-console/daemon] 升级 ${instanceId} 失败（${message}），自动回滚`, { scope: 'upgrade' })
+        // 4. 失败自动回滚：切引用模式切回旧引用；重拷模式恢复最近快照。
         try {
           this.writeUpgradeStatus(spec, instanceId, { step: 'rollback', done: false, version, message: `升级失败（${message}），自动回滚…` })
-          this.restoreReleaseSnapshot(snapshot, homeProfile)
+          if (useSwitch) {
+            const back = linkRuntimeInto(homeProfile, switchFrom)
+            if (!back.ok) throw new Error(back.error ?? '回滚切引用失败')
+          } else {
+            this.restoreReleaseSnapshot(snapshot, homeProfile)
+          }
           if (applied) await this.restartAfterUpgrade(instanceId, spec)
           this.recordUpgradeResult(homeProfile, instanceId, false, version, message, true)
           this.writeUpgradeStatus(spec, instanceId, { step: 'rollback', done: true, version, message: '已回滚到升级前版本' })
           this.writeUpgradeStatus(spec, instanceId, { step: 'done', done: true, ok: false, error: message, rolledBack: true, version, message: '升级失败，已回滚' })
+          this.adminEvent('upgrade', instanceId, false, 'daemon', `已回滚：${message}`)
           this.emitUpgradeResult(instanceId, version, false, message, true)
         } catch (rollbackError) {
           this.log(`[dsh-console/daemon] 升级 ${instanceId} 回滚也失败: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`, { scope: 'upgrade' })
@@ -1418,6 +1698,27 @@ export class ConsoleService extends TypertRemoteService {
 
   /** daemon 角色：停止实例——守护拉起的直接 kill；否则在线实例自退兜底
    * （有 broker 经指令投递；无 broker 时跨进程指令不可达 → 本机端口定位 kill）。 */
+  /**
+   * 删除实例（执行面）：守卫 → 停进程 → 目录归档 → 档案墓碑 → 从运行时清单移除。
+   * 守卫先判（正式 web / 本机 daemon）——拒绝时**不改任何东西**并给出明确原因。
+   */
+  private daemonDeleteLocal(instanceId: string, spec: LaunchSpec): ControlOutcome {
+    const reg = loadRegistry()
+    const entry = findRegistryInstance(reg, instanceId)
+    if (entry === undefined) return { ok: false, error: `实例 ${instanceId} 不在注册表，无法删除` }
+    const denied = deleteGuard(entry)
+    if (denied !== null) return { ok: false, error: denied }
+    this.daemonStop(instanceId)
+    const archived = archiveInstance(entry)
+    if (!archived.ok) return { ok: false, error: archived.error }
+    this.runtimeInstances.delete(instanceId)
+    this.ops.delete(instanceId)
+    this.log(`[dsh-console/daemon] 已删除 ${instanceId}：目录归档到 ${archived.archivedAt ?? '(无目录)'}，档案转墓碑`, { scope: 'deploy' })
+    this.adminEvent('delete', instanceId, true, 'daemon', `归档 ${archived.archivedAt ?? '无目录'}`)
+    void spec
+    return { ok: true, detail: `已删除 ${instanceId}（归档 ${archived.archivedAt ?? '无目录'}，可用 restoreInstance 恢复）` }
+  }
+
   private daemonStop(instanceId: string): void {
     const child = this.children.get(instanceId)
     if (child !== undefined && child.exitCode === null) {
@@ -1549,13 +1850,24 @@ export class ConsoleService extends TypertRemoteService {
     payload: { version?: string },
     actor: string,
   ): ControlResult {
+    const result = this.controlInstanceCore(instanceId, command, payload, actor)
+    this.adminEvent(command, instanceId, result.ok, actor, result.ok ? '' : (result.error ?? ''))
+    return result
+  }
+
+  private controlInstanceCore(
+    instanceId: string,
+    command: 'stop' | 'start' | 'upgrade' | 'restart',
+    payload: { version?: string },
+    actor: string,
+  ): ControlResult {
     // 目标侧短路（本机即目标实例）：跨实例 RPC 到达这里时直接执行自退，
     // 不再 remoteControl 递归（否则管理端→实例→再调自己→死循环）。
-    // instance 角色用部署 env 的本机 agent id（无 relay 也设 DSH_RELAY_AGENT，
+    // instance 角色用部署 env 的本机实例 id（DSH_CHANNEL_ID，旧名兼容读），
     // 无守护场景直连本体也能识别自己）；console/daemon 用 relay.agent
     // （daemon 不短路自己——避免误杀守护，本机清单分支在前面处理）。
     const selfId = this.config.role === 'instance'
-      ? process.env.DSH_RELAY_AGENT
+      ? instanceIdFromEnv()
       : this.ctx.channel.relay?.agent
     if (instanceId === selfId) {
       const action = resolveControlAction({ id: 'rpc', type: command, payload, ts: Date.now() })
@@ -1619,6 +1931,125 @@ export class ConsoleService extends TypertRemoteService {
   }
 
   /**
+   * 删除实例（typert @Remote）：守卫 → 停进程 → 目录归档（可恢复）→ 档案转墓碑。
+   * 守卫（正式 web / 本机 daemon）在本地判定并**同步返回拒绝原因**——这类破坏性操作
+   * 不能只回"已下发"（见实例模型 note 的静默失败台账项）。
+   * @param instanceId - 目标实例 id。
+   */
+  @Remote
+  deleteInstance(instanceId: string): ControlResult {
+    const result = this.deleteInstanceCore(instanceId)
+    this.adminEvent('delete', instanceId, result.ok, 'system', result.ok ? '' : (result.error ?? ''))
+    return result
+  }
+
+  private deleteInstanceCore(instanceId: string): ControlResult {
+    const reg = loadRegistry()
+    const entry = findRegistryInstance(reg, instanceId)
+    if (entry === undefined) return { ok: false, error: `实例 ${instanceId} 不在注册表，无法删除` }
+    if (entry.status === 'deleted') {
+      // 重复删除显式拒绝：否则第二次会"再归档一次"并回 ok，掩盖真实状态。
+      return { ok: false, error: `实例 ${instanceId} 已是已删除状态（可用 restoreInstance 恢复）` }
+    }
+    const denied = deleteGuard(entry)
+    if (denied !== null) return { ok: false, error: denied }
+    if (this.config.role === 'daemon') {
+      const spec = this.instanceSpec(instanceId)
+      const outcome = this.daemonDeleteLocal(instanceId, spec ?? { dshHome: entry.home, profile: entry.profileDir })
+      return outcome.ok ? { ok: true, detail: outcome.detail } : { ok: false, error: outcome.error }
+    }
+    // 非 daemon 角色：派发给实例所属守护（host 从档案取；缺失则显式失败）。
+    const host = entry.host === hostId() ? `host-${this.config.hostId ?? entry.host}` : entry.host
+    return this.dispatchToHost(host, { type: 'delete', payload: { instanceId } }, 'system')
+  }
+
+  /**
+   * 已删除实例（墓碑）列表（typert @Remote）：UI「已删除」筛选读这里。
+   * 墓碑**永久保留在档案里**（审计），但默认不在实例列表显示。
+   */
+  @Remote
+  listDeletedInstances(): Array<{ id: string; host: string; deletedAt: string | null; archivePath?: string; version: string | null }> {
+    const reg = loadRegistry()
+    return listRegistryInstances(reg, { includeDeleted: true })
+      .filter((i) => i.status === 'deleted')
+      .map((i) => ({ id: i.id, host: i.host, deletedAt: i.deletedAt, archivePath: i.archivePath, version: i.version }))
+  }
+
+  /** 恢复实例（typert @Remote）：归档目录移回 + 档案转回 active（CLI/UI 同一入口）。 */
+  @Remote
+  restoreInstance(instanceId: string): ControlResult {
+    const result = this.restoreInstanceCore(instanceId)
+    this.adminEvent('restore', instanceId, result.ok, 'system', result.ok ? '' : (result.error ?? ''))
+    return result
+  }
+
+  private restoreInstanceCore(instanceId: string): ControlResult {
+    const r = restoreInstance(instanceId)
+    return r.ok ? { ok: true, detail: `已恢复 ${instanceId}（目录 ${r.home ?? ''}，待拉起）` } : { ok: false, error: r.error }
+  }
+
+  /**
+   * 实例模板清单（typert @Remote）：daemon 的 templateHome 下 profiles/* 目录名。
+   * 创建向导的模板下拉读这里——模板 = 创建时快照（见实例模型 note），UI 不硬编码模板名。
+   */
+  @Remote
+  listTemplates(): string[] {
+    return this.templateNames()
+  }
+
+  /**
+   * runtime 池视图（typert @Remote）：池内可用版本 + 引用它们的实例 + 内容自检。
+   * UI 的「导入版本」与创建向导的版本下拉都读这里（池是版本的唯一来源）。
+   */
+  @Remote
+  listRuntimePool(): RuntimePoolView {
+    const reg = loadRegistry()
+    const versions = listRuntimes().map((version) => {
+      const check = verifyRuntime(version)
+      return {
+        version,
+        inUseBy: instancesUsingVersion(reg, version),
+        ok: check.ok,
+        error: check.error,
+      }
+    })
+    return { poolPath: poolRoot(), versions }
+  }
+
+  /**
+   * 导入 runtime 版本到池（typert @Remote；UI「导入版本」入口）。
+   * 池不可变：同版本重复导入被拒绝；来源版本不符被拒绝。
+   * @param version - 目标版本号（= dsh 版本，如 0.1.2-rc.1）。
+   * @param source - 来源目录（缺省 = 本机独立 CLI `~/dsh-alpha5-cli`）。
+   */
+  @Remote
+  importRuntimeVersion(version: string, source?: string): ControlResult {
+    const result = this.importRuntimeVersionCore(version, source)
+    this.adminEvent('import-runtime', version, result.ok, 'system', result.ok ? '' : (result.error ?? ''))
+    return result
+  }
+
+  private importRuntimeVersionCore(version: string, source?: string): ControlResult {
+    const r = importRuntime({ version, source: source === undefined || source === '' ? undefined : source })
+    this.log(`[dsh-console] 导入 runtime ${version}：${r.ok ? `完成（${r.dir ?? ''}）` : `失败（${r.error ?? ''}）`}`, { scope: 'upgrade' })
+    return r.ok ? { ok: true, detail: `已导入 runtime ${version}` } : { ok: false, error: r.error ?? '导入失败' }
+  }
+
+  /** 删除池内 runtime 版本（typert @Remote）：被实例引用时拒绝。 */
+  @Remote
+  removeRuntimeVersion(version: string): ControlResult {
+    const result = this.removeRuntimeVersionCore(version)
+    this.adminEvent('remove-runtime', version, result.ok, 'system', result.ok ? '' : (result.error ?? ''))
+    return result
+  }
+
+  private removeRuntimeVersionCore(version: string): ControlResult {
+    const r = removeRuntime(version)
+    this.log(`[dsh-console] 删除 runtime ${version}：${r.ok ? '完成' : `拒绝（${r.error ?? ''}）`}`, { scope: 'upgrade' })
+    return r.ok ? { ok: true, detail: `已删除 runtime ${version}` } : { ok: false, error: r.error ?? '删除失败' }
+  }
+
+  /**
    * 统一升级批次（typert @Remote）：多选实例 → 逐实例路由到其守护宿主
    * （launch.host / 档案 host），下发 'upgrade' 指令（payload 带 instanceId +
    * 目标版本）。守护执行事务（快照→对齐发行包源→滚动重启→失败回滚，见
@@ -1629,6 +2060,14 @@ export class ConsoleService extends TypertRemoteService {
    */
   @Remote
   upgradeInstances(instanceIds: string[], version: string): UpgradeBatchResult {
+    const batch = this.upgradeInstancesCore(instanceIds, version)
+    // 批次结果逐项判定：全成功才算成功（`results` 里每项自带 ok）
+    const allOk = batch.results.every((r) => r.ok)
+    this.adminEvent('upgrade-batch', instanceIds.join(','), allOk, 'system', `version=${version}；${batch.results.filter((r) => !r.ok).length} 项失败`)
+    return batch
+  }
+
+  private upgradeInstancesCore(instanceIds: string[], version: string): UpgradeBatchResult {
     const selfId = this.ctx.channel.relay?.agent
     const results: UpgradeItemResult[] = instanceIds.map((instanceId) => {
       if (isHostAgent(instanceId)) {
@@ -1685,9 +2124,13 @@ export class ConsoleService extends TypertRemoteService {
     const addr = this.ctx.channel.get(hostId)?.addr
     if (addr === undefined || addr === '') {
       const loopback = this.ctx.channel.sendControl(hostId, command)
-      return loopback.ok
-        ? { ok: true, ...(loopback.commandId !== undefined ? { commandId: loopback.commandId } : {}) }
-        : { ok: false, error: loopback.error }
+      if (!loopback.ok) return { ok: false, error: loopback.error }
+      // 同进程回环：接收者同步返回的结论要回传——否则守护明确拒绝（如"版本不在池"）时
+      // 上层仍拿到 ok:true（"已下发"），调用方与 UI 都以为成功（台账第 1 条）。
+      if (loopback.outcome !== undefined && !loopback.outcome.ok) {
+        return { ok: false, error: loopback.outcome.error ?? '目标拒绝执行' }
+      }
+      return { ok: true, ...(loopback.commandId !== undefined ? { commandId: loopback.commandId } : {}) }
     }
     if (instanceId === undefined) return { ok: false, error: `${command.type} 缺少 instanceId` }
     if (command.type !== 'stop' && command.type !== 'start' && command.type !== 'restart') {
@@ -1795,6 +2238,12 @@ export class ConsoleService extends TypertRemoteService {
    */
   @Remote
   deployInstance(request: DeployInstanceRequest): ControlResult {
+    const result = this.deployInstanceCore(request)
+    this.adminEvent('deploy', request.instanceId, result.ok, 'system', result.ok ? '' : (result.error ?? ''))
+    return result
+  }
+
+  private deployInstanceCore(request: DeployInstanceRequest): ControlResult {
     const { host, instanceId, name, version, addr } = request
     if (!host || !instanceId || !version) return { ok: false, error: '部署请求缺 host/instanceId/version' }
     // 先派发再登记：登记 = 已受理（派发失败时不留下"有档案无人执行"的假成功）。
@@ -1890,7 +2339,7 @@ export class ConsoleService extends TypertRemoteService {
    * @param opts - tail/maxBytes（默认 tail=200, maxBytes=512KB）。
    */
   @Remote
-  readLog(target: LogTarget, opts: LogReadOptions): LogReadResult {
+  async readLog(target: LogTarget, opts: LogReadOptions): Promise<LogReadResult> {
     const tail = opts.tail ?? 200
     const maxBytes = opts.maxBytes ?? 512 * 1024
     if (this.config.role === 'daemon') {
@@ -1910,17 +2359,24 @@ export class ConsoleService extends TypertRemoteService {
       // 实例：经 callRemote 转发到守护
       const spec = this.config.launch?.[target.instanceId]
       if (spec === undefined || spec.host === undefined || spec.host === '') {
-        return { records: [], total: 0, truncated: false }
+        return { records: [], total: 0, truncated: false, error: `实例 ${target.instanceId} 无守护宿主信息（launch 配置缺失），无法读取其日志` }
       }
-      // 实例：经 callRemote 转发到守护（v1 同步签名无法 await——fire-and-forget；
-      // 结果由上方 fallback 空返回，转发仅为预触发）。必须 catch：守护不可达超时
-      // 的 rejection 不捕获会成 unhandledRejection → 崩整个进程。
-      this.ctx.channel.callRemote<LogReadResult>(spec.host, {
-        namespace: 'console', method: 'readLog', args: { target, opts },
-      }, 5_000).catch((e: unknown) => {
-        this.log(`[dsh-console] 转发读实例日志失败（${spec.host}/${target.instanceId}）: ${e instanceof Error ? e.message : String(e)}`, { scope: 'console' })
-      })
-      return { records: [], total: 0, truncated: false }
+      // 实例：经 callRemote 转发到守护并**等待结果**（此前是 fire-and-forget + 空返回，
+      // UI 只能看到"没有日志"——静默失败；见实例模型 note 台账项）。
+      try {
+        const forwarded = await this.ctx.channel.callRemote<LogReadResult>(spec.host, {
+          namespace: 'console', method: 'readLog', args: { target, opts },
+        }, 5_000)
+        // callRemote 返回 RemoteResult 包装——失败要变成"读失败"而不是"没有日志"
+        if (!forwarded.ok) {
+          return { records: [], total: 0, truncated: false, error: `守护 ${spec.host} 读取失败：${forwarded.error.message}` }
+        }
+        return forwarded.value ?? { records: [], total: 0, truncated: false, error: `守护 ${spec.host} 返回空结果` }
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e)
+        this.log(`[dsh-console] 转发读实例日志失败（${spec.host}/${target.instanceId}）: ${reason}`, { scope: 'console' })
+        return { records: [], total: 0, truncated: false, error: `转发到守护 ${spec.host} 失败：${reason}` }
+      }
     }
     return { records: [], total: 0, truncated: false }
   }
@@ -2031,12 +2487,14 @@ export class ConsoleService extends TypertRemoteService {
           : role
         const scope = typeof raw.scope === 'string' ? raw.scope : role
         const instanceId = typeof raw.instanceId === 'string' ? raw.instanceId : undefined
+        const category = typeof raw.category === 'string' ? raw.category : undefined
         return {
           ts: raw.ts,
           role: recordRole,
           level,
           scope,
           ...(instanceId !== undefined ? { instanceId } : {}),
+          ...(category !== undefined ? { category } : {}),
           msg: raw.msg,
         }
       }
@@ -2134,6 +2592,13 @@ function deriveLogLevel(msg: string): LogLevel {
  * `${DSH_HOME}/console.log`（fallback `~/.dsh/console.log`）。instance 角色
  * 不落盘（实例无管理面，stdin/out 已被守护 spawn 收集到 `~/.dsh-daemon/logs/<id>.log`）。
  */
+/** 单文件日志上限（超出即滚动到 `<file>.1`；可配）。 */
+export function logMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.DSH_LOG_MAX_BYTES
+  const n = raw === undefined || raw === '' ? 100 * 1024 * 1024 : Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 100 * 1024 * 1024
+}
+
 export const Logger = {
   resolvePath(role: 'console' | 'daemon' | 'instance'): string | null {
     if (role === 'instance') return null
@@ -2141,23 +2606,41 @@ export const Logger = {
     const isDaemon = role === 'daemon'
     return join(roleDataRoot(isDaemon ? 'daemon' : 'console'), isDaemon ? 'daemon.log' : 'console.log')
   },
+  /**
+   * 需要时滚动：文件超过上限（默认 100MB）就把它挪成 `<file>.1`（覆盖旧 .1），
+   * 新记录写入空文件。不做滚动的话实例长时间运行会把盘写满。
+   */
+  rotateIfNeeded(path: string): boolean {
+    try {
+      if (!existsSync(path)) return false
+      if (statSync(path).size <= logMaxBytes()) return false
+      const prev = `${path}.1`
+      if (existsSync(prev)) rmSync(prev, { force: true })
+      renameSync(path, prev)
+      return true
+    } catch {
+      return false // 滚动失败不能挂主流程
+    }
+  },
   append(role: 'console' | 'daemon' | 'instance', line: string): void {
     const path = Logger.resolvePath(role)
     if (path === null) return
     try {
       mkdirSync(join(path, '..'), { recursive: true })
+      Logger.rotateIfNeeded(path)
       const ts = new Date().toISOString()
       appendFileSync(path, `[${ts}] ${line}\n`, 'utf8')
     } catch {
       // 不能让日志挂掉主流程。
     }
   },
-  /** 写一条结构化 JSONL 记录（ts/role/level/scope/msg）。与 append 共用路径。 */
-  record(role: 'console' | 'daemon' | 'instance', entry: { level: LogLevel; scope: string; msg: string; instanceId?: string }): void {
+  /** 写一条结构化 JSONL 记录（ts/role/level/scope/msg/category?）。与 append 共用路径。 */
+  record(role: 'console' | 'daemon' | 'instance', entry: { level: LogLevel; scope: string; msg: string; instanceId?: string; category?: string }): void {
     const path = Logger.resolvePath(role)
     if (path === null) return
     try {
       mkdirSync(join(path, '..'), { recursive: true })
+      Logger.rotateIfNeeded(path)
       const ts = new Date().toISOString()
       const record = JSON.stringify({
         ts,
@@ -2165,6 +2648,7 @@ export const Logger = {
         level: entry.level,
         scope: entry.scope,
         ...(entry.instanceId !== undefined ? { instanceId: entry.instanceId } : {}),
+        ...(entry.category !== undefined ? { category: entry.category } : {}),
         msg: entry.msg,
       })
       appendFileSync(path, `${record}\n`, 'utf8')

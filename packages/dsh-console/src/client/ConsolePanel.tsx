@@ -3,21 +3,22 @@
  *
  * 照抄官方 settings 面板结构（overlay/mask/panel + nav rail + content 换页）。
  * 数据面经 ConsoleHost（typert ctx.remote.console.listInstances/controlInstance +
- * channel.brokerStatus）。v1 页签：总览 / 实例 / 主机守护 / 部署 / 升级。
+ * 版本池）。页签：总览 / 实例 / 主机守护 / 部署 / 升级。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConsoleHost } from './types'
-import type { ConsoleInstanceViewItem, HostRecord, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget, LogLevel, LogRecord } from 'dsh-console/types'
+import type { ConsoleInstanceViewItem, HostRecord, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget, LogLevel, LogRecord, RuntimePoolView } from 'dsh-console/types'
 import { UpgradeDialog } from './UpgradeDialog'
 import * as logView from './logView'
 
 // ---- 页签定义 ----
-type TabId = 'overview' | 'instances' | 'hosts' | 'logs'
+type TabId = 'overview' | 'instances' | 'hosts' | 'versions' | 'logs'
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: 'overview', label: '总览', icon: '▤' },
   { id: 'instances', label: '实例', icon: '☰' },
   { id: 'hosts', label: '主机', icon: '⛁' },
+  { id: 'versions', label: '版本', icon: '◈' },
   { id: 'logs', label: '日志', icon: '⎙' },
 ]
 
@@ -104,6 +105,14 @@ function InstanceRow(props: {
             <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 2000, minWidth: 160, background: 'var(--dsw-alias-bg-layer-2)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, boxShadow: 'var(--dsw-shadow-lv2)', padding: 4 }}>
               <button type="button" className="dsh-console-menu-item" onClick={() => { setMenuOpen(false); onMore!('upgrade', item.id) }}>
                 升级到 0.1.2-rc.1
+              </button>
+              <button
+                type="button"
+                className="dsh-console-menu-item"
+                onClick={() => { setMenuOpen(false); onMore!('delete', item.id) }}
+                title="停止进程并把目录归档（可从命令行恢复）；正式 web 与本机 daemon 会被拒绝"
+              >
+                删除实例…
               </button>
             </div>
           </>
@@ -213,6 +222,18 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [newInstId, setNewInstId] = useState('')
   const [newInstPort, setNewInstPort] = useState('')
   const [newInstHost, setNewInstHost] = useState('host1')
+  /** 模板（创建时快照；清单来自宿主 listTemplates，不硬编码模板名）。 */
+  const [newInstTemplate, setNewInstTemplate] = useState('dev')
+  /** 创建时选的内核版本（必选；默认池内最新，见 runtime 池模型）。 */
+  const [newInstVersion, setNewInstVersion] = useState('')
+  /** runtime 池视图（版本页签 + 创建向导共用）。 */
+  const [pool, setPool] = useState<RuntimePoolView | null>(null)
+  const [templates, setTemplates] = useState<string[]>([])
+  const [poolInput, setPoolInput] = useState('')
+  /** 已删除实例筛选（墓碑默认隐藏；恢复走 CLI，UI 只读展示）。 */
+  const [showDeleted, setShowDeleted] = useState(false)
+  const [deleted, setDeleted] = useState<Array<{ id: string; host: string; deletedAt: string | null; archivePath?: string; version: string | null }>>([])
+  const [poolBusy, setPoolBusy] = useState(false)
   const [newInstResult, setNewInstResult] = useState<string | null>(null)
   const [newInstBusy, setNewInstBusy] = useState(false)
   // 日志页签状态：来源 + 级别过滤 + 模糊搜索（行数/只看错误/跟随已移除）
@@ -224,16 +245,84 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [logFiles, setLogFiles] = useState<LogFileList>({ daemon: null, instances: [] })
   const [logMinLevel, setLogMinLevel] = useState<'all' | 'error' | 'warn' | 'info'>('all')
   const [logQuery, setLogQuery] = useState('')
+  /** 只看管理事件（category='admin'：状态变更与失败异常；见实例模型 note）。 */
+  const [logAdminOnly, setLogAdminOnly] = useState(false)
 
+
+  /** 删除实例（停进程 + 目录归档，可恢复）：破坏性操作，先二次确认。 */
+  const runDelete = async (id: string): Promise<void> => {
+    if (!window.confirm(`删除实例 ${id}？\n\n会停止进程并把目录归档（可从命令行恢复；正式 web 与本机 daemon 会被拒绝）。`)) return
+    try {
+      const r = await host.deleteInstance(id)
+      setToast(r.ok ? { kind: 'ok', msg: r.detail ?? `已删除 ${id}` } : { kind: 'error', msg: `删除失败：${r.error ?? 'unknown'}` })
+      await refreshInstances()
+    } catch (e) {
+      setToast({ kind: 'error', msg: `删除调用失败：${e instanceof Error ? e.message : String(e)}` })
+    }
+  }
+
+  /** 读已删除实例（墓碑）：默认不显示，开启筛选时拉取。 */
+  const loadDeleted = useCallback(async (): Promise<void> => {
+    try {
+      setDeleted(await host.listDeletedInstances())
+    } catch {
+      setDeleted([])
+    }
+  }, [host])
+
+  /** 读 runtime 池 + 模板清单（best-effort：老宿主无此面时降级为空）。 */
+  const loadPool = useCallback(async (): Promise<void> => {
+    try {
+      const p = await host.listRuntimePool()
+      setPool(p)
+      setNewInstVersion((cur) => (cur !== '' ? cur : (p.versions.length > 0 ? p.versions[p.versions.length - 1].version : '')))
+    } catch {
+      setPool(null)
+    }
+    try {
+      const ts = await host.listTemplates()
+      if (ts.length > 0) setTemplates(ts)
+    } catch { /* 模板面不可用：保留默认值 */ }
+  }, [host])
+
+  const importVersion = async (): Promise<void> => {
+    const v = poolInput.trim()
+    if (v === '') return
+    setPoolBusy(true)
+    try {
+      const r = await host.importRuntimeVersion(v)
+      setToast(r.ok ? { kind: 'ok', msg: `已导入 runtime ${v}` } : { kind: 'error', msg: `导入失败：${r.error ?? 'unknown'}` })
+      if (r.ok) setPoolInput('')
+      await loadPool()
+    } catch (e) {
+      setToast({ kind: 'error', msg: `导入调用失败：${e instanceof Error ? e.message : String(e)}` })
+    } finally {
+      setPoolBusy(false)
+    }
+  }
+
+  const removeVersion = async (v: string): Promise<void> => {
+    setPoolBusy(true)
+    try {
+      const r = await host.removeRuntimeVersion(v)
+      setToast(r.ok ? { kind: 'ok', msg: `已删除 runtime ${v}` } : { kind: 'error', msg: `删除失败：${r.error ?? 'unknown'}` })
+      await loadPool()
+    } catch (e) {
+      setToast({ kind: 'error', msg: `删除调用失败：${e instanceof Error ? e.message : String(e)}` })
+    } finally {
+      setPoolBusy(false)
+    }
+  }
 
   const deployNewInstance = async (): Promise<void> => {
     const id = newInstId.trim()
     if (!id || !newInstPort) { setNewInstResult('请填写实例名称与端口'); return }
+    if (newInstVersion === '') { setNewInstResult('池内没有可用版本：先到「版本」页签导入一个 runtime 版本'); return }
     setNewInstBusy(true)
     try {
       const r = await host.deployInstance({
-        host: newInstHost, instanceId: id, name: id, version: '0.1.2-rc.1', profile: 'web',
-        dshHome: `/home/long2015/.dsh-${id}`, port: Number(newInstPort), token: Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2),
+        host: newInstHost, instanceId: id, name: id, version: newInstVersion, profile: newInstTemplate,
+        dshHome: `/home/long2015/.dsh-home/instance-${id}`, port: Number(newInstPort), token: Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2),
         addr: `http://127.0.0.1:${newInstPort}`, env: { DSH_RELAY_AGENT: id, DSH_CONSOLE_ADDR: 'http://127.0.0.1:3082' },
       })
       setNewInstResult(r.ok ? `已下发部署 ${id}（daemon 将拉起）` : `部署失败：${r.error ?? 'unknown'}`)
@@ -276,8 +365,9 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     } catch {
       setLoaded(true) // 远端暂不可用：保留旧数据，下次轮询再试
     }
-    void host.brokerStatus().catch(() => {})
   }, [host])
+
+  useEffect(() => { void loadPool() }, [loadPool])
 
   useEffect(() => {
     void refreshInstances()
@@ -309,7 +399,8 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
       setLogRecords(r.records ?? [])
       setLogTruncated(r.truncated)
       setLogTotal(r.total)
-      setLogError(null)
+      // 跨实例读取失败会带 error（不是"没有日志"）——原样显示原因，别静默成空列表
+      setLogError(r.error ?? null)
       // 默认显示最新：下一帧滚到底（DOM 尚未更新）。
       requestAnimationFrame(() => {
         if (logBoxRef.current) logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight
@@ -340,6 +431,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     minLevel: logMinLevel,
     query: logQuery,
     errorsOnly: false,
+    ...(logAdminOnly ? { categoryOnly: 'admin' } : {}),
   })
 
   const close = useCallback(() => onClose(), [onClose])
@@ -389,6 +481,14 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               <div className="grow" />
               <button type="button" className="dsh-console-btn" onClick={() => { void refreshInstances() }} title="立即刷新（每 10s 自动）">⟳ 刷新</button>
               <button type="button" className="dsh-console-btn" onClick={() => setShowNewInst((v) => !v)}>{showNewInst ? '收起' : '新建实例'}</button>
+              <button
+                type="button"
+                className="dsh-console-btn"
+                title="已删除实例默认隐藏（档案永久保留作审计）；恢复用命令行 restoreInstance"
+                onClick={() => { const next = !showDeleted; setShowDeleted(next); if (next) void loadDeleted() }}
+              >
+                {showDeleted ? '隐藏已删除' : `已删除 ${deleted.length > 0 ? deleted.length : ''}`.trim()}
+              </button>
             </div>
             {showNewInst && (
               <div className="dsh-console-toolbar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
@@ -402,11 +502,40 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div className="dsh-console-field" style={{ marginBottom: 0 }}><label>模板</label>
+                    <select className="dsh-console-select" value={newInstTemplate} onChange={(e) => setNewInstTemplate(e.target.value)}>
+                      {(templates.length > 0 ? templates : [newInstTemplate]).map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div className="dsh-console-field" style={{ marginBottom: 0 }}><label>内核版本</label>
+                    <select className="dsh-console-select" value={newInstVersion} onChange={(e) => setNewInstVersion(e.target.value)}>
+                      {newInstVersion === '' && <option value="">（池内无版本）</option>}
+                      {(pool?.versions ?? []).map((v) => <option key={v.version} value={v.version}>{v.version}</option>)}
+                    </select>
+                  </div>
                   <button type="button" className="dsh-console-btn primary" onClick={() => { void deployNewInstance() }} disabled={newInstBusy}>{newInstBusy ? '部署中…' : '部署实例'}</button>
                   {newInstResult && <span style={{ fontSize: 12, color: newInstResult.startsWith('已') || newInstResult.startsWith('下发') ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)' }}>{newInstResult}</span>}
                 </div>
               </div>
-            )}            {loaded && sortedInstances.map((i) => (
+            )}
+            {showDeleted && (
+              <>
+                <div className="dsh-console-sect"><h3>已删除（{deleted.length}）</h3></div>
+                {deleted.length === 0 && <div className="dsh-console-toolbar"><span className="hint">没有已删除实例</span></div>}
+                {deleted.map((d) => (
+                  <div className="dsh-console-row" key={`${d.host}/${d.id}`}>
+                    <span className="dot off" />
+                    <div className="grow">
+                      <div className="name">{d.id} <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>· 已删除 {d.deletedAt !== null ? new Date(d.deletedAt).toLocaleString('zh-CN', { hour12: false }) : ''}</span></div>
+                      <div style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>
+                        {d.archivePath !== undefined ? `归档：${d.archivePath}（可用 restoreInstance 恢复）` : '无归档'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+            {loaded && sortedInstances.map((i) => (
               <InstanceRow
                 key={i.id}
                 item={i}
@@ -414,7 +543,11 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 machineName={machineNameOf(i.host)}
                 opLabel={opPending?.id === i.id ? (opPending.op === 'start' ? '启动中…' : opPending.op === 'stop' ? '停止中…' : '重启中…') : undefined}
                 onControl={(id, op) => { void runControl(id, op) }}
-                onMore={i.self ? undefined : (_action, id) => { const inst = sortedInstances.find((x) => x.id === id); if (inst) setUpgradeTarget(inst) }}
+                onMore={i.self ? undefined : (action, id) => {
+                  if (action === 'delete') { void runDelete(id); return }
+                  const inst = sortedInstances.find((x) => x.id === id)
+                  if (inst) setUpgradeTarget(inst)
+                }}
               />
             ))}
           </>
@@ -494,6 +627,51 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             )}
           </>
         )
+      case 'versions':
+        return (
+          <>
+            <div className="dsh-console-toolbar">
+              <span className="hint">runtime 池：{pool?.poolPath ?? '（不可用）'} · 版本 = 内核版本，池只增不改</span>
+              <button type="button" className="dsh-console-btn" onClick={() => { void loadPool() }}>⟳ 刷新</button>
+            </div>
+            <div className="dsh-console-sect"><h3>导入版本</h3></div>
+            <div className="dsh-console-row">
+              <div className="grow">
+                <div className="dsh-console-field" style={{ marginBottom: 0 }}>
+                  <label>版本号（dsh 版本，如 0.1.2-rc.1）</label>
+                  <input className="dsh-console-input" placeholder="0.1.2-rc.1" value={poolInput} onChange={(e) => setPoolInput(e.target.value)} />
+                </div>
+              </div>
+              <button type="button" className="dsh-console-btn primary" disabled={poolBusy || poolInput.trim() === ''} onClick={() => { void importVersion() }}>
+                {poolBusy ? '处理中…' : '导入版本'}
+              </button>
+            </div>
+            <div className="dsh-console-sect"><h3>池内版本（{(pool?.versions ?? []).length}）</h3></div>
+            {(pool?.versions ?? []).length === 0 && (
+              <div className="dsh-console-toolbar"><span className="hint">池为空：先导入一个版本，创建实例时才能选内核版本</span></div>
+            )}
+            {(pool?.versions ?? []).map((v) => (
+              <div className="dsh-console-row" key={v.version}>
+                <span className={`dot ${v.ok ? 'on' : 'off'}`} />
+                <div className="grow">
+                  <div className="name">{v.version}{v.ok ? '' : ' · 自检失败'}</div>
+                  <div style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>
+                    {v.inUseBy.length > 0 ? `被引用：${v.inUseBy.join(', ')}` : '无实例引用'}{v.error !== undefined ? ` · ${v.error}` : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="dsh-console-btn"
+                  disabled={v.inUseBy.length > 0 || poolBusy}
+                  title={v.inUseBy.length > 0 ? '被实例引用，禁止删除' : '删除该版本'}
+                  onClick={() => { void removeVersion(v.version) }}
+                >
+                  删除
+                </button>
+              </div>
+            ))}
+          </>
+        )
       case 'logs':
         // 结构化日志查看器：来源/级别 = 标签在上、值在下；值行含 模糊搜索 + 刷新；
         // （行数/只看错误/跟随/复制/滚到底 已移除）。可见行在组件顶层派生，此处只渲染。
@@ -544,6 +722,10 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                   onChange={(e) => setLogQuery(e.target.value)}
                   style={{ flex: 1, minWidth: 140 }}
                 />
+                <label className="hint" style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }} title="只显示状态变更与失败异常（category=admin）">
+                  <input type="checkbox" checked={logAdminOnly} onChange={(e) => setLogAdminOnly(e.target.checked)} />
+                  只看管理事件
+                </label>
                 <button type="button" className="dsh-console-btn" onClick={() => { void fetchLog() }} title="重新读取最新日志">⟳ 刷新</button>
               </div>
             </div>
@@ -615,7 +797,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
               </button>
             ))}
           </div>
-          <div className="dsh-console-nav-foot">管理端 console<br />v0.1.2-rc.1 · broker OK</div>
+          <div className="dsh-console-nav-foot">管理端 console<br />{instances.length} 实例 · {(pool?.versions ?? []).length} 个 runtime</div>
         </nav>
         <div className="dsh-console-content">
           <div className="dsh-console-header">

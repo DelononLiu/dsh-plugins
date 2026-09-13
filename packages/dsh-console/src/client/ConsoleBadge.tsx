@@ -1,7 +1,7 @@
 /**
  * Console 徽标按钮（会话头部可见 UI）——点击弹出实例控制面板。
  * 数据/操作经 typert 远程化（host.listInstances / host.controlInstance /
- * host.brokerStatus——broker 状态由 channel 暴露，替换手写 HTTP 端点）。
+ * host.listRuntimePool / host.deleteInstance …，统一由 console @Remote 面提供）。
  */
 
 import { useState } from 'react'

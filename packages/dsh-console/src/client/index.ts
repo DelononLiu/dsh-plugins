@@ -2,10 +2,9 @@
  * dsh-console：管理组件 client 半区（原 dsh-console-ui 并入，UI 与实现同包）。
  *
  * v1 可见 UI：在左侧栏底部（sidebar.footer.action，设置上方）注册
- * 「Console」徽标按钮入口。数据面（实例列表/控制指令/broker 状态）经
- * **typert 远程化**消费（`ctx.remote.console.listInstances()` /
- * `controlInstance()` + `ctx.remote.channel.brokerStatus()`——broker 是
- * channel 的传输后端，状态由 channel 暴露）。
+ * 「Console」徽标按钮入口。数据面（实例列表/控制指令/日志/版本池）经
+ * **typert 远程化**消费（`ctx.remote.console.*`：listInstances / controlInstance /
+ * deployInstance / listRuntimePool / deleteInstance …）。
  *
  * 控制台入口只对管理端（console 角色）显示：/api/console/* 端点只由
  * console 角色挂载，client 启动时探测该端点，200 才注册入口——
@@ -14,8 +13,7 @@
 
 import { createElement } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, LogFileList, LogReadOptions, LogReadResult, UpgradeBatchResult, UpgradeStatus } from 'dsh-console/types'
-import type { BrokerStatusView } from 'dsh-channel/types'
+import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, LogFileList, LogReadOptions, LogReadResult, RuntimePoolView, UpgradeBatchResult, UpgradeStatus } from 'dsh-console/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
 import type {} from 'dsh-console/remote'
@@ -47,7 +45,7 @@ export const inject = ['slots', 'remote']
 
 /**
  * Client 插件体：管理端注册侧栏底部「Console」入口（非管理端不注册）。
- * 数据面经 ctx.remote（console @Remote + channel brokerStatus）。
+ * 数据面经 ctx.remote（console @Remote 面）。
  * @param ctx - client 根上下文。
  */
 export function apply(ctx: ClientContext): void {
@@ -65,9 +63,7 @@ export function apply(ctx: ClientContext): void {
           // ctx.inject 进入注入 fiber 抓取 namespace 引用（服务注册在 ownerCtx，
           // 引用在 fiber 结束后仍有效，可缓存）。
           // 注意：只 $mount consoleRemote——channel remote 已由 dsh-quick-nav 挂载
-          // （channel.list 等），重复 $mount(channelRemote) 会报
-          // "channel/brokerStatus already mounted"。brokerStatus 直接访问已挂载的
-          // ctx.remote.channel（同实例已挂 channel remote 时可用；缺席时降级）。
+          // （channel.list 等），重复 $mount 会报 "already mounted"。
           const consoleReady = ctx.remote.$mount(consoleRemote)
           const host: ConsoleHost = {
             listInstances: async () => {
@@ -84,14 +80,6 @@ export function apply(ctx: ClientContext): void {
               await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
               const result = await ns!.controlInstance(instanceId, command, {})
               return result.ok ? { ok: true } : { ok: false, error: result.error.message }
-            },
-            brokerStatus: async () => {
-              // broker 是 channel 的传输后端——状态由 channel 暴露。channel remote
-              // 已由 quick-nav 挂载（不重复 $mount）；此处直接注入取 namespace。
-              let ns: { brokerStatus(): Promise<{ ok: boolean; value: BrokerStatusView; error: { message: string } }> }
-              await ctx.inject(['remote.channel'], (injected) => { ns = (injected as unknown as { remote: { channel: typeof ns } }).remote.channel })
-              const result = await ns!.brokerStatus()
-              return result.ok ? result.value : { connected: false, reason: result.error.message, agents: [], queueCount: 0 }
             },
             bootstrapHost: async (instanceId, hostAddr, version, alias) => {
               await consoleReady
@@ -131,6 +119,63 @@ export function apply(ctx: ClientContext): void {
               await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
               const result = await ns!.readLog(target, opts)
               if (!result.ok) throw new Error(`console.readLog failed: ${result.error.code}: ${result.error.message}`)
+              return result.value
+            },
+            deleteInstance: async (instanceId) => {
+              await consoleReady
+              let ns: { deleteInstance(id: string): Promise<{ ok: boolean; value: ControlResult; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.deleteInstance(instanceId)
+              if (!result.ok) throw new Error(`console.deleteInstance failed: ${result.error.message}`)
+              return result.value
+            },
+            listDeletedInstances: async () => {
+              await consoleReady
+              let ns: { listDeletedInstances(): Promise<{ ok: boolean; value: Array<{ id: string; host: string; deletedAt: string | null; archivePath?: string; version: string | null }>; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.listDeletedInstances()
+              if (!result.ok) throw new Error(`console.listDeletedInstances failed: ${result.error.message}`)
+              return result.value
+            },
+            restoreInstance: async (instanceId) => {
+              await consoleReady
+              let ns: { restoreInstance(id: string): Promise<{ ok: boolean; value: ControlResult; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.restoreInstance(instanceId)
+              if (!result.ok) throw new Error(`console.restoreInstance failed: ${result.error.message}`)
+              return result.value
+            },
+            listRuntimePool: async () => {
+              // runtime 池（版本 = 内核版本）：UI「版本」页签与创建向导的版本下拉都读它。
+              await consoleReady
+              let ns: { listRuntimePool(): Promise<{ ok: boolean; value: RuntimePoolView; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.listRuntimePool()
+              if (!result.ok) throw new Error(`console.listRuntimePool failed: ${result.error.message}`)
+              return result.value
+            },
+            importRuntimeVersion: async (version, source) => {
+              await consoleReady
+              let ns: { importRuntimeVersion(v: string, s?: string): Promise<{ ok: boolean; value: ControlResult; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.importRuntimeVersion(version, source)
+              if (!result.ok) throw new Error(`console.importRuntimeVersion failed: ${result.error.message}`)
+              return result.value
+            },
+            removeRuntimeVersion: async (version) => {
+              await consoleReady
+              let ns: { removeRuntimeVersion(v: string): Promise<{ ok: boolean; value: ControlResult; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.removeRuntimeVersion(version)
+              if (!result.ok) throw new Error(`console.removeRuntimeVersion failed: ${result.error.message}`)
+              return result.value
+            },
+            listTemplates: async () => {
+              await consoleReady
+              let ns: { listTemplates(): Promise<{ ok: boolean; value: string[]; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.listTemplates()
+              if (!result.ok) throw new Error(`console.listTemplates failed: ${result.error.message}`)
               return result.value
             },
             getUpgradeStatus: async (instanceId) => {

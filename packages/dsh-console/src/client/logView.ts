@@ -57,13 +57,18 @@ export function filterRecords(
     minLevel: LogLevel | 'all' | null;
     query: string;
     errorsOnly: boolean;
+    /** 只保留某类别记录（如 'admin' = 管理事件）；缺省 = 不过滤。 */
+    categoryOnly?: string;
   }
 ): LogRecord[] {
-  const { minLevel, query, errorsOnly } = opts;
+  const { minLevel, query, errorsOnly, categoryOnly } = opts;
   const effectiveMinLevel = errorsOnly ? 'error' : minLevel;
   const trimmedQuery = query.trim();
 
   return records.filter((record) => {
+    // 类别筛选（管理事件等）
+    if (categoryOnly !== undefined && record.category !== categoryOnly) return false;
+
     // Level filter
     if (!passesLevelFilter(record, effectiveMinLevel)) return false;
 

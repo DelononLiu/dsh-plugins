@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
+import { instanceIdFromEnv } from '../src/index.ts'
 import { Context } from '@deepseek-ai/cordis'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
@@ -648,5 +649,41 @@ describe('多机：worker 回执真实结果（handler 结果 → 台账）', ()
     }, 'tok-1')
     expect(hub.get('host1')?.version).toBe('0.1.2-rc.1')
     expect(hub.get('web3')?.version).toBe('0.1.2-rc.1')
+  })
+})
+
+describe('实例 id 的 env 载体：新名 DSH_CHANNEL_ID 优先、旧名 DSH_RELAY_AGENT 兼容读', () => {
+  it('新名优先；只有旧名时回落；都为空 → undefined', () => {
+    expect(instanceIdFromEnv({ DSH_CHANNEL_ID: 'new-id', DSH_RELAY_AGENT: 'old-id' })).toBe('new-id')
+    expect(instanceIdFromEnv({ DSH_RELAY_AGENT: 'old-id' })).toBe('old-id')
+    expect(instanceIdFromEnv({ DSH_CHANNEL_ID: '' , DSH_RELAY_AGENT: 'old-id' })).toBe('old-id')
+    expect(instanceIdFromEnv({})).toBe(undefined)
+    expect(instanceIdFromEnv({ DSH_CHANNEL_ID: '' })).toBe(undefined)
+  })
+})
+
+describe('broker 退场（批 5）：公共面已删净', () => {
+  it('channel 不再暴露 brokerStatus（不留传输后端扩展点，多机走 hub/worker）', () => {
+    const ch = boot({})
+    expect((ch as unknown as Record<string, unknown>).brokerStatus).toBe(undefined)
+  })
+})
+
+describe('本地回环回传执行结论（批 6b）：区分"已下发"与"被拒"', () => {
+  it('同步 handler 返回 ok:false → 派发结果带 outcome 且可判失败', () => {
+    const ch = boot({})
+    ch.onControl(() => ({ ok: false, error: '版本不在池' }))
+    const r = ch.sendControl('instA', { type: 'deploy', payload: { instanceId: 'instA' } })
+    expect(r.ok).toBe(true) // 派发本身成功
+    expect(r.outcome?.ok).toBe(false) // 但执行结论是失败
+    expect(r.outcome?.error).toBe('版本不在池')
+  })
+
+  it('异步 handler（返回 Promise）不阻塞派发：outcome 留空，结论走台账', () => {
+    const ch = boot({})
+    ch.onControl(async () => ({ ok: false, error: '稍后才知道' }))
+    const r = ch.sendControl('instA', { type: 'stop', payload: { instanceId: 'instA' } })
+    expect(r.ok).toBe(true)
+    expect(r.outcome).toBe(undefined)
   })
 })

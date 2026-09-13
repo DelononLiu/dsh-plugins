@@ -168,7 +168,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 - 升级 = 推新版本发行包 → 逐实例滚动重启 → 心跳恢复确认。
 - **patch 层升级适配**（2026-08 定，半自动）：升级前校验 patch 层的 target id 是否在新 rc 存在——**校验失败默认回滚**（安全），管理员**显式确认后可跳过失效 patch 继续**（升级 + 报告待适配项）。**回滚保留 3 份**（默认，可配）。
 
-### 传输与调用分层（2026-08 定：typert 在 channel 之上，broker 为 channel 可选后端）
+### 传输与调用分层（2026-08 定；2026-09 broker 退场：typert 在 channel 之上，传输 = 直连 + hub/worker 出站拉取）
 
 ```
 浏览器 UI（console 面板 / quick-nav）
@@ -182,10 +182,10 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
     └── transport: broker（出站代理，daemon 安全模型）
 ```
 
-- **依赖方向**：`typert → dsh-channel`（上层调用下层）——**typert 的调用帧由 channel 传输**；channel 是 typert 的传输底座，broker 是 channel 的可选物理后端（**保留 broker 扩展能力**：daemon 只出站连 broker、不开放入站端口的安全模型不变；单机/可直连场景用直连 transport，broker 可不装）。
-- **职责边界**：typert 只做方法级调用契约（不实现传输）；channel 做寻址（实例表 id/addr/status）、鉴权（实例令牌）、事件（三平面承载 typert `$on` 事件面）；broker 只做物理投递（HMAC 签名 wire 协议，参考 dsh-agent-relay 蓝本）。
+- **依赖方向**：`typert → dsh-channel`（上层调用下层）——**typert 的调用帧由 channel 传输**；channel 是 typert 的传输底座，物理传输 = 同机**直连**（loopback 插件路由）+ 多机 **hub 台账 / worker 出站长轮询**。**broker 已退场**（2026-09，见 [console 实例模型](../.agents/notes/proposed/architecture/2026-09-13-console-instance-model.md)）：不做可选后端、不留扩展点（daemon 不开放入站端口的安全模型由"只出站拉取"承接）。
+- **职责边界**：typert 只做方法级调用契约（不实现传输）；channel 做寻址（实例表 id/addr/status）、鉴权（实例令牌）、事件（三平面承载 typert `$on` 事件面）（物理投递由 hub 台账 + worker 轮询完成；broker/HMAC wire 协议随 broker 一并退场）。
 - **对齐官方**：官方为 `typert（协议）→ Connection 层（ctx.connection.rpc.intercept('/api')，HTTP/WS 传输）`；我们把官方 Connection 的职责放到 dsh-channel（既有通信层），不发明新分层。
-- **待实现**：channel 提供 typert transport 契约（`rpc.send(frame, target)` / `intercept(endpoint, handler)`，对齐官方 `connection.rpc.intercept` 签名）；transport 选择策略（目标可达→直连，不可达/daemon→broker）；跨实例调用鉴权复用实例令牌；typert forwardable events ↔ channel 三平面映射。当前跨实例仍走 relay+HTTP 端点（/api/console/* + EventSource），见 §9。
+- **待实现**：channel 提供 typert transport 契约（`rpc.send(frame, target)` / `intercept(endpoint, handler)`，对齐官方 `connection.rpc.intercept` 签名）；跨实例调用鉴权复用实例令牌；typert forwardable events ↔ channel 三平面映射。当前跨实例走 hub 台账 + worker 出站拉取（+ 同机直连）；broker 路径已删。
 - **多机走向（proposed）**：跨主机以 **broker-free、console 单入站口 + worker 出站拉取**为主路径（唯一入站面是 console 的插件路由；daemon 长轮询取指令、上报结果与事件；不建对等面，broker 降为可选后端）——方案与分阶段拆解见 [multihost-channel-pull](../.agents/notes/proposed/architecture/2026-09-11-multihost-channel-pull.md)。边界事实：官方 `/api` RPC 面被 BrowserAuth fence（实测 401）；该 fence 是 `dsh-client-connection` 注册在官方 webserver 上的一条 `/api` prefix 路由，不是全局中间件，`webServer.register` 的 exact 路由先命中因而免 fence（实测免凭据 200）；内核 `webserver.host` 只接受 `127.0.0.1 | 0.0.0.0`。
 
 ### 部署状态机
@@ -230,7 +230,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 | web2 | `~/.dsh-web2` | web2 | 3082 | **开发**（日常开发/组装器验证） |
 | web3 | `~/.dsh-web3` | web3 | 3083 | **探索/测试**（变动最快；`DSH_RELAY_AGENT=web3`） |
 | web4 | `~/.dsh-web4` | web4 | 3084 | instance（`DSH_RELAY_AGENT=web4`） |
-| daemon | `~/.dsh-daemon` | daemon | 无 web（headless） | 总控主机守护 `host-master`（`hostId: 'master'`；broker `http://127.0.0.1:19121` 出站连） |
+| daemon | `~/.dsh-daemon` | daemon | 无 web（headless） | 总控主机守护 `host-master`（`hostId: 'master'`；多机经 hub/worker 出站拉取，broker 已退场） |
 
 profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名>`，`dsh --profile <名>` 即 boot 之）；web2/3/4 内容同源 web 全家桶，目录各归各实例，可逐实例补丁/升级。实例模板（`profiles/master|dev|explorer|minimal`）是**另一层命名**（模板 = 创建时快照），勿混。
 
@@ -248,7 +248,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | --- | --- | --- | --- |
 | dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；**身份来源可插拔（IdentityResolver 接口）**；client 半区侧边栏用户徽标（/api/user/me） | ✅ 已实现（29 测试；gateway cookie 验签 + 侧边栏徽标/登出，见 §9） |
 | dsh-channel | 系统·通信 | 发现/心跳、事件总线（at-least-once/幂等/TTL/三平面）、鉴权、控制指令；**实例服务提供者**（实例类型 + 发现/状态服务）；**多机回路**（hub 注册/台账派发 + worker 出站拉取） | ✅ 已实现（37 测试：含真 HTTP 注册→长轮询→回执端到端、鉴权/归属冲突/租约重投/台账恢复；P1a 已落地，见 §9） |
-| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | ✅ 已实现（116 测试 + 3 HTTP 端点 instances/control/broker；daemon/instance 三角色 + 多机 hub 接入；升级回滚挂起，见 §9） |
+| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | ✅ 已实现（**149 测试**；HTTP 端点 instances/control + registry/池/删除恢复的 @Remote 面；daemon/instance 三角色 + 多机 hub 接入；升级回滚见 §9） |
 | dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示） | ✅ 已并入（非独立包） |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ✅ 已上线三端（2 测试） |
 | dsh-focus-session | UI | **会话关注层**：侧栏「置顶」区（钉住/拖拽排序/行尾取消钉）+「活跃」区（最近活跃会话，`updatedAt` 序，上限 5）+ 会话标题**胶囊标签**（人工标签）；拥有钉住/标签 settings 数据 | ✅ 已实现（90 测试） |

@@ -22,7 +22,7 @@ import { dirname } from 'node:path'
 
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则：边界类型
 // 必须来自公共非根类型子路径，供跨包消费与类型契约）。
-import type { BrokerStatusView, InstanceIdentity } from './types.ts'
+import type { InstanceIdentity } from './types.ts'
 // 跨实例 RPC 复用官方 typert 协议类型：帧 = InvokeRemoteRequest（gateway），
 // 回执 = RemoteResult（protocol）——channel 只做 carrier，不定义新协议。
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
@@ -82,7 +82,7 @@ export interface Config {
   relay?: RelayConfig
   /** 通道角色（缺省 local；配置 console 地址时缺省 worker）。 */
   mode?: ChannelMode
-  /** 本实例 id（worker 身份；缺省回落 relay.agent / DSH_RELAY_AGENT）。 */
+  /** 本实例 id（worker 身份；缺省回落 relay.agent / env 的 DSH_CHANNEL_ID）。 */
   id?: string
   /** hub（console 实例）基地址，如 http://10.0.0.1:3082——worker 出站目标。 */
   console?: string
@@ -146,6 +146,11 @@ export interface ControlDispatchResult {
   /** 成功时的指令 id（台账/回执对账用）。 */
   commandId?: string
   error?: string
+  /**
+   * **同进程回环**时接收者同步返回的执行结果（异步实现返回 Promise → 走台账回执，此处为 undefined）。
+   * 有了它，调用方才能区分"已下发"与"目标真的拒了"——否则守护的拒绝只留在守护日志里。
+   */
+  outcome?: ControlOutcome
 }
 
 /** worker 上报的本机实例状态（hub 侧据此维护实例表与归属）。 */
@@ -316,7 +321,7 @@ export class ChannelService extends TypertRemoteService {
     this.mode = resolveMode(config, relay)
     this.selfId = resolveSelfId(config, relay)
     if (this.mode === 'worker' && (config.console === undefined || this.selfId === undefined)) {
-      throw new Error('dsh-channel: worker 模式需要 console 地址与实例 id（config.id 或 DSH_RELAY_AGENT）')
+      throw new Error('dsh-channel: worker 模式需要 console 地址与实例 id（config.id 或 DSH_CHANNEL_ID）')
     }
     if (this.mode === 'hub') {
       this.loadLedger()
@@ -529,47 +534,6 @@ export class ChannelService extends TypertRemoteService {
   }
 
   /**
-   * Broker 运行状态（typert @Remote）：连接/在线 agent/消息队列计数。
-   * broker 是 channel 的传输后端（relay）——状态由 channel 暴露，上层
-   * （console/UI）经 ctx.remote.channel.brokerStatus() 消费，不绕道直连。
-   */
-  @Remote
-  async brokerStatus(): Promise<BrokerStatusView> {
-    const relay = this.relay
-    if (relay === undefined) {
-      return { connected: false, reason: 'relay 未配置', agents: [], queueCount: 0 }
-    }
-    try {
-      const ts = Math.floor(Date.now() / 1000)
-      const peersRes = await fetch(`${relay.brokerUrl}/peers`, {
-        headers: {
-          'x-relay-agent': relay.agent,
-          'x-relay-timestamp': String(ts),
-          'x-relay-signature': signRequest(relay.secret, 'GET', '/peers', ts),
-        },
-      })
-      if (!peersRes.ok) {
-        return { connected: false, reason: `broker http ${peersRes.status}`, agents: [], queueCount: 0 }
-      }
-      const peers = (await peersRes.json() as { peers?: Array<{ agent: string; online: boolean }> }).peers ?? []
-      // 队列计数：本 agent 收件箱待处理消息（since 空 → 从最新游标起）。
-      const ts2 = Math.floor(Date.now() / 1000)
-      const path2 = '/messages?since=&limit=50'
-      const msgRes = await fetch(`${relay.brokerUrl}${path2}`, {
-        headers: {
-          'x-relay-agent': relay.agent,
-          'x-relay-timestamp': String(ts2),
-          'x-relay-signature': signRequest(relay.secret, 'GET', path2, ts2),
-        },
-      })
-      const queueCount = msgRes.ok ? ((await msgRes.json() as { messages?: unknown[] }).messages ?? []).length : -1
-      return { connected: true, agents: peers.map((p) => ({ id: p.agent, online: p.online })), queueCount }
-    } catch (error) {
-      return { connected: false, reason: error instanceof Error ? error.message : String(error), agents: [], queueCount: 0 }
-    }
-  }
-
-  /**
    * 发布事件（at-least-once 投递语义的进程内实现）：自动生成消息 id（幂等
    * 去重键），按 TTL 清理。跨实例投递由传输层消费同一接口。
    * @param plane - 事件平面（control/task/session）。
@@ -635,10 +599,17 @@ export class ChannelService extends TypertRemoteService {
       if (this.controlHandlers.size === 0) {
         return { ok: false, error: `目标 ${instanceId} 无本机接收者（channel 非 hub 模式，且无 relay）` }
       }
+      let outcome: ControlOutcome | undefined
       for (const handler of this.controlHandlers) {
-        handler(full, instanceId)
+        const ret = handler(full, instanceId) as ControlOutcome | Promise<ControlOutcome> | undefined
+        // 只认**真正的 ControlOutcome**（普通对象 + boolean ok）：handler 的其它返回值（如
+        // 测试桩里 `array.push()` 返回的 length）不是结论，不能当拒绝；异步实现的 Promise
+        // 也不在此处等待（结论经台账回执，见 onControl 文档）。
+        const isAsync = ret !== null && typeof ret === 'object' && typeof (ret as Promise<ControlOutcome>).then === 'function'
+        const isOutcome = ret !== null && typeof ret === 'object' && typeof (ret as ControlOutcome).ok === 'boolean'
+        if (isOutcome && !isAsync) outcome = ret as ControlOutcome
       }
-      return { ok: true, commandId: full.id }
+      return { ok: true, commandId: full.id, ...(outcome !== undefined ? { outcome } : {}) }
     }
     return this.enqueueCommand(instanceId, command as Omit<ControlCommand, 'id' | 'ts'>, actor)
   }
@@ -656,7 +627,7 @@ export class ChannelService extends TypertRemoteService {
 
   // --- 多机：身份、归属与注册订阅 ---
 
-  /** 本实例 id（worker 身份；未配置且无 relay/`DSH_RELAY_AGENT` 时为 undefined）。 */
+  /** 本实例 id（worker 身份；未配置且无 relay/`DSH_CHANNEL_ID` 时为 undefined）。 */
   get instanceId(): string | undefined {
     return this.selfId
   }
@@ -1272,7 +1243,7 @@ function toIdentity(entry: InstanceEntry): InstanceIdentity {
 /** 从环境变量解析 relay 配置（DSH_RELAY_BROKER_URL/AGENT/SECRET/POLL_PEERS_MS/STATE_FILE）。 */
 function envRelayConfig(): RelayConfig | undefined {
   const brokerUrl = process.env.DSH_RELAY_BROKER_URL
-  const agent = process.env.DSH_RELAY_AGENT
+  const agent = instanceIdFromEnv()
   const secret = process.env.DSH_RELAY_SECRET
   if (!brokerUrl || !agent || !secret) return undefined
   const stateFile = process.env.DSH_RELAY_STATE_FILE
@@ -1346,12 +1317,24 @@ export function resolveMode(config: Config, relay: RelayConfig | undefined): Cha
   return 'local'
 }
 
-/** 解析本实例 id：config.id → relay.agent → DSH_RELAY_AGENT。 */
+/**
+ * 本实例 id 的 env 载体：新名 `DSH_CHANNEL_ID` 优先，旧名 `DSH_RELAY_AGENT` **兼容读**。
+ * broker 退场后 "relay" 这个术语不再有含义；但老实例的启动 env 与 patch 可能仍写旧名，
+ * 所以读两个名字（不强制改老实例），新写入一律用新名。
+ */
+export function instanceIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  // 空串一律当"未设置"（与 config.id !== '' 的判读口径一致）：新名为空则回落旧名。
+  for (const v of [env.DSH_CHANNEL_ID, env.DSH_RELAY_AGENT]) {
+    if (v !== undefined && v !== '') return v
+  }
+  return undefined
+}
+
+/** 解析本实例 id：config.id → relay.agent → env（DSH_CHANNEL_ID / 兼容 DSH_RELAY_AGENT）。 */
 export function resolveSelfId(config: Config, relay: RelayConfig | undefined): string | undefined {
   if (config.id !== undefined && config.id !== '') return config.id
   if (relay !== undefined) return relay.agent
-  const fromEnv = process.env.DSH_RELAY_AGENT
-  return fromEnv !== undefined && fromEnv !== '' ? fromEnv : undefined
+  return instanceIdFromEnv()
 }
 
 /** 去尾部斜杠（拼 URL 用）。 */

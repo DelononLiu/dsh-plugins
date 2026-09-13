@@ -52,6 +52,22 @@ export interface ControlResult {
   error?: string
   /** 已下发指令的幂等 id。 */
   commandId?: string
+  /** 人类可读的结果说明（导入/删除这类同步动作）。 */
+  detail?: string
+}
+
+/** runtime 池视图（@Remote 边界）：池内可用版本 + 引用它们的实例。 */
+export interface RuntimePoolView {
+  /** 池根目录（`~/.dsh-runtimes`，`$DSH_RUNTIMES` 可覆盖）。 */
+  poolPath: string
+  versions: Array<{
+    version: string
+    /** 引用该版本的实例 id（非空时禁止删除）。 */
+    inUseBy: string[]
+    /** 池内容自检（版本与目录是否一致）。 */
+    ok: boolean
+    error?: string
+  }>
 }
 
 /** 实例列表视图元素（管理面板：独立于档案的展示形态——host/self/离线覆盖）。 */
@@ -182,6 +198,8 @@ export interface LogRecord {
   scope: string
   /** 来源实例 id（实例 stdout 记录专用；daemon/console 一般为空）。 */
   instanceId?: string
+  /** 记录类别（如 'admin' = 管理事件：状态变更与失败异常；缺省 = 运行日志）。 */
+  category?: string
   /** 日志正文。 */
   msg: string
 }
@@ -190,6 +208,8 @@ export interface LogRecord {
 export interface LogReadResult {
   /** 解析后的记录列表（tail 取最后 N 条）。 */
   records: LogRecord[]
+  /** 跨实例转发/读取失败的原因（有值 = 本次读取没成功，别当"没有日志"）。 */
+  error?: string
   /** 文件中非空行总数。 */
   total: number
   /** 是否被 maxBytes 截断（true=内容不全）。 */
