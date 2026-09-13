@@ -422,7 +422,10 @@ export class ConsoleService extends TypertRemoteService {
         // agent 自证身份契约；配置清单声明不受 tokens 配置影响）。
         // 初始 online（声明即身份 + 直连前提）——但构造尾部立即首轮 probe，
         // 不可达实例马上被 setStatus(offline)，消除"重启即全绿"的假在线窗口。
-        ctx.channel.declare({ id, name: id, addr, status: 'online' })
+        // 状态口径：有可探测地址才敢报在线；无端口的条目（headless/legacy 未登记端口）
+        // 不可验证 → 记离线，不做乐观在线（实测：未运行的 web 曾因"声明即在线"而假绿）。
+        const status = addr !== '' ? 'online' as const : 'offline' as const
+        ctx.channel.declare({ id, name: id, addr, status })
       }
     }
     // 直连状态探测（管理端 launch / daemon 本机 instances 通用）：可达 → heartbeat

@@ -430,7 +430,8 @@ describe('daemon 角色（主机守护）', () => {
     ConsoleService.execImpl = ((_cmd: string, cb: (e: Error | null, s: string) => void) => cb(null, '')) as unknown as typeof childProcess.exec
     // 无 port（daemonStartAfterStop 走固定窗口，fake timers 可控；端口 kill 已由 stop 测试覆盖）
     const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
-    // 实例在线（channel 注册）但守护无子进程 → 分支 2（无 broker → 不发跨进程 stop）
+    // 实例在线（显式心跳——无端口条目不再"声明即在线"）但守护无子进程 → 分支 2（无 broker → 不发跨进程 stop）
+    ctx.channel.heartbeat('web3', '')
     ctx.channel.sendControl('host-lab1', { type: 'restart', payload: { instanceId: 'web3' } })
     expect(spawnSpy).not.toHaveBeenCalled()
     // 固定窗口（STOP_SELF_EXIT_WAIT_MS=35000）后拉起
