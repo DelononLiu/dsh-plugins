@@ -2186,3 +2186,95 @@ describe('状态来源（在跑实例不得显示离线）', () => {
     }
   })
 })
+
+describe('本机守护自启 + 幽灵行（daemon 是 ~/.dsh 下与 web 平级的 profile）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+    ConsoleService.fetchImpl = fetch
+    delete process.env.DSH_CHANNEL_ID
+    delete process.env.DSH_SESSION_ID
+  })
+
+  /** 守护控制面不可达（fetch 抛错）= 守护没在跑。 */
+  function unreachable(): void {
+    ConsoleService.fetchImpl = (async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch
+  }
+
+  /** 可达（守护已在跑）。 */
+  function reachable(): void {
+    ConsoleService.fetchImpl = (async () => new Response(JSON.stringify({ result: { ok: true, value: { instances: [] } } }), { status: 200 })) as unknown as typeof fetch
+  }
+
+  async function bootConsole(launch: Record<string, unknown>): Promise<Context> {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, { launch })
+    return ctx
+  }
+
+  const autoHost = { host: 'host-master', addr: 'http://127.0.0.1:3089', autoStart: true, profile: 'daemon' }
+
+  it('守护不可达 → 同一 DSH_HOME 拉起 `--profile daemon`（身份 = host-master）', async () => {
+    const spawnSpy = mockSpawn(fakeChild())
+    unreachable()
+    // 管理端自己的身份/会话变量必须剔除：继承 DSH_CHANNEL_ID=web 会让守护顶掉管理端 id。
+    process.env.DSH_CHANNEL_ID = 'web'
+    process.env.DSH_SESSION_ID = 'sess-1'
+    await bootConsole({ 'host-master': autoHost })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+    const [bin, args, opts] = spawnSpy.mock.calls[0] as [string, string[], { env: Record<string, string>; detached: boolean }]
+    expect(bin).toBe('dsh')
+    expect(args).toEqual(['--profile', 'daemon'])
+    // DSH_HOME 继承管理端（守护与 web 同 home、不同 profile），身份必须是守护 agent 名。
+    expect(opts.env.DSH_HOME).toBe(testDshHome)
+    expect(opts.env.DSH_CHANNEL_ID).toBe('host-master')
+    expect(opts.env.DSH_SESSION_ID).toBeUndefined()
+    expect(opts.detached).toBe(true)
+  })
+
+  it('守护已在跑（控制面可达）→ 不拉起', async () => {
+    const spawnSpy = mockSpawn(fakeChild())
+    reachable()
+    await bootConsole({ 'host-master': autoHost })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).not.toHaveBeenCalled()
+  })
+
+  it('未配 autoStart 的守护条目 → 不自启（多机守护由目标主机常驻）', async () => {
+    const spawnSpy = mockSpawn(fakeChild())
+    unreachable()
+    await bootConsole({ 'host-master': { host: 'host-master', addr: 'http://127.0.0.1:3089' } })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawnSpy).not.toHaveBeenCalled()
+  })
+
+  it('拉起后宽限窗口内不重复拉起（守护启动非瞬时，防拉起风暴）', async () => {
+    const spawnSpy = mockSpawn(fakeChild())
+    unreachable()
+    const ctx = await bootConsole({ 'host-master': autoHost })
+    await new Promise((r) => setTimeout(r, 20))
+    const svc = ctx.console as unknown as { ensureLocalDaemons(): Promise<void> }
+    await svc.ensureLocalDaemons()
+    await svc.ensureLocalDaemons()
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('注册表里的守护档案（role: daemon）不并入实例列表——它是执行面自身，不是实例', async () => {
+    const ctx = await bootConsole({})
+    const reg = loadRegistry()
+    upsertInstance(reg, {
+      id: 'daemon', host: 'master', home: process.env.DSH_HOME ?? '', profileDir: 'daemon',
+      layout: 'profile', role: 'daemon',
+    })
+    upsertInstance(reg, {
+      id: 'web9', host: 'master', home: '/tmp/.dsh-web9', profileDir: 'web9', layout: 'legacy', role: 'instance',
+    })
+    saveRegistry(reg)
+    const ids = ctx.console.listInstances().instances.map((i) => i.id)
+    // 守护无 port/addr，并进实例表就只是一行永远"离线"的幽灵行（用户实测报障）。
+    expect(ids).not.toContain('daemon')
+    // 普通实例仍按注册表权威源并入（本条语义未被误伤）。
+    expect(ids).toContain('web9')
+  })
+})

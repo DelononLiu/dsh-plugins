@@ -98,6 +98,13 @@ export interface LaunchSpec {
   env?: Record<string, string>
   /** 引用的 runtime 池版本（内核版本；空 = 实例自带安装，见 runtime 池模型）。 */
   version?: string
+  /**
+   * console 端：本机守护自启（只对 host-* 条目有意义）——管理端启动后该守护
+   * 控制面不可达即按 {@link profile} 拉起。守护与 web 是**同一 DSH_HOME 下的两个
+   * profile**（`dsh --profile daemon`），故 DSH_HOME 缺省继承管理端本进程。
+   * 缺省 false：不自启（多机守护由目标主机自行常驻）。
+   */
+  autoStart?: boolean
 }
 
 /** 插件角色（部署位置）：console=管理端 / daemon=主机守护 / instance=实例自退。 */
@@ -261,6 +268,25 @@ export class ConsoleService extends TypertRemoteService {
   private static readonly PROBE_TIMEOUT_MS = 5_000
   /** 宿主状态同步周期（ms）：拉取守护本机视图并入实例表（同机 local 模式的状态来源）。 */
   private static readonly HOST_SYNC_INTERVAL_MS = 5_000
+  /** 本机守护自启：补齐检查周期（ms）——探活失败即尝试拉起（幂等，见 spawn 宽限）。 */
+  private static readonly DAEMON_ENSURE_INTERVAL_MS = 10_000
+  /** 本机守护自启：spawn 后视为"启动中"的宽限（ms）——窗口内探活失败不重复拉起
+   * （守护要装插件、开控制端口、注册，启动不是瞬时的；不设宽限 = 拉起风暴）。 */
+  private static readonly DAEMON_START_GRACE_MS = 30_000
+  /** 本机守护自启：拉起前必须从本进程 env 剔除的变量（同 `dsh-profile.sh` 的纪律）。
+   * DSH_CHANNEL_ID/DSH_RELAY_AGENT = 本实例身份（守护继承会顶掉管理端 id，
+   * 而守护必须是 `host-<hostId>`，故剔除后重设）；DSH_SESSION_ID 等会话变量与
+   * DSH_SHELL/DSH_WEB_URL/DSH_WEB_MODE 宿主变量 = 带过守护会让它派生的 shell
+   * 指向管理端的会话与 home。 */
+  private static readonly DAEMON_ENV_DENY = [
+    'DSH_CHANNEL_ID',
+    'DSH_RELAY_AGENT',
+    'DSH_SESSION_ID',
+    'DSH_SESSION_JSONL',
+    'DSH_SHELL',
+    'DSH_WEB_URL',
+    'DSH_WEB_MODE',
+  ] as const
   /** 升级：快照保留份数（滚动删旧；最新一份即回滚点）。 */
   private static readonly UPGRADE_SNAPSHOT_KEEP = 3
   /** 升级：kill 旧进程后等待退出的宽限（ms），超时补 SIGKILL。 */
@@ -335,6 +361,10 @@ export class ConsoleService extends TypertRemoteService {
   private unsubscribeControl: (() => void) | undefined
   /** daemon 角色：追踪的子进程（instanceId → 守护拉起的进程）。 */
   private readonly children = new Map<string, ChildProcess>()
+  /** console 角色：本机守护自启——已拉起的主机（host agent 名 → spawn 时刻 ms），防重拉风暴。 */
+  private readonly daemonSpawns = new Map<string, number>()
+  /** console 角色：自启检查是否在途（异步探活期间不重入）。 */
+  private ensuringDaemons = false
   /**
    * daemon 角色：运行时实例清单（deploy 动态加入；初始 = config.instances 静态）。
    * 只读处经 {@link instanceSpec} 查询（静态 + 动态合并）。deploy 出来的实例
@@ -496,6 +526,13 @@ export class ConsoleService extends TypertRemoteService {
         const hostSyncTimer = setInterval(() => void this.syncHostStatuses(), ConsoleService.HOST_SYNC_INTERVAL_MS)
         hostSyncTimer.unref?.()
         ctx.effect(() => () => clearInterval(hostSyncTimer))
+        // 本机守护自启：管理端起来了就保证执行面（守护）在跑——launch 表里 autoStart
+        // 的 host-* 条目探活失败即拉起（守护是同一 DSH_HOME 下的另一个 profile）。
+        // 不等人手先起守护：否则 UI 的 start 离线实例没有执行面，只能一直转圈。
+        void this.ensureLocalDaemons()
+        const daemonEnsureTimer = setInterval(() => void this.ensureLocalDaemons(), ConsoleService.DAEMON_ENSURE_INTERVAL_MS)
+        daemonEnsureTimer.unref?.()
+        ctx.effect(() => () => clearInterval(daemonEnsureTimer))
         // 等 webServer 服务可用后挂 HTTP 端点（ctx.inject 原生等待；
         // daemon/instance 角色部署的无 webserver profile 不会走到这里）。
         // 注意用注入后的 ctx（webServer 只在注入 fiber 的 scope 可见）。
@@ -548,12 +585,15 @@ export class ConsoleService extends TypertRemoteService {
     // 注册表是实例清单的**权威源**：并入注册表内（非墓碑）但尚未向 channel 注册的实例。
     // 否则 UI 只显示 channel 发现过的实例（UI 自验实测：注册表 6 个、界面只 3 个）。
     // 状态记 offline（未注册 = 本管理端看不到它的心跳；不做乐观在线）。
+    // 守护（role: daemon）除外：它是**执行面自身**（主机角色，无 webserver/port/addr），
+    // 存活证据在 `hosts` 一侧（主机守护页由控制端口探活给出），并进实例表就只是一行
+    // 恒离线的幽灵行（实测：注册表里的守护档案让 UI 多出一行永远"离线"的 daemon）。
     {
       const seen = new Set(instances.map((i) => i.id))
       try {
         const reg = loadRegistry()
         for (const e of listRegistryInstances(reg)) {
-          if (seen.has(e.id)) continue
+          if (e.role === 'daemon' || seen.has(e.id)) continue
           instances = [...instances, { id: e.id, name: e.name, addr: e.addr ?? '', status: 'offline' as const }]
           seen.add(e.id)
         }
@@ -753,6 +793,92 @@ export class ConsoleService extends TypertRemoteService {
       } catch {
         // 守护不可达/超时：保留上一轮结论（下一轮重试）。
       }
+    }
+  }
+
+  /**
+   * console 角色：确保本机守护在线（launch 表里 `autoStart === true` 的 host-* 条目）。
+   * 守护 = 同一 DSH_HOME 下的另一个 profile（缺省 `daemon`，与 `web` 平级）——管理端
+   * 只负责把执行面叫起来，实例仍由守护拉。幂等两重：在途检查不重入；spawn 后
+   * {@link DAEMON_START_GRACE_MS} 内不重复拉起（守护启动非瞬时，没宽限就是拉起风暴）。
+   */
+  private async ensureLocalDaemons(): Promise<void> {
+    if (this.ensuringDaemons) return
+    this.ensuringDaemons = true
+    try {
+      for (const [id, spec] of Object.entries(this.config.launch ?? {})) {
+        if (!isHostAgent(id) || spec.autoStart !== true) continue
+        const addr = spec.addr
+        // 无 addr = 无从判定它在不在跑 → 不猜（既不乐观在线，也不盲拉）。
+        if (addr === undefined || addr === '') continue
+        if (await this.hostReachable(addr)) {
+          this.daemonSpawns.delete(id)
+          continue
+        }
+        const spawnedAt = this.daemonSpawns.get(id)
+        if (spawnedAt !== undefined && Date.now() - spawnedAt < ConsoleService.DAEMON_START_GRACE_MS) continue
+        this.spawnLocalDaemon(id, spec)
+      }
+    } finally {
+      this.ensuringDaemons = false
+    }
+  }
+
+  /** 守护控制面可达性（与 {@link syncHostStatuses} 同一判据：POST client-request 信封）。 */
+  private async hostReachable(addr: string): Promise<boolean> {
+    try {
+      const res = await ConsoleService.fetchImpl(`${addr.replace(/\/+$/, '')}/api/console/listInstances`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: randomUUID(),
+          method: 'console/listInstances',
+          payload: { args: {} },
+        }),
+        signal: AbortSignal.timeout(ConsoleService.PROBE_TIMEOUT_MS),
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * console 角色：拉起本机守护（detached；stdout/stderr 落 `<守护 home>/logs/daemon.log`，
+   * 与实例 stdout 收集同一约定；日志查看器按实例白名单列日志、不扫目录，故这份
+   * 守护 stdout 不会被当成某个"daemon 实例"的日志）。
+   * 环境 = 本进程 env 剔除**会话/宿主作用域**与**本实例身份**后叠加守护配置：
+   * DSH_CHANNEL_ID 必须按守护 agent 名重设——继承管理端的 id（如 `web`）会让守护
+   * 顶掉管理端自己的身份（守护必须是 `host-<hostId>`）。DSH_HOME 缺省继承本进程
+   * （守护与 web 同 home、不同 profile），显式配 `dshHome` 才换根。
+   */
+  private spawnLocalDaemon(hostIdName: string, spec: LaunchSpec): void {
+    const profile = typeof spec.profile === 'string' && spec.profile !== '' ? spec.profile : 'daemon'
+    const home = typeof spec.dshHome === 'string' && spec.dshHome !== ''
+      ? spec.dshHome
+      : (process.env.DSH_HOME ?? roleDataRoot('console'))
+    const bin = ConsoleService.selfDshCommand()
+    // 先记账再 spawn：spawn 抛错（bin 不存在等）同样要吃掉宽限窗口，否则每轮都重试。
+    this.daemonSpawns.set(hostIdName, Date.now())
+    try {
+      const logDir = join(home, 'logs')
+      mkdirSync(logDir, { recursive: true })
+      const fd = openSync(join(logDir, 'daemon.log'), 'a')
+      const env: NodeJS.ProcessEnv = { ...process.env }
+      for (const key of ConsoleService.DAEMON_ENV_DENY) delete env[key]
+      env.DSH_HOME = home
+      env.DSH_CHANNEL_ID = hostIdName
+      for (const [key, value] of Object.entries(spec.env ?? {})) env[key] = value
+      const child = ConsoleService.spawnImpl(bin, ['--profile', profile], {
+        env,
+        detached: true,
+        stdio: ['ignore', fd, fd],
+      })
+      child.unref()
+      this.log(`[dsh-console] 本机守护 ${hostIdName} 未在线 → 已拉起（${bin} --profile ${profile}，DSH_HOME=${home}）`, { scope: 'daemon' })
+    } catch (error) {
+      this.log(`[dsh-console] 本机守护 ${hostIdName} 拉起失败：${error instanceof Error ? error.message : String(error)}`, { scope: 'daemon', level: 'error' })
     }
   }
 

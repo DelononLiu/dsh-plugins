@@ -27,7 +27,7 @@ ENVS=(
   "web3|$HOME/.dsh-web3|web|3083|web"
   "web4|$HOME/.dsh-web4|web|3084|web"
   "web5|$HOME/.dsh-web5|web|3085|web"
-  "daemon|$HOME/.dsh-daemon|daemon|3089|headless"
+  "daemon|$HOME/.dsh|daemon|3089|headless"
 )
 
 # 官方内核包：base bundle 自带、profile 绝不该显式装（双实例风险源）。

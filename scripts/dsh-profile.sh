@@ -15,7 +15,9 @@
 #   由 DSH 在 agent 会话内注入，带进别的实例会让它指向别的实例的会话与 home，
 #   破坏「测试环境目录隔离」。
 # ✅ restart 等待就绪：进程在 + 端口监听（headless 只看进程），超时打印日志尾部并非零退出。
-# 🔴 永不触碰正式 ~/.dsh（3080 禁令，见 AGENTS.md）。
+# 🔴 永不触碰正式 ~/.dsh（3080 禁令，见 AGENTS.md）——**例外**：`web` 与 `daemon`
+#   是同一 home（~/.dsh）下的两个 profile（GUI 与 headless 守护），按 profile 启停
+#   是正常运维；其余任何实例仍一律拒绝。
 #
 # 用法：
 #   scripts/dsh-profile.sh status                              # 列出注册表内全部实例
@@ -68,7 +70,7 @@ resolve_instance() {
   fi
   local home prof host layout role version port status
   IFS=$'\t' read -r home prof host layout role version port status <<< "$meta"
-  if [[ "$home" == "$OFFICIAL_HOME" && "$name" != "web" ]]; then
+  if [[ "$home" == "$OFFICIAL_HOME" && "$name" != "web" && "$name" != "daemon" ]]; then
     echo "[$name] 🔴 拒绝：正式 home（~/.dsh，3080 禁令）" >&2
     return 1
   fi
@@ -88,12 +90,34 @@ resolve_instance() {
   echo "$home|$prof|$live_port|$chanId"
 }
 
-# 自操作防护：目标 home == 当前环境 DSH_HOME → 拒绝（stop/restart 会杀掉承载
-# 当前命令的实例进程）。返回 0=允许，1=拒绝（已打印原因）。
+# 目标 pid 是否为当前 shell 的祖先（是 → 杀它就是杀自己）。
+is_ancestor_of_self() {
+  local target="$1" pid="$$" hop=0
+  while [[ -n "$pid" && "$pid" != "0" && "$hop" -lt 64 ]]; do
+    [[ "$pid" == "$target" ]] && return 0
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    hop=$((hop + 1))
+  done
+  return 1
+}
+
+# 自操作防护：目标进程是当前 shell 的**祖先**时 stop/restart 拒绝（自己杀自己）。
+# 判据用祖先链而非 DSH_HOME：一个 home 下可有多个 profile（~/.dsh 的 web 与 daemon），
+# 「DSH_HOME 相等」不再等价于「就是自己」——老判据会把同 home 的另一个 profile 也
+# 误判成自己而拒绝（实测：守护迁入 ~/.dsh 后，从 GUI 会话里 stop daemon 被误拒）。
+# pid 未知（目标没在跑）时回落到老判据：home 相等 → 保守拒绝。
 guard_no_self_operate() {
-  local name="$1" home="$2"
-  if [[ -n "${DSH_HOME:-}" && "$home" == "$DSH_HOME" ]]; then
-    echo "[$name] 🔴 自操作拒绝：当前 shell 的 DSH_HOME（$DSH_HOME）就是目标实例——"
+  local name="$1" home="$2" pid="${3:-}"
+  local why=""
+  if [[ -n "$pid" ]]; then
+    if is_ancestor_of_self "$pid"; then
+      why="目标是当前 shell 的祖先进程（pid=$pid）"
+    fi
+  elif [[ -n "${DSH_HOME:-}" && "$home" == "$DSH_HOME" ]]; then
+    why="当前 shell 的 DSH_HOME（$DSH_HOME）就是目标 home（进程未在跑，按老判据保守拒绝）"
+  fi
+  if [[ -n "$why" ]]; then
+    echo "[$name] 🔴 自操作拒绝：$why——"
     echo "        stop/restart 会杀掉承载当前命令的进程（自己杀自己）。"
     echo "        请在实例环境外（无 DSH_HOME 的终端）执行，或改用 start/status。"
     return 1
@@ -151,7 +175,7 @@ launch_instance() {
     nohup "$DSH_BIN" "${launch_args[@]}" > "$log" 2>&1 &
   local deadline=$((SECONDS + READY_TIMEOUT)) pid http_code=""
   while (( SECONDS < deadline )); do
-    pid="$(is_running "$home" || true)"
+    pid="$(is_running "$home" "$profile" || true)"
     if [[ -n "$pid" ]]; then
       if [[ -z "$port" ]]; then
         echo "[$name] 就绪 pid=$pid（headless）"
@@ -192,7 +216,7 @@ print_login_url() {
 }
 
 is_running() {
-  local home="$1"
+  local home="$1" profile="$2"
   for pid in $(pgrep -f 'dsh --profile' 2>/dev/null || true); do
     local cmd; cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
     # 只认 node 主进程（命令行以 node …/dsh --profile 开头，兼容 .bin/dsh 与 alpha5 CLI）；
@@ -201,6 +225,14 @@ is_running() {
       node*/dsh*--profile*) ;;
       *) continue ;;
     esac
+    # profile 必须精确同名（`--profile web` 不得命中 `--profile web2`）：一个 home 下
+    # 可有多个 profile（~/.dsh 的 web 与 daemon），只按 home 匹配会把 GUI 与守护混为
+    # 一谈——`stop daemon` 可能命中 3080 GUI。
+    if [[ "$cmd" =~ --profile[[:space:]]+([^[:space:]]+) ]]; then
+      [[ "${BASH_REMATCH[1]}" == "$profile" ]] || continue
+    else
+      continue
+    fi
     if [[ "$(cat /proc/$pid/environ 2>/dev/null | tr '\0' '\n' | grep '^DSH_HOME=' | cut -d= -f2)" == "$home" ]]; then
       echo "$pid"
       return 0
@@ -213,7 +245,7 @@ start_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port chanId <<< "$info"
-  local pid; pid="$(is_running "$home" || true)"
+  local pid; pid="$(is_running "$home" "$profile" || true)"
   if [[ -n "$pid" ]]; then
     echo "[$name] 已在运行 pid=$pid（$home）"
     return 0
@@ -226,14 +258,15 @@ stop_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port chanId <<< "$info"
-  guard_no_self_operate "$name" "$home" || return 1
-  local pid; pid="$(is_running "$home" || true)"
+  local pid; pid="$(is_running "$home" "$profile" || true)"
+  # 先定位 pid 再判自操作（祖先链判据需要 pid；见 guard_no_self_operate）。
+  guard_no_self_operate "$name" "$home" "$pid" || return 1
   if [[ -n "$pid" ]]; then
     echo "[$name] 停止 pid=$pid"
     kill "$pid"
     # 等待优雅退出（gateway/webserver 端口释放），避免紧跟的 start 竞态 bind 失败。
     for _ in $(seq 1 40); do
-      is_running "$home" >/dev/null 2>&1 || break
+      is_running "$home" "$profile" >/dev/null 2>&1 || break
       sleep 0.5
     done
   else
@@ -248,7 +281,7 @@ restart_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port chanId <<< "$info"
-  local pid; pid="$(is_running "$home" || true)"
+  local pid; pid="$(is_running "$home" "$profile" || true)"
   local -a inherit=()
   if [[ -n "$pid" ]]; then
     local total kv
@@ -281,7 +314,7 @@ status() {
     fi
     local home profile port chanId
     IFS='|' read -r home profile port chanId <<< "$info"
-    local pid; pid="$(is_running "$home" || true)"
+    local pid; pid="$(is_running "$home" "$profile" || true)"
     local port_txt="port=headless"
     if [[ -n "$port" ]]; then
       port_txt="port=$port$(ss -tln 2>/dev/null | grep -q ":$port " && echo ' (监听)' || echo ' (未监听)')"

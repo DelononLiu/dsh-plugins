@@ -27,7 +27,13 @@ export interface InstanceEntry {
   version: string | null
   port: number | null
   role: string
-  layout: 'legacy' | 'home'
+  /**
+   * 布局：`legacy` = per-instance home（`~/.dsh-<名>`，自带安装）；`home` = 引用
+   * runtime 池的新布局（`~/.dsh-home/instance-<名>`）；`profile` = **既有 home 下的
+   * 一个 profile**（如 `~/.dsh` 的 `daemon`——与 `web` 平级，不是独立实例 home）。
+   * 纯描述字段（运行时判布局看 home/profileDir 实际存在性，不读它）。
+   */
+  layout: 'legacy' | 'home' | 'profile'
   addr: string | null
   status: 'active' | 'deleted'
   createdAt: string

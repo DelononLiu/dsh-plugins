@@ -226,15 +226,15 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 | 环境 | DSH_HOME | profile | 端口 | 角色 |
 | --- | --- | --- | --- | --- |
-| web | `~/.dsh` | web | 3080 | 正式 GUI（实测实装 = 官方基线 + gateway + browser-skill；未装 console/channel；3080 禁令：只读不改） |
+| web | `~/.dsh` | web | 3080 | 正式 GUI + **管理端**（console role: console + channel；3080 常驻，重启会断开 GUI 会话） |
 | web2 | `~/.dsh-web2` | web2 | 3082 | **开发**（日常开发/组装器验证） |
 | web3 | `~/.dsh-web3` | web3 | 3083 | **探索/测试**（变动最快；`DSH_RELAY_AGENT=web3`） |
 | web4 | `~/.dsh-web4` | web4 | 3084 | instance（`DSH_RELAY_AGENT=web4`） |
-| daemon | `~/.dsh-daemon` | daemon | 无 web（headless） | 总控主机守护 `host-master`（`hostId: 'master'`；多机经 hub/worker 出站拉取，broker 已退场） |
+| daemon | `~/.dsh`（与 web **同 home 的另一个 profile**） | daemon | 控制口 3089（无 web） | 总控主机守护 `host-master`（`hostId: 'master'`；管理端启动时自启；多机经 hub/worker 出站拉取，broker 已退场） |
 
 profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名>`，`dsh --profile <名>` 即 boot 之）；web2/3/4 内容同源 web 全家桶，目录各归各实例，可逐实例补丁/升级。实例模板（`profiles/master|dev|explorer|minimal`）是**另一层命名**（模板 = 创建时快照），勿混。
 
-实例矩阵权威源 = 管理端 web2 的 `dsh-console.launch` 配置；quick-nav/console 从 `DSH_CONSOLE_ADDR=http://127.0.0.1:3082` 拉实例表（实例清单权威源 = 注册表 `~/.dsh-home/registry.json`）。
+实例矩阵权威源 = 管理端 web（3080 的 `dsh-console.launch` 配置）；quick-nav/console 从 `DSH_CONSOLE_ADDR` 拉实例表（实例清单权威源 = 注册表 `~/.dsh-home/registry.json`）。
 
 ---
 
