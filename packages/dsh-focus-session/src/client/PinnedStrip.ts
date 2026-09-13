@@ -430,7 +430,6 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
           onSelect: () => {
             openTagEditor({
               sessionId: id,
-              anchor: row,
               getTags: (sid) => deps.getTags(sid),
               setTags: (sid, tags) => deps.setTags(sid, tags),
             })

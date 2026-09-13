@@ -251,7 +251,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | ✅ 已实现（**160 测试**；HTTP 端点 instances/control + registry/池/删除恢复的 @Remote 面；daemon/instance 三角色 + 多机 hub 接入；升级回滚见 §9） |
 | dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示） | ✅ 已并入（非独立包） |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ✅ 已上线三端（2 测试） |
-| dsh-focus-session | UI | **会话关注层**：侧栏「置顶」区（钉住/拖拽排序/行尾取消钉）+「活跃」区（最近活跃会话，`updatedAt` 序，上限 5）+ 会话标题**胶囊标签**（人工标签）；拥有钉住/标签 settings 数据 | ✅ 已实现（90 测试） |
+| dsh-focus-session | UI | **会话关注层**：侧栏「置顶」区（钉住/拖拽排序/行尾取消钉）+「活跃」区（最近活跃会话，`updatedAt` 序，上限 5）+ 会话标题**胶囊标签**（人工标签）；行菜单与标签弹框照官方 Menu/Modal 契约；拥有钉住/标签 settings 数据 | ✅ 已实现（101 测试） |
 | dsh-focus-tabs | UI | 顶部会话标签行（Alt+P 固定、Alt+1..9 切换、编号标题、状态圆点）；只读消费 dsh-focus-session 的钉住数据，两处天然同步 | ✅ 已实现（24 测试，web2 验证） |
 | dsh-desk | UI（平台） | 布局/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：SSH/技能中心摆控制台上方、任务看板摆会话头快捷导航右侧，均对齐官方契约；回退 foot）** | ✅ 组装器已实现（assembler.spec 15 测试）；布局配置开关已实现，见 §9 |
 
@@ -397,7 +397,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | console UI（并入 dsh-console client 半区：ConsoleBadge + 控制面板） | sidebar.footer.action，仅管理端 |
 | dsh-quick-nav 顶栏导航（三端在线） | 2 测试 |
 | dsh-focus-tabs 固定会话标签行（Alt+P/Alt+1..9/编号/状态圆点） | 24 测试 |
-| dsh-focus-session 侧栏置顶区 + 活跃区 + 会话胶囊标签（钉/排序/取消钉 + 最近活跃时间序 + 行首 #标签编辑 + 行尾 ⋯ 菜单：编辑标签/加入/移出置顶） | 90 测试 |
+| dsh-focus-session 侧栏置顶区 + 活跃区 + 会话胶囊标签（钉/排序/取消钉 + 最近活跃时间序 + 行尾 ⋯ 菜单：编辑标签/加入/移出置顶 + 标签弹框；菜单/弹框照官方 Menu/Modal 契约） | 101 测试 |
 | dsh-desk 工具入口组装器（SSH/技能中心 re-parent 到 foot 区控制台上方、任务看板隐藏 + 顶部按钮摆到会话头快捷导航右侧；均对齐官方契约样式 + 间距；无顶部目标回退 foot） | assembler.spec 15 测试 + web2 验证 |
 | dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关 + 组装器配置化/通用性 + **slots 型插件显隐 git-graph 开关**） | 25 测试（含 slots-controller 5） |
 | vendored 全家桶 5 包（better-sidebar/git-graph/ssh/task-board/skill-explorer） | profile 依赖 + lock 锁版本 |

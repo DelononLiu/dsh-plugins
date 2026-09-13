@@ -14,18 +14,24 @@ Status: implemented
   - 触发按钮照官方 `.iconButton`：16×16、`--dsw-alias-label-tertiary`、hover
     `--dsw-alias-label-primary`、圆角 4、无边框、三点横排 svg；hover/focus/
     `aria-expanded=true` 时显示（对齐官方 `.rowActions` 的显隐契约）。
-  - 弹层照官方 `.menu`：底 `--dsw-specific-menu`、`box-shadow:
-    var(--dsw-elevation-prominent)`、`--dsw-elevation-stroke-color:
-    var(--dsw-alias-border-l1)`、最大高 `min(360px,100vh - 96px)`。
-  - 菜单项照官方 `.cell`：高 40、圆角 10、内边距 `0 10px`、`gap 8`、字号 14/行高 22、
-    hover `--dsw-alias-interactive-bg-hover`。
+  - 弹层照官方 `ui-primitives/src/Menu.module.css` 的 `.list`/`.portal`（2026-09-13
+    更正：此前按 `.menu`/`.cell` 手挑近似值——圆角/最小宽/最大高/层级都对不上，见
+    [official-menu-modal-alignment](2026-09-13-focus-strips-official-menu-modal.md)）：
+    `padding:4px`、`border-radius:20px`、`min-width:218px`、`max-width:360px`、
+    `max-height:calc(100vh - 24px)`、`z-index:1100`、底 `--dsw-specific-menu`、
+    `box-shadow:var(--dsw-elevation-prominent)`、`--dsw-elevation-stroke-color:
+    var(--dsw-alias-border-l1)`、内层 `.viewport` 承担滚动。
+  - 菜单项照官方 `.item`：`min-height:40px`、圆角 10、内边距 `8px 10px`、`gap 8`、
+    字号 14/行高 22、hover `--dsw-alias-interactive-bg-hover`、disabled `opacity:.4`、
+    danger 用 `--dsw-alias-state-error-primary`。
 - **置顶区行菜单**：「编辑标签…」+「从置顶区移除」（后者即原 `×` 的语义）。
 - **活跃区行菜单**：「编辑标签…」+「**添加到置顶区**」（写回同一份 `dsh-focus-pinned`，
   置顶区行随之出现）。
 - **`×` 与 `#` 按钮删除**：行尾只留一个 `⋯`；`makeTagButton` 与 `TAG_BUTTON_ATTR`
   随之移除（已无消费方）。
 - 菜单**单例**（同时只开一个）；点菜单外或面板/菜单内按 Esc 关闭；打开时触发按钮
-  `aria-expanded=true`，关闭复位。
+  `aria-expanded=true`，关闭复位。（2026-09-13 补齐官方 portal 语义：按锚点矩形固定定位、
+  开着期间跟随 scroll/resize、指针离开触发按钮与卡片后 200ms 宽限关闭、行保持 hover 底。）
 - 样式注入用引用计数（两区共用一份，任一方卸载不摘掉另一方在用的样式）。
 
 ## Alternatives

@@ -10,6 +10,11 @@
  *   `.label` 的 22px/12px 之间的会话行内小尺寸）。
  * - 配色 = 官方 token：底 `--dsw-alias-fill-tsp-secondary`、字 `--dsw-alias-label-secondary`，
  *   色调只换字色（官方状态语义色 primary）。不引入新色值。
+ * - 标签编辑弹框 = 官方 Modal 契约（`ui-primitives/src/Modal.module.css`，kernel
+ *   0.1.2-rc.1）：根全屏层 z1000 + 遮罩（`--dsw-alias-bg-mask-1` + `--dsw-mask-blur`）
+ *   + 居中卡片 r24 / `--dsw-alias-bg-layer-2` / `--dsw-elevation-prominent` /
+ *   `width:min(380px,100%)` / 标题行 `22px 14px 12px 24px` / 正文与底部行 `0 24px`；
+ *   卡片内的胶囊、输入框、按钮分别用官方 Pill / Input / Button 的几何与 token。
  */
 
 /** 可选的胶囊色调（键即 settings 里存的 tone 值）。 */
@@ -36,8 +41,20 @@ const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/tags"]'
 export const TAG_LIST_ATTR = 'data-dsh-tag-list'
 /** 单个胶囊标记。 */
 export const TAG_ATTR = 'data-dsh-tag'
-/** 编辑面板标记。 */
+/** 编辑弹框根标记（官方 Modal `.root`：全屏层 + 居中卡片）。 */
 export const TAG_EDITOR_ATTR = 'data-dsh-tag-editor'
+/** 弹框遮罩标记（官方 Modal `.mask`）。 */
+const TAG_MASK_ATTR = 'data-dsh-tag-mask'
+/** 弹框卡片标记（官方 Modal `.dialog`）。 */
+const TAG_DIALOG_ATTR = 'data-dsh-tag-dialog'
+/** 标题行关闭按钮标记（官方 Modal `.close`）。 */
+const TAG_CLOSE_ATTR = 'data-dsh-tag-close'
+/** 弹框正文标记（官方 Modal `.body`）。 */
+const TAG_BODY_ATTR = 'data-dsh-tag-body'
+/** 弹框底部操作行标记（官方 Modal `.footer`）。 */
+const TAG_FOOTER_ATTR = 'data-dsh-tag-footer'
+/** 输入框外壳标记（官方 Input `.wrap`）。 */
+const TAG_INPUT_WRAP_ATTR = 'data-dsh-tag-input-wrap'
 /** 面板内输入框标记。 */
 const TAG_INPUT_ATTR = 'data-dsh-tag-input'
 /** 面板内已存在标签（点击删除）标记。 */
@@ -94,7 +111,7 @@ export function removeTag(tags: readonly SessionTag[], text: string): SessionTag
   return tags.filter((tag) => tag.text !== text)
 }
 
-/** 胶囊 + 编辑面板样式。 */
+/** 胶囊 + 标签编辑弹框样式。 */
 export function tagCss(): string {
   return [
     // 胶囊（官方小标签形态：全圆角 + 小字号 + 语义色字）；行首排列，右侧 4px 与标题分隔。
@@ -104,21 +121,44 @@ export function tagCss(): string {
     `[${TAG_ATTR}][data-tone='green']{color:var(--dsw-alias-state-success-primary)}`,
     `[${TAG_ATTR}][data-tone='amber']{color:var(--dsw-alias-state-warn-primary)}`,
     `[${TAG_ATTR}][data-tone='red']{color:var(--dsw-alias-state-error-primary)}`,
-    // 行尾「#」编辑按钮（hover/focus-within 显示，照置顶区 × 的显隐契约）。
-    // 编辑面板（贴行弹出的轻量气泡）。
-    `[${TAG_EDITOR_ATTR}]{position:fixed;z-index:2147483000;display:flex;flex-direction:column;gap:6px;min-width:200px;max-width:260px;padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-overlay);box-shadow:0 4px 16px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);font-family:inherit}`,
-    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-editor-title]{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary)}`,
+    // 编辑弹框 = 官方 Modal 契约（ui-primitives/src/Modal.module.css，kernel 0.1.2-rc.1）：
+    // 根全屏层 z1000 + 遮罩（bg-mask-1 + mask-blur）+ 居中卡片 r24 / layer-2 /
+    // elevation-prominent / width min(380px,100%) / gap 20 / padding 0 0 24px。
+    `[${TAG_EDITOR_ATTR}]{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;font-family:inherit}`,
+    `[${TAG_MASK_ATTR}]{position:absolute;inset:0;background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur)}`,
+    `[${TAG_DIALOG_ATTR}]{position:relative;z-index:1;display:flex;flex-direction:column;gap:20px;box-sizing:border-box;width:min(380px,100%);padding:0 0 24px;overflow:hidden;border:0;border-radius:24px;background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-prominent)}`,
+    // 标题行（官方 .header pad l24/t22/r14/b12；标题 16/24 wt500；关闭钮 28×28 r8）。
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-header]{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:22px 14px 12px 24px}`,
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-editor-title]{margin:0;font-size:16px;line-height:24px;font-weight:500;color:var(--dsw-alias-label-primary)}`,
+    `[${TAG_CLOSE_ATTR}]{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:8px;background:transparent;cursor:pointer;color:var(--dsw-alias-label-secondary)}`,
+    `[${TAG_CLOSE_ATTR}]:hover{background:var(--dsw-alias-interactive-bg-hover)}`,
+    // 正文（官方 .body：margin-top 20 / padding 0 24px）。
+    `[${TAG_BODY_ATTR}]{display:flex;flex-direction:column;gap:12px;min-width:0;margin-top:20px;padding:0 24px}`,
     `[${TAG_EDITOR_ATTR}] [data-dsh-tag-editor-current]{display:flex;flex-wrap:wrap;gap:4px}`,
-    `[${TAG_EDITOR_ATTR}] [${TAG_REMOVE_ATTR}]{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border:none;border-radius:10px;background:var(--dsw-alias-fill-tsp-secondary);color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:11px;line-height:20px;cursor:pointer}`,
-    `[${TAG_EDITOR_ATTR}] [${TAG_REMOVE_ATTR}]:hover{color:var(--dsw-alias-label-primary)}`,
-    `[${TAG_EDITOR_ATTR}] [${TAG_INPUT_ATTR}]{box-sizing:border-box;width:100%;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px}`,
+    // 已存在标签 = 官方 Pill 几何（h24 / pad 0 8px / r12 / 12-18 / layer-2 底）。
+    `[${TAG_REMOVE_ATTR}]{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border:none;border-radius:12px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-family:inherit;font-size:12px;line-height:18px;cursor:pointer}`,
+    `[${TAG_REMOVE_ATTR}]:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}`,
+    // 输入框 = 官方 Input 契约（.wrap h32 / pad 0 8px / 0.5px border-l4 / r8 / layer-1）。
+    `[${TAG_INPUT_WRAP_ATTR}]{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;height:32px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:8px;background:var(--dsw-alias-bg-layer-1)}`,
+    `[${TAG_INPUT_WRAP_ATTR}]:focus-within{border-color:var(--dsw-alias-brand-primary)}`,
+    `[${TAG_INPUT_ATTR}]{flex:1;min-width:0;border:none;outline:none;background:transparent;font-family:inherit;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}`,
+    `[${TAG_INPUT_ATTR}]::placeholder{color:var(--dsw-alias-label-dimmed)}`,
     `[${TAG_EDITOR_ATTR}] [data-dsh-tag-editor-tones]{display:flex;align-items:center;gap:6px}`,
-    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone]{width:16px;height:16px;padding:0;border:1px solid var(--dsw-alias-border-l2);border-radius:50%;background:var(--dsw-alias-fill-tsp-secondary);cursor:pointer}`,
-    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='blue']{background:var(--dsw-alias-state-business-primary)}`,
-    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='green']{background:var(--dsw-alias-state-success-primary)}`,
-    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='amber']{background:var(--dsw-alias-state-warn-primary)}`,
-    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='red']{background:var(--dsw-alias-state-error-primary)}`,
-    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][aria-pressed='true']{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}`,
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone]{width:16px;height:16px;padding:0;border:0.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:transparent;cursor:pointer}`,
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone]:hover{border-color:var(--dsw-alias-label-secondary)}`,
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='blue'][aria-pressed='true']{background:var(--dsw-alias-state-business-primary)}`,
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='green'][aria-pressed='true']{background:var(--dsw-alias-state-success-primary)}`,
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='amber'][aria-pressed='true']{background:var(--dsw-alias-state-warn-primary)}`,
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='red'][aria-pressed='true']{background:var(--dsw-alias-state-error-primary)}`,
+    `[${TAG_EDITOR_ATTR}] [data-dsh-tag-tone][data-tone='neutral'][aria-pressed='true']{background:var(--dsw-alias-label-tertiary)}`,
+    // 底部操作行（官方 .footer：右对齐 + gap 8 + padding 0 24px）+ 官方 Button 契约
+    // （h36 / pad 0 14px / r18 / 14-22；outline = 0.5px border-l3；primary = button-primary-fill）。
+    `[${TAG_FOOTER_ATTR}]{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 24px}`,
+    `[${TAG_FOOTER_ATTR}] button{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:36px;padding:0 14px;border:none;border-radius:18px;background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:22px;cursor:pointer}`,
+    `[${TAG_FOOTER_ATTR}] button[data-variant='outline']{border:0.5px solid var(--dsw-alias-border-l3)}`,
+    `[${TAG_FOOTER_ATTR}] button[data-variant='outline']:hover{background:var(--dsw-alias-interactive-bg-hover)}`,
+    `[${TAG_FOOTER_ATTR}] button[data-variant='primary']{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}`,
+    `[${TAG_FOOTER_ATTR}] button[data-variant='primary']:hover{background:var(--dsw-alias-button-primary-hover)}`,
   ].join('')
 }
 
@@ -177,7 +217,7 @@ export function renderTagPills(container: HTMLElement, tags: readonly SessionTag
   }
 }
 
-/** 标签编辑面板的依赖。 */
+/** 标签编辑弹框的依赖。 */
 export interface TagEditorDeps {
   /** 会话 id。 */
   sessionId: string
@@ -185,48 +225,78 @@ export interface TagEditorDeps {
   getTags(sessionId: string): readonly SessionTag[]
   /** 写该会话标签（整份映射由调用方回写 settings）。 */
   setTags(sessionId: string, tags: readonly SessionTag[]): void
-  /** 定位锚点（行元素）。 */
-  anchor: HTMLElement
+  /** 文档（测试注入；缺省 = 当前文档，与官方 Modal 的 `createPortal(document.body)` 同落点）。 */
+  doc?: Document
 }
 
-/** 当前打开的编辑面板（同一时刻只允许一个）。 */
-let openEditor: HTMLElement | null = null
+/** 当前打开的编辑弹框（同一时刻只允许一个）。 */
+let openEditor: { root: HTMLElement; dispose: () => void } | null = null
 
-/** 关闭当前编辑面板（若有）。 */
+/** 关闭当前编辑弹框（若有）。 */
 export function closeTagEditor(): void {
-  openEditor?.remove()
+  if (openEditor === null) return
+  const current = openEditor
   openEditor = null
+  current.dispose()
+  current.root.remove()
 }
 
 /**
- * 打开标签编辑面板：列出当前标签（点击移除）+ 输入框（回车加标签）+ 色调选择。
- * 同一时刻只保留一个面板；点面板外或按 Esc 关闭。
- * @param deps - 面板依赖。
+ * 打开标签编辑弹框：列出当前标签（点击移除）+ 输入框（回车加标签）+ 色调选择。
+ * 形态照官方 Modal 契约（遮罩 + 居中卡片 + 标题行/正文/底部操作行）；同一时刻只
+ * 保留一个弹框；Esc、遮罩点击、关闭/取消/完成都关闭（标签在回车时即时写入）。
+ * @param deps - 弹框依赖。
  */
 export function openTagEditor(deps: TagEditorDeps): void {
-  const doc = deps.anchor.ownerDocument
+  const doc = deps.doc ?? document
   closeTagEditor()
   let tone: TagTone = 'neutral'
 
-  const panel = doc.createElement('div')
-  panel.setAttribute(TAG_EDITOR_ATTR, '')
-  panel.setAttribute('role', 'dialog')
-  panel.setAttribute('aria-label', '编辑标签')
+  const root = doc.createElement('div')
+  root.setAttribute(TAG_EDITOR_ATTR, '')
+  root.setAttribute('role', 'presentation')
 
-  const title = doc.createElement('div')
+  const mask = doc.createElement('div')
+  mask.setAttribute(TAG_MASK_ATTR, '')
+  mask.setAttribute('aria-hidden', 'true')
+  root.appendChild(mask)
+
+  const dialog = doc.createElement('div')
+  dialog.setAttribute(TAG_DIALOG_ATTR, '')
+  dialog.setAttribute('role', 'dialog')
+  dialog.setAttribute('aria-modal', 'true')
+  dialog.setAttribute('aria-label', '编辑标签')
+  root.appendChild(dialog)
+
+  const header = doc.createElement('div')
+  header.setAttribute('data-dsh-tag-header', '')
+  const title = doc.createElement('h2')
   title.setAttribute('data-dsh-tag-editor-title', '')
-  title.textContent = '标签'
-  panel.appendChild(title)
+  title.textContent = '编辑标签'
+  const close = doc.createElement('button')
+  close.type = 'button'
+  close.setAttribute(TAG_CLOSE_ATTR, '')
+  close.setAttribute('aria-label', '关闭')
+  close.textContent = '✕'
+  header.append(title, close)
+  dialog.appendChild(header)
+
+  const body = doc.createElement('div')
+  body.setAttribute(TAG_BODY_ATTR, '')
+  dialog.appendChild(body)
 
   const current = doc.createElement('div')
   current.setAttribute('data-dsh-tag-editor-current', '')
-  panel.appendChild(current)
+  body.appendChild(current)
 
+  const inputWrap = doc.createElement('div')
+  inputWrap.setAttribute(TAG_INPUT_WRAP_ATTR, '')
   const input = doc.createElement('input')
   input.setAttribute(TAG_INPUT_ATTR, '')
   input.type = 'text'
   input.placeholder = '输入标签，回车添加'
-  panel.appendChild(input)
+  inputWrap.appendChild(input)
+  body.appendChild(inputWrap)
 
   const tones = doc.createElement('div')
   tones.setAttribute('data-dsh-tag-editor-tones', '')
@@ -247,9 +317,22 @@ export function openTagEditor(deps: TagEditorDeps): void {
     })
     tones.appendChild(dot)
   }
-  panel.appendChild(tones)
+  body.appendChild(tones)
 
-  /** 重画面板内当前标签（点击移除）。 */
+  const footer = doc.createElement('div')
+  footer.setAttribute(TAG_FOOTER_ATTR, '')
+  const cancel = doc.createElement('button')
+  cancel.type = 'button'
+  cancel.dataset.variant = 'outline'
+  cancel.textContent = '取消'
+  const done = doc.createElement('button')
+  done.type = 'button'
+  done.dataset.variant = 'primary'
+  done.textContent = '完成'
+  footer.append(cancel, done)
+  dialog.appendChild(footer)
+
+  /** 重画弹框内当前标签（点击移除）。 */
   const renderCurrent = (): void => {
     const tags = deps.getTags(deps.sessionId)
     current.replaceChildren()
@@ -284,25 +367,20 @@ export function openTagEditor(deps: TagEditorDeps): void {
     input.value = ''
     renderCurrent()
   })
-  // 行内按钮点击/面板内点击不冒泡到「点外关闭」。
-  panel.addEventListener('click', (e) => e.stopPropagation())
-  input.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation()
-      closeTagEditor()
-    }
-  })
+  const onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') closeTagEditor()
+  }
+  mask.addEventListener('click', () => closeTagEditor())
+  close.addEventListener('click', () => closeTagEditor())
+  cancel.addEventListener('click', () => closeTagEditor())
+  done.addEventListener('click', () => closeTagEditor())
+  doc.addEventListener('keydown', onKeyDown)
 
   renderCurrent()
-  doc.body.appendChild(panel)
-  // 定位：贴在行下方；越界时上移/左移收敛在视口内。
-  const rect = deps.anchor.getBoundingClientRect()
-  const panelRect = panel.getBoundingClientRect()
-  const top = rect.bottom + 6 + panelRect.height > window.innerHeight
-    ? Math.max(8, rect.top - panelRect.height - 6)
-    : rect.bottom + 6
-  panel.style.top = `${top}px`
-  panel.style.left = `${Math.min(rect.left, Math.max(8, window.innerWidth - panelRect.width - 8))}px`
-  openEditor = panel
+  doc.body.appendChild(root)
+  openEditor = {
+    root,
+    dispose: (): void => doc.removeEventListener('keydown', onKeyDown),
+  }
   input.focus()
 }

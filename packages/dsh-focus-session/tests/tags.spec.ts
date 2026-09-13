@@ -16,6 +16,7 @@ import {
   openTagEditor,
   removeTag,
   renderTagPills,
+  tagCss,
   tagLabel,
   tagsOf,
 } from '../src/client/tags.ts'
@@ -143,30 +144,71 @@ describe('injectTagCss', () => {
   })
 })
 
-describe('openTagEditor', () => {
+describe('openTagEditor（官方 Modal 契约）', () => {
   let sessionTags: { text: string; tone?: string }[]
-  let anchor: HTMLElement
 
   const deps = () => ({
     sessionId: 's1',
-    anchor,
+    doc: document,
     getTags: () => sessionTags,
     setTags: (_id: string, tags: readonly { text: string; tone?: string }[]) => {
       sessionTags = tags.map((t) => ({ ...t }))
     },
   })
 
+  const css = (): string => tagCss()
+  const dialog = (): HTMLElement => document.querySelector<HTMLElement>('[data-dsh-tag-dialog]')!
+
   beforeEach(() => {
     document.body.innerHTML = ''
     sessionTags = []
-    anchor = document.createElement('div')
-    document.body.appendChild(anchor)
   })
 
-  it('打开面板并在点外部后关闭', () => {
+  it('弹框结构照官方 Modal：遮罩 + 居中卡片（标题行/正文/底部操作行）', () => {
     openTagEditor(deps())
     expect(document.querySelector(`[${TAG_EDITOR_ATTR}]`)).not.toBeNull()
+    expect(document.querySelector('[data-dsh-tag-mask]')).not.toBeNull()
+    const card = dialog()
+    expect(card.getAttribute('role')).toBe('dialog')
+    expect(card.getAttribute('aria-modal')).toBe('true')
+    expect(card.querySelector('[data-dsh-tag-header] h2')?.textContent).toBe('编辑标签')
+    expect(card.querySelector('[data-dsh-tag-close]')).not.toBeNull()
+    expect(card.querySelector('[data-dsh-tag-body]')).not.toBeNull()
+    const footer = card.querySelector('[data-dsh-tag-footer]')!
+    expect(footer.querySelectorAll('button')).toHaveLength(2)
     closeTagEditor()
+    expect(document.querySelector(`[${TAG_EDITOR_ATTR}]`)).toBeNull()
+  })
+
+  it('样式含官方 Modal / Input / Button 度量', () => {
+    const text = css()
+    expect(text).toContain('z-index:1000')
+    expect(text).toContain('border-radius:24px')
+    expect(text).toContain('width:min(380px,100%)')
+    expect(text).toContain('gap:20px')
+    expect(text).toContain('--dsw-alias-bg-mask-1')
+    expect(text).toContain('--dsw-mask-blur')
+    expect(text).toContain('--dsw-elevation-prominent')
+    expect(text).toContain('height:32px')      // 官方 Input .wrap
+    expect(text).toContain('border-radius:8px')
+    expect(text).toContain('height:36px')      // 官方 Button .md
+    expect(text).toContain('border-radius:18px')
+    expect(text).toContain('--dsw-alias-button-primary-fill')
+  })
+
+  it('遮罩点击 / Esc / 完成 都关闭弹框', () => {
+    openTagEditor(deps())
+    document.querySelector<HTMLElement>('[data-dsh-tag-mask]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector(`[${TAG_EDITOR_ATTR}]`)).toBeNull()
+
+    openTagEditor(deps())
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(document.querySelector(`[${TAG_EDITOR_ATTR}]`)).toBeNull()
+
+    openTagEditor(deps())
+    dialog().querySelector<HTMLButtonElement>('[data-dsh-tag-footer] button[data-variant="primary"]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(document.querySelector(`[${TAG_EDITOR_ATTR}]`)).toBeNull()
   })
 
@@ -193,11 +235,13 @@ describe('openTagEditor', () => {
     closeTagEditor()
   })
 
-  it('面板是单例：再次打开替换前一个', () => {
+  it('弹框是单例：再次打开替换前一个（Esc 监听不残留）', () => {
     openTagEditor(deps())
     openTagEditor(deps())
     expect(document.querySelectorAll(`[${TAG_EDITOR_ATTR}]`)).toHaveLength(1)
     closeTagEditor()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(document.querySelector(`[${TAG_EDITOR_ATTR}]`)).toBeNull()
   })
 })
 

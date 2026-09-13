@@ -329,7 +329,6 @@ export function startActiveStrip(deps: ActiveStripDeps): () => void {
           onSelect: () => {
             openTagEditor({
               sessionId: id,
-              anchor: row,
               getTags: (sid) => deps.getTags(sid),
               setTags: (sid, tags) => deps.setTags(sid, tags),
             })
