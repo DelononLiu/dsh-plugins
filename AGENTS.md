@@ -35,11 +35,11 @@ pnpm test         # pnpm -r test
 ## 分层与依赖纪律（最高优先级）
 
 ```
-业务 app（vendored 功能应用）  dst-agent-teams（多 Agent 协作编排）· 全家桶功能应用（task-board/ssh/git-graph…）
-UI                         dsh-desk（布局平台 + 工具入口组装器）· dsh-quick-nav（顶部区域）· dsh-focus-session（侧栏关注区：置顶/活跃/标签）· dsh-focus-tabs（tab 行）· 各界面 · 全家桶 UI 能力（better-sidebar 侧边栏；无皮肤）
-管理组件                    dsh-console（档案/生命周期/部署编排/inbox，升级回滚为遗留项）+ 社区 dsh-prometheus
-系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区）· LLM 记忆（社区 dsh-memento）
-内核                        官方 deepseek-harness（0.1.2-rc.1，2026-09 对齐）
+业务 app（vendored 功能应用）  当前无 vendored 成员（task-board/ssh/git-graph/skill-explorer 与 dst-agent-teams 均 2026-09-26 移除；协作编排改用官方 agent-team）
+UI                         dsh-desk（布局配置服务）· dsh-quick-nav（顶部区域）· dsh-focus-session（侧栏关注区：置顶/活跃/标签）· dsh-focus-tabs（tab 行）· 各界面（vendored UI 应用已移除：UI = 官方原生 + 自研关注层；无皮肤）
+管理组件                    dsh-console（档案/生命周期/部署编排/inbox，升级回滚为遗留项）
+系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区 clarknu/dsh-gateway，2026-09-26 起不内置实例——独立部署为 backlog）· LLM 记忆（社区 dsh-memento，选定未接入）
+内核                        官方 deepseek-harness（0.1.7-rc.2，2026-09-26 对齐）
 ```
 
 - **依赖严格向下**：业务 app→UI→管理组件→系统→内核，禁止反向或跨层依赖；UI 层内部允许聚合依赖（meta 包）。
@@ -47,12 +47,12 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 - **控制面/执行面分离**：console 只编排决策，远程 agent 本地执行，SSH 仅一次性引导。
 - **UI 默认与官方一致（抄官方）**：任何 UI 元素以官方对应组件（DOM 结构 / CSS 机制 / 属性值）为唯一基准，默认直接照抄，不手写近似、不自由发挥——官方组件实现即样式契约（见 [.agents/notes/implemented/process/2026-08-22-ui-official-alignment.md](.agents/notes/implemented/process/2026-08-22-ui-official-alignment.md)）。
 - **UI 可替换**：UI 层不进入核心契约。
-- **自研边界**：系统层自研核心（dsh-user 身份模型 + dsh-channel 通信），**认证网关采用社区 vendored**（接入件可替换）；管理组件自研主体 + 社区通用能力；UI/业务 app 以社区为主。完整矩阵见 `docs/architecture.md` §5。
+- **自研边界**：系统层自研核心（dsh-user 身份模型 + dsh-channel 通信），**认证网关采用社区 vendored**（接入件可替换；2026-09-26 起不内置实例）；管理组件自研主体 + 社区通用能力；UI/业务 app 以社区为主。完整矩阵见 `docs/architecture.md` §5。
 
 ## 命名空间
 
 - `dsh-*` = 自研家族（packages/，发布 npm）；`dst-*` = vendored 第三方。
-- 社区包保留原名（vendored 不重命名，防与上游发布版脱钩）：dsh-web-ui（UI 全家桶来源，npm @linxin666）、dsh-memento（LLM 记忆）、dst-agent-teams（业务 app）；改造走 cordis.patch.yml 补丁层，不 fork。
+- 社区包保留原名（vendored 不重命名，防与上游发布版脱钩）：dsh-web-ui（UI 全家桶来源，npm @linxin666）、dsh-memento（LLM 记忆）；改造走 cordis.patch.yml 补丁层，不 fork。
 - 新增名字前查 npm + GitHub 占用（已有名字均已实查，见 `docs/architecture.md` §8）。
 
 ## 开发模式
@@ -61,19 +61,19 @@ UI                         dsh-desk（布局平台 + 工具入口组装器）· 
 
 - **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
 - **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
-- 本项目当前为**已实现 + 部分接入**：6 插件实现（124 测试全绿）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
-- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定，2026-09 内核升 0.1.2-rc.1）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 rc.1 CLI**（`~/dsh-alpha5-cli`，与正式内核解耦），启停/状态/重启用 `scripts/dsh-profile.sh`——实例清单读**注册表** `~/.dsh-home/registry.json`（读写用 `scripts/dsh-registry.mjs`；唯一权威，运行时**不扫描目录**，主键 `<host>/<id>`）：参数 = 实例名，按注册表取 home/profileDir + 读该实例自己 cordis.patch.yml 的 webserver.port（无 webserver = headless）；未登记/目录缺失报错（不设别名/不猜），`import` 子命令显式登记现有实例（幂等）；**start/stop/restart/resolve 必须点名实例（无参禁用，防止误碰开发实例）**，`status` 列出注册表内全部；restart 继承旧进程的**实例作用域 env**（provider 凭证、channel id），**会话/宿主变量一律剔除**（DSH_SESSION_ID/DSH_SESSION_JSONL/DSH_SHELL/DSH_WEB_URL，调用方 env 与旧进程继承两条路径都过滤）；start/restart **等待就绪**（端口监听 **且 HTTP 有应用应答**——实测存在"端口已监听但应用仍返回 404"的启动窗口期；headless 只看进程；web 实例自动带 `--no-open`；就绪后打印该实例的**登录链接**，旧标签页据此重开；超时打印日志尾部并非零退出）；自操作防护：目标进程是当前 shell 的**祖先进程**时拒绝 stop/restart（防止自己杀自己；pid 未知时回落"DSH_HOME 相等即拒绝"）——共享 home 的 web/daemon 靠 DSH_HOME 分不出"自己"，故按祖先链判定。下表现有已知实例，老实例（`~/.dsh-<名>`，自带安装）经一次 `dsh-profile.sh import` 登记；新实例（`~/.dsh-home/instance-<名>`，引用 runtime 池）由创建流程登记（见 [console 实例模型](.agents/notes/implemented/architecture/2026-09-13-console-instance-model.md)）：
+- 本项目当前为**已实现 + 部分接入**：8 插件实现（418 测试全绿；含 vendored typert-protocol 构建期镜像）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
+- **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定；2026-09-26 起内核基线 0.1.7-rc.2）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 CLI**（与正式内核解耦）：`~/dsh-017-cli` = 0.1.7-rc.2（web2/web5 现用；`scripts/dsh-profile.sh` 的默认 `DSH_BIN`）；旧基线 `~/dsh-alpha5-cli`（0.1.2-rc.1）已退役——旧内核启动会被 peer 闸门禁用自研插件，启停/状态/重启用 `scripts/dsh-profile.sh`——实例清单读**注册表** `~/.dsh-home/registry.json`（读写用 `scripts/dsh-registry.mjs`；唯一权威，运行时**不扫描目录**，主键 `<host>/<id>`）：参数 = 实例名，按注册表取 home/profileDir + 读该实例自己 cordis.patch.yml 的 webserver.port（无 webserver = headless）；未登记/目录缺失报错（不设别名/不猜），`import` 子命令显式登记现有实例（幂等）；**start/stop/restart/resolve 必须点名实例（无参禁用，防止误碰开发实例）**，`status` 列出注册表内全部；restart 继承旧进程的**实例作用域 env**（provider 凭证、channel id），**会话/宿主变量一律剔除**（DSH_SESSION_ID/DSH_SESSION_JSONL/DSH_SHELL/DSH_WEB_URL，调用方 env 与旧进程继承两条路径都过滤）；start/restart **等待就绪**（端口监听 **且 HTTP 有应用应答**——实测存在"端口已监听但应用仍返回 404"的启动窗口期；headless 只看进程；web 实例自动带 `--no-open`；就绪后打印该实例的**登录链接**，旧标签页据此重开；超时打印日志尾部并非零退出）；自操作防护：目标进程是当前 shell 的**祖先进程**时拒绝 stop/restart（防止自己杀自己；pid 未知时回落"DSH_HOME 相等即拒绝"）——共享 home 的 web/daemon 靠 DSH_HOME 分不出"自己"，故按祖先链判定。下表现有已知实例，老实例（`~/.dsh-<名>`，自带安装）经一次 `dsh-profile.sh import` 登记；新实例（`~/.dsh-home/instance-<名>`，引用 runtime 池）由创建流程登记（见 [console 实例模型](.agents/notes/implemented/architecture/2026-09-13-console-instance-model.md)）：
 
   | 环境 | DSH_HOME | 启动 | 端口 | 角色 |
   | --- | --- | --- | --- | --- |
-  | web | `~/.dsh` | 官方 CLI（**3080 禁令**见下） | 3080 | 正式 GUI + **管理端**（`dsh-console` role: console + `dsh-channel`；另有 `dsh-gateway` + browser-skill） |
-  | web2 | `~/.dsh-web2` | `DSH_HOME=~/.dsh-web2 dsh --profile web2 --no-open` | 3082 | **开发**（日常开发/组装器验证） |
+  | web | `~/.dsh` | 官方 CLI（**3080 禁令**见下） | 3080 | 正式 GUI + **管理端**（`dsh-console` role: console + `dsh-channel`；另有 browser-skill） |
+  | web2 | `~/.dsh-web2` | `DSH_HOME=~/.dsh-web2 dsh --profile web2 --no-open` | 3082 | **开发**（日常开发/UI 基线验证） |
   | web3 | `~/.dsh-web3` | `DSH_HOME=~/.dsh-web3 dsh --profile web3 --no-open` | 3083 | **探索/测试**（变动最快；`DSH_CHANNEL_ID=web3`） |
   | web4 | `~/.dsh-web4` | `DSH_HOME=~/.dsh-web4 dsh --profile web4 --no-open` | 3084 | instance 角色（`DSH_CHANNEL_ID=web4`） |
   | daemon | `~/.dsh`（**与 web 同一 home 的另一个 profile**：`~/.dsh/profiles/daemon`） | `DSH_HOME=~/.dsh dsh --profile daemon`（headless；**管理端启动时自启** = `launch[host-master].autoStart`） | 控制口 3089（无 web） | 总控主机守护 `host-master`（`hostId: 'master'`；多机经 hub/worker **出站拉取**，broker 已退场） |
 
   实例矩阵权威源 = **管理端 web（3080 profile）**（`dsh-console.launch` 配置，cordis.patch.yml）；quick-nav/console 从 `DSH_CONSOLE_ADDR` 拉实例表。启动脚本见 `scripts/dsh-profile.sh`（`start|stop|restart daemon` 亦可，共享 home 不构成障碍：进程定位按 home + profile 双匹配）。
-  登录入口（rc.1）：官方 `dsh web` 每次启动打印 `?token=`——浏览器访问换 30 天 cookie 会话（官方 client-connection BrowserAuth，无用户/角色）。**dsh-user 多用户登录走认证网关 HTTPS（社区 clarknu/dsh-gateway）**，但官方 BrowserAuth fence 挡 gateway 反代（登录成功也 401）——官方会话桥为 backlog（见 `.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md`）。**网关不随 dsh 实例启动**（2026-09 定：多实例应共享**单一**网关，实例内置会各自抢端口/职责错位）——独立部署为 backlog，就位前实例仅官方 token 登录（见 `.agents/notes/implemented/architecture/2026-09-05-gateway-standalone-deployment.md`）。8080 HTTP 反代已移除（与 3082 重复）。
+  登录入口（0.1.7）：官方 `dsh web` 每次启动打印 `?token=`——浏览器访问换 30 天 cookie 会话（官方 client-connection BrowserAuth，无用户/角色）。**认证网关（社区 clarknu/dsh-gateway）已于 2026-09-26 下架，实例只走官方 token 登录**（此前的卡点：官方 BrowserAuth fence 挡 gateway 反代，登录成功也 401）——独立部署 + 官方会话桥为 backlog（见 `.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md`）。**网关不随 dsh 实例启动**（2026-09 定：多实例应共享**单一**网关，实例内置会各自抢端口/职责错位）——独立部署为 backlog，就位前实例仅官方 token 登录（见 `.agents/notes/implemented/architecture/2026-09-05-gateway-standalone-deployment.md`）。8080 HTTP 反代已移除（与 3082 重复）。
 - **🔴 3080 是常驻 GUI + 管理端，动它要有意识**（2026-09 修订；此前为"只读不改"禁令）：3080 = `~/.dsh` 的 `web` profile，现装 `dsh-console`（role: console）+ `dsh-channel`，是**实例矩阵权威源**。**重启 3080 会断开当前 GUI/agent 会话**——`stop|restart web` 与改 `~/.dsh/profiles/web` 配置都按"会掉线"对待，必要时由用户执行。`~/.dsh` 下的 `daemon` profile 同理受管（与 web 平级，headless）。测试实例仍一律走独立 DSH_HOME + 独立端口（3082/3083/3084），不拿 3080 做试验。
 - **client 构建**：声明 dsh.client 的插件必须产出 `lib/client.js`（官方 ModuleLoader closure 格式）——`scripts/build-client.mjs`（esbuild）生成，4 个 UI 插件 build 已接入。
 

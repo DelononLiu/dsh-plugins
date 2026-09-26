@@ -11,8 +11,8 @@
 
 ```
 ┌─ 业务 app（vendored 功能应用）───────────────────────┐
-│  dst-agent-teams（多 Agent 协作编排，第一个成员）      │
-│  全家桶功能应用（task-board/ssh/git-graph…，按需组合） │
+│  （当前无 vendored 成员：协作编排改用官方 agent-team； │
+│   全家桶功能应用已于 2026-09-26 移除）                 │
 ├─ UI（可替换）────────────────────────────────────────┤
 │   dsh-desk：UI 平台（布局/插件组合自定义；            │
 │   不做换肤——皮肤否决；meta-package；"我的"=personal）  │
@@ -41,7 +41,7 @@
 - **系统**：基础设施能力（身份、通信），被上层消费，自身无业务含义。
 - **管理组件**：面向"系统/资源运维"的能力（主机、实例、部署、健康）——IT 管理面。
 - **UI**：界面层（布局、组件组合、导航、标签），消费管理组件与系统数据。
-- **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**首个成员：dst-agent-teams（vendored 协作应用）；全家桶功能应用（task-board/ssh/git-graph 等）随 vendored dsh-web-ui 拆分归入**；**跨层依赖严格向下，UI 层内部允许聚合依赖**（meta 包，如 dsh-desk）。
+- **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**当前无成员：vendored 协作应用（dst-agent-teams）与全家桶功能应用（task-board/ssh/git-graph 等）已于 2026-09-26 移除，协作编排改用官方 agent-team（实验态）**；**跨层依赖严格向下，UI 层内部允许聚合依赖**（meta 包，如 dsh-desk）。
 
 ### 插件协作模式（服务定义 / 提供者 / 消费者）
 
@@ -78,8 +78,8 @@
 | 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-quick-nav + 快捷操作 |
 | tab 区 | 会话级切换（固定标签 + Alt+1..9 跨工作区） | dsh-focus-tabs |
 | 侧边栏（列表上方） | 手动钉住的会话（置顶区，可排序/取消）+ 最近活跃会话（活跃区） | dsh-focus-session |
-| 侧边栏 | 工作区/会话树管理 | 官方原生 + better-sidebar 增强（社区） |
-| 侧边栏底部 | 功能区快捷入口（SSH/技能中心 + 控制台 + 设置；**任务看板入口在会话头 ⚙快捷导航 右侧**），SSH/技能中心入口经 dsh-desk 组装器摆到控制台上方 | 全家桶工具入口（task-board/ssh/skill-explorer）+ console 入口 + 设置 |
+| 侧边栏 | 工作区/会话树管理 | 官方原生（2026-09-26 起不再引入 better-sidebar） |
+| 侧边栏底部 | 功能区快捷入口（控制台 + 设置） | console 入口 + 设置（vendored 工具入口随全家桶移除，2026-09-26） |
 | 侧边栏底部·用户徽标 | 当前用户（人形图标 + 用户名 + 角色 + 经网关时登出），**设置下方**，只消费身份模型 | dsh-user client 半区（/api/user/me） |
 
 **皮肤中心（dsh-web-ui 的 skin-center v2）不引入**：用户明确"不喜欢换皮肤，功能优先"；dsh-desk 自定义维度收敛为**布局 + 插件组合**（vendored 全家桶时可不装 skin-center 包）。
@@ -262,12 +262,12 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 
 | 插件 | 层 | 用途 | 说明 |
 | --- | --- | --- | --- |
-| dsh-web-ui 全家桶（@linxin666 scope） | UI + 业务 app | UI 能力（better-sidebar 侧边栏 / 布局；**不含 skin-center，皮肤否决**）+ 功能应用（task-board 任务看板 / git-graph / ssh / skill-explorer；**v1 引入 5 包**） | Apache-2.0（4 子包 BSD-3-Clause；Maid Atelier 皮肤 CC BY-NC-SA 商用需剔除——不装皮肤则无关） |
-| better-sidebar（omdsh-dev） | UI | 侧边栏框架（文件/编辑器/终端/Git 面板），registerTab/registerFileViewer 扩展点 | MIT；全家桶已集成，也可独立引入 |
-| dst-agent-teams（@nanmicoder） | 业务 app | 多 Agent 协作编排（船长+成员+任务 DAG+直接消息） | vendored 自 NanmiCoder，MIT；**业务 app 层第一个成员**；npm 安装 + lock 锁版本（v0.1.12） |
-| dsh-gateway（clarknu） | 系统·认证网关 | 登录/认证（scrypt、fail-closed、限速、吊销、多站点） | ✅ 已选定；**不随 dsh 实例启动**（2026-09：多实例应共享单一网关，实例内置会各自抢端口/职责错位）——独立部署为 backlog，见 §9 |
+| ~~dsh-web-ui 全家桶（@linxin666 scope）~~ | ~~UI + 业务 app~~ | ~~task-board / git-graph / ssh / skill-explorer~~ | **2026-09-26 全部移除**：UI 一律官方原生 + 自研关注层，不再引入 vendored UI 应用（见 [trim-vendored](../.agents/notes/implemented/architecture/2026-09-26-trim-vendored-ui-and-gateway.md)）；社区调研结论保留在 `docs/community-reference.md` |
+| ~~better-sidebar（omdsh-dev）~~ | ~~UI~~ | ~~侧边栏框架（文件/编辑器/终端/Git 面板），registerTab/registerFileViewer 扩展点~~ | **2026-09-26 移除**：侧边栏一律用官方原生，不再引入该框架（见 [drop-better-sidebar](../.agents/notes/implemented/architecture/2026-09-26-drop-better-sidebar-official-sidebar.md)）；社区调研结论仍留在 `docs/community-reference.md` |
+| ~~dst-agent-teams（@nanmicoder）~~ | ~~业务 app~~ | ~~多 Agent 协作编排~~ | **2026-09-26 移除**：协作编排改用**官方** agent-team（实验态，内核自带）；不再 vendored |
+| ~~dsh-gateway（clarknu）~~ | ~~系统·认证网关~~ | ~~登录/认证（scrypt、fail-closed、限速、吊销、多站点）~~ | **2026-09-26 下架**：实例只走官方 token 登录；独立部署（单一共享网关 + 官方会话桥）仍为 backlog，见 §9。既有不兼容：0.1.7 上其 `scope.settings.register` 已失效 |
 | dsh-memento（PerryLink） | 系统·LLM 记忆 | ctx.memory seam + 本地 SQLite + memory 工具 + 门控/审计注入 | ✅ 已选定（2026-08，npm v0.4.4 活跃）；纯本地；npm 安装 + lock 锁版本；**消费方 = agent 会话/上层插件经 ctx.memory 运行时使用（非 type-only 协作）**；官方无 memory，社区填补 |
-| dsh-prometheus | 管理组件 | 有界指标 + Grafana 总览数据面 | 挂起（console 总览复用，见 §9） |
+| ~~dsh-prometheus~~ | ~~管理组件~~ | ~~有界 Prometheus 指标 + Grafana 总览数据面~~ | **2026-09-26 评估后不引入**：上游 npm 0.1.0 的 8 个官方 peer 精确钉 `0.1.0-rc.6` → 0.1.7 的 peer 闸门会拒装；console 总览继续用手工数据，指标面将来重评（社区调研结论保留在 `docs/community-reference.md`） |
 
 > **已移除/已实现**：dsh-topbar-manager（顶栏治理）删除——nav/tabs 直接注入顶栏，不设统一注册表；dsh-update-checker（升级/备份/回滚）删除——作为 dsh-console 遗留项（console 生命周期未来补）；dsh-agent-relay（HMAC 事件总线骨架）submodule 移除——仅作 channel 设计蓝本，事件总线已由 channel 自研实现；dsh-daemon 已实现——**融入 dsh-console 的 daemon 角色**（守护进程：本机实例 spawn/kill/追踪/重启三分支/busy 锁，控制面在 console）。
 
@@ -366,7 +366,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 - [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored 机制落地~~（已定 2026-08 → **2026-08 改统一 npm**）：原"dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装"——**已改为统一 npm 安装 + lock 锁版本**（dsh-memento / dst-agent-teams npm 均有发布版，submodule 已移除；见 Vendoring policy）
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，dsh-desk 自定义维度=布局+插件组合
-- [x] ~~全家桶工具入口组装边界~~（**已实现** 2026-08，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默、④ rail 折叠态视觉验收（web2 实测正常）、**① slots 型插件显隐（git-graph 开关：`assembler.slots.gitGraph`，CSS 覆盖 chip+dialog，实时生效）** 全部落地。better-sidebar 为整体工作台框架（自带面板 toggle），不纳入组装——它自己的配置管。
+- [x] ~~全家桶工具入口组装边界~~（**已实现** 2026-08，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默、④ rail 折叠态视觉验收（web2 实测正常）、**① slots 型插件显隐（git-graph 开关：`assembler.slots.gitGraph`，CSS 覆盖 chip+dialog，实时生效）** 全部落地。（better-sidebar 为整体工作台框架、不纳入组装，已于 2026-09-26 整包移除，侧边栏改用官方原生。）
 
 - [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」；**第一二期已落地**，见 [typert-integration](../.agents/notes/implemented/architecture/2026-08-23-typert-integration.md)）：`typert → dsh-channel`（typert 调用帧经 channel 传输，broker 为 channel 可选后端）。内核 0.1.1-rc.2 内置 typert 运行时；构建期 generator 需源码（vendored typert-protocol）。**第一期**：channel @Remote（list/get/brokerStatus）+ 构建管线 + quick-nav `ctx.remote.channel.list()`。**第二期**：console @Remote（listInstances/controlInstance）+ ConsoleBadge 改 ctx.remote；**broker 下沉 channel**（console 无 broker 接口，经 `ctx.remote.channel.brokerStatus()`）。**剩余（第三期）**：① 跨实例 @RemoteScope 控制指令（console→instance/daemon）② transport 选择策略（直连 vs broker）③ typert forwardable events ↔ channel 三平面映射。
 - [ ] **多机（broker-free，2026-09-11 提案）**（见 [multihost-channel-pull](../.agents/notes/proposed/architecture/2026-09-11-multihost-channel-pull.md)）：目标形态 = 总控主机唯一 web 实例（console+channel）为全集群控制面，每台工作主机一个 headless daemon 管本机 web 实例，实例间经 channel 通信。现状阻碍（实测/读码）：① 直连 RPC 打官方 `/api/{ns}/{method}` → BrowserAuth fence 401，插件自注册路由免 fence（3082 `/api/console/instances`、3083 `/api/quick-nav/instances` 实测 200）；② 跨进程载体只有 daemon 手写的 `127.0.0.1:controlPort`（管理组件内、无凭据校验）与 broker，而 broker 无实现（`packages/dsh-agent-relay` 缺失、19121 无监听）→ `sendControl` 在无 relay 时空转、relay 不可达时 catch 吞错，`deployInstance`/`upgradeInstances` 静默；③ channel 无自己的 server、事件总线无远端投递、每事件 TTL 未生效且去重与 inbox 仅在内存；④ 身份只能来自 `relay.agent`/`DSH_RELAY_AGENT`；⑤ console 的 `/api/console/instances`、`/api/console/control` 无凭据校验（免凭据 POST 可达 handler，实测 400 非法指令），当前仅回环可及；⑥ 注册面默认信任（未配 tokens 即放行、注册无条件覆写 launch 的 addr）；⑦ daemon 运行时实例清单不持久化 → 孤儿进程。方案要点：**console 单入站口 + worker 出站拉取**（注册/保活、长轮询取指令、回执、事件上行）、console 落盘指令台账、归属唯一权威、令牌在 v1 内闭环（含默认 deny）、在线判定改用正向存活证据、事件经 hub 中继（seq 游标 + 持久去重）、地址语义分列 `localAddr`/`browserAddr`；**不建对等面**，实例不暴露控制面（生命周期全经本机 daemon）。**v1 = P1a 控制闭环 + P1b 部署/升级/状态/日志 + P2 事件面**；P3 为引导可执行、令牌轮换吊销、用户级会话鉴权。**P1a 已落地（2026-09-11）**：channel 增 `mode/id/console/token`（local/hub/worker）、hub 路由 `register`/`commands`/`result`（实例令牌鉴权、默认 deny、归属冲突拒绝）、落盘指令台账（租约重投 + 重启恢复）、worker 出站注册与长轮询；console 接入注册落档案 + inbox、控制经台账派发（未注册显式失败）、`deployInstance` 先派发后登记、hub 探测跳过跨机与已注册目标；同机 local 模式保留直连（daemon `controlPort`）。遗留见 note「P1a 遗留」。
@@ -400,9 +400,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-focus-tabs 固定会话标签行（Alt+P/Alt+1..9/编号/状态圆点） | 24 测试 |
 | dsh-focus-session 侧栏置顶区 + 活跃区 + 会话胶囊标签（钉/排序/取消钉 + 最近活跃时间序 + 行尾 ⋯ 菜单：编辑标签/加入/移出置顶 + 标签弹框；菜单/弹框照官方 Menu/Modal 契约） | 101 测试 |
 | dsh-plan-show Show 层 MVP（`show_artifact` 工具 + 产物存储 + 只读端点 + 侧栏面板五视图 + 验收矩阵"无证据=未验证" + markdown 导入/导出） | 19 测试 + dev 实例（web2/3082）自验 |
-| dsh-desk 工具入口组装器（SSH/技能中心 re-parent 到 foot 区控制台上方、任务看板隐藏 + 顶部按钮摆到会话头快捷导航右侧；均对齐官方契约样式 + 间距；无顶部目标回退 foot） | assembler.spec 15 测试 + web2 验证 |
-| dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关 + 组装器配置化/通用性 + **slots 型插件显隐 git-graph 开关**） | 25 测试（含 slots-controller 5） |
-| vendored 全家桶 5 包（better-sidebar/git-graph/ssh/task-board/skill-explorer） | profile 依赖 + lock 锁版本 |
+| dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关） | 3 测试（组装器/slots 显隐随 vendored UI 退出，2026-09-26 移除） |
 | 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh 读实例注册表 | scripts/ 已实测（registry.test.mjs 7 项 + profile-registry.test.sh 14 项） |
 | vendoring 统一 npm（submodule 归零） | AGENTS.md policy |
 
@@ -413,7 +411,6 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 
 | **typert 接入**（传输分层已定；**第一二期完成** 2026-08——channel/console @Remote + 构建管线 + broker 下沉 channel） | 部分（剩第三期） | 第三期：① 跨实例 @RemoteScope 控制指令（console→instance/daemon）② transport 选择策略（直连 vs broker）③ typert forwardable events ↔ channel 三平面映射 |
 
-| **dsh-memento / dst-agent-teams** | 待接入 | 选定未接入（v1 无消费方 / 未来成员） |
-| **dsh-prometheus** | 挂起 | 指标总览非 v1 必需——console 总览先用手工数据，指标面后续评估 |
+| **dsh-memento** | 待接入 | 选定未接入（v1 无消费方；npm 最新 0.5.18，peer 已声明 0.1.7-rc.2 兼容）。dst-agent-teams 已于 2026-09-26 移除（改用官方 agent-team） |
 | **升级回滚** | **统一升级引擎 v1 落地**（2026-09-04，见 [unified-upgrade-engine](../.agents/notes/implemented/architecture/2026-09-04-unified-upgrade-engine.md)） | 升级页 UI 接通：console 批次编排（upgradeInstances）→ daemon 事务（快照保留 3 份 → 对齐发行包源 → 滚动重启 → 健康探测 → 失败自动回滚）→ 结果落盘 `.dsh-upgrade-result.json`（事件仅进程内；跨进程 UI 完成态以实例在线状态为准）；v1 以守护本机发行包源为实（多版本 releases/ 与 patch 适配校验、跨进程 task 平面 relay = 二期/backlog） |
 | **多用户隔离实例**（2026-09-04 转正需求，团队共用服务器每人隔离实例） | 方案已出，实现未开始（见 [multi-user-isolated-instances-v1](../.agents/notes/proposed/architecture/2026-09-04-multi-user-isolated-instances-v1.md)） | 会话桥评估结论：v1 走「实例直达链接」捷径（launch token 受控派发，无需门户登录）；待实现 provisionUserInstance（复用 deployInstance）/ 每实例独立 token=个人 Key / 直达链接目录页 |

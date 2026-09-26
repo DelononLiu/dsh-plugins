@@ -36,7 +36,7 @@
 | [Airmetro/dsh-update-checker](https://github.com/Airmetro/dsh-update-checker) | 全栈更新管理：检测官方+第三方插件更新（npm+GitHub 双源）、一键更新+**备份/回滚**/watchdog 重启 | **直答未定项 U3（升级回滚策略）**：备份→更新→回滚闭环（/rollback、/plugin-rollback、/backups.json）；更新与回滚持久化到 profile package.json+lockfile 防静默回退；watchdog 以端口监听+HTTP 200 探活；写路由强制 loopback+confirm | MIT |
 | [alex04130/dsh-forge](https://github.com/alex04130/dsh-forge) | DSH 运行时扩展套件：跨会话邮箱 mailbridge、agent 团队 teamhub、模型委派、运行时注入器与插件管理面板 | **inbox/投递对应物**：mailbridge 跨会话邮箱（session_list/read/send/mailbox_check、离线消息持久排队、重启自动投递）；注入器 symlink+loader.create+auto-plugins.json 持久注册表（与发行包 patch 层思路一致） | MIT |
 | [zoahdev/dsh-plugin-doctor](https://github.com/zoahdev/dsh-plugin-doctor) | 插件健康检查：manifest/patch/entry/build/pack+全新 profile 安装验证+环境诊断（RFC #1629 dsh plugin check 先行） | **发行包质量门禁**：每条检查绑定真实事故编号；--full 模式在全新 profile 跑 pack→install→dump-config——版本锁校验+CI 冒烟可直接借鉴 | MIT |
-| [xxiaoxiong/dsh-prometheus](https://github.com/xxiaoxiong/dsh-prometheus) | 有界 Prometheus 指标（会话/回合/LLM/工具/审批/子代理/后台任务）+ Grafana dashboard，默认 loopback-only | **总览数据面**：指标刻意有界、命名语义独立成文档、不导出 payload——多实例总览聚合复用同一指标面，避免逐插件私有指标模型 | MIT |
+| [xxiaoxiong/dsh-prometheus](https://github.com/xxiaoxiong/dsh-prometheus) | 有界 Prometheus 指标（会话/回合/LLM/工具/审批/子代理/后台任务）+ Grafana dashboard，默认 loopback-only | **总览数据面**：指标刻意有界、命名语义独立成文档、不导出 payload——多实例总览聚合复用同一指标面，避免逐插件私有指标模型 | MIT · ⏸ 本仓 2026-09-26 评估后不引入（上游 peer 钉 0.1.0-rc.6，未跟内核） |
 
 ## UI · 导航与会话（dsh-quick-nav / dsh-focus-tabs）
 
@@ -113,7 +113,7 @@
 
 | 参考 | 定位 | match 与差距 | License / 可引入性 |
 | --- | --- | --- | --- |
-| [flymysql/dsh-remote](https://github.com/flymysql/dsh-remote)（npm `dsh-remote` v0.8.12） | **远程工作区执行面**：SSH（密钥/密码）连远端 → 选远程工作区 → `rw_*` 工具操作 → SFTP 镜像成本地真实 DSH 工作区 | Model-A 形态最典型（远端目录=agent 可操作工作区）；SFTP 镜像到本地工作区的双向语义需实测；`engines` 未声明（cslht fork 曾为 rc.2 适配 → rc 兼容有门槛）；依赖 dsh-better-sidebar（我们已 vendored） | MIT · 55★ · 2026-09-03 活跃 · **引入候选（需 rc.1 实测）** |
+| [flymysql/dsh-remote](https://github.com/flymysql/dsh-remote)（npm `dsh-remote` v0.8.12） | **远程工作区执行面**：SSH（密钥/密码）连远端 → 选远程工作区 → `rw_*` 工具操作 → SFTP 镜像成本地真实 DSH 工作区 | Model-A 形态最典型（远端目录=agent 可操作工作区）；SFTP 镜像到本地工作区的双向语义需实测；`engines` 未声明（cslht fork 曾为 rc.2 适配 → rc 兼容有门槛）；依赖 dsh-better-sidebar（**本仓 2026-09-26 已移除该框架，引入前需另评估**） | MIT · 55★ · 2026-09-03 活跃 · **引入候选（需 rc.1 实测）** |
 | [DobyChao/dsh-workspace-enhancement](https://github.com/DobyChao/dsh-workspace-enhancement)（npm `dsh-workspace-enhancement`） | **本地+远程工作区一体**：`ctx.subprocess`+`ctx.fs` 透明远程 provider（单 SSH 链多跳），会话可挂多个 side workspace（各自 `fs: ro/rw`+`exec: on/off` 权限），`sw_exec` 跨服务器执行，TOFU 主机钥/系统钥匙串 | 最贴合"远程工作区进会话"的**架构**（provider 注入 → tools 零改动）；多工作区+权限模型可直接参照；npm 可装 | MIT · 0★（新）· 2026-08-31 · **引入候选（需 rc.1 实测 + 质量评估）** |
 | [dsh-ssh/dsh-ssh](https://github.com/dsh-ssh/dsh-ssh)（GitHub-only） | SSH remote workspaces：在任意外部机器上跑 **bash/file/search** 工具 | 工具面最小集（只三种工具）= 远程执行面最小契约参考 | MIT · 8★ · 2026-08-27 · 无 npm（与 @linxin666/dsh-ssh 名冲突）→ 按 policy 例外不入 |
 | [@linxin666/dsh-remote-web-ui](https://github.com/zhu1090093659/dsh-web-ui/tree/main/packages/dsh-remote-web-ui)（npm v0.3.13） | **远程访问面**：QR 扫码配对手机/PC，同一官方 Web GUI（手机竖屏触控适配层），一次性配对令牌+可吊销设备会话，LAN bind 开关 / 自带 cloudflared 隧道+固定域名 | **不是工作区**（暴露"本机实例"给外部设备）；peer 钉 alpha.2 cohort + cloudflared 下载/一键自升级/遥测 → 与 daemon/多实例/官方 fence 合拍风险高，不直接引入；**其 cookie-less 配对链（/pair-accept→/pair-app，插件自 serve 官方 shell 绕过 BrowserAuth 401）= "官方会话桥"的社区实现证据，作会话桥参考** | Apache-2.0 · rc.1 对齐 · 2026-09-03 活跃 |
