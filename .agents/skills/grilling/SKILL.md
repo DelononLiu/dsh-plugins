@@ -252,6 +252,21 @@ ss -tlnp 2>/dev/null | grep -c 30[0-9][0-9]         # 实际在跑的端口数�
 判读：删除/迁移之后，**别的清单（channel 实例表、UI 视图）会不会仍显示幽灵条目**？以注册表为准做收敛
 （实测踩过：删除后 UI 仍显示已删实例）。
 
+### 19. 换包/换内核之后，跑着的进程和磁盘上的包是同一代吗？
+
+```sh
+PKG=/home/long2015/dsh-017-cli/node_modules/@deepseek-ai/dsh-client-modules   # ← 换成被换掉的包
+PID=$(pgrep -f 'dsh web' | head -1)                                            # ← 换成目标实例的启动形态
+ps -o pid,lstart,cmd -p "$PID"                                                 # 进程起于何时
+stat -c '%y %n' "$PKG/package.json"                                            # 包是什么时候被换的
+LOG=/tmp/dsh-web.log; URL="$(grep -oE 'http://[^[:space:]]+/\?token=[A-Za-z0-9_-]+' "$LOG" | tail -1)"
+curl -s "$URL" | grep -c '"batches"'                                           # 宿主拼的 wire 格式代次
+```
+判读：**进程启动时间早于包文件 mtime = 半升级现场**——宿主在内存里跑旧代码，却从磁盘发新 bundle
+（实测踩过：`dsh web` 07:14 起、09:31 换包到 0.1.7-rc.2，旧宿主拼的 boot manifest 没有 `batches`，
+新 client 要求 `batches` → 浏览器 "Failed to load plugins"）。`grep -c '"batches"'` 期望 ≥1；
+0 且包比进程新 = **换包不算升级完成，必须重启进程**。
+
 ## 收尾
 
 - 拷问产出的种子清单与 `../dsh-incident-forensics/SKILL.md` 共用：**排错时按同一份清单优先怀疑**

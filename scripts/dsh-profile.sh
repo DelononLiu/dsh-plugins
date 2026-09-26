@@ -178,7 +178,9 @@ launch_instance() {
   local deadline=$((SECONDS + READY_TIMEOUT)) pid http_code=""
   while (( SECONDS < deadline )); do
     pid="$(is_running "$home" "$profile" || true)"
-    if [[ -n "$pid" ]]; then
+    # pid 可能在 is_running 与端口判定之间退出：只认活着的 pid。否则「新进程 bind
+    # 失败已退出、别的进程仍占着端口」会让端口 + HTTP 判据误报就绪。
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       if [[ -z "$port" ]]; then
         echo "[$name] 就绪 pid=$pid（headless）"
         return 0
@@ -217,24 +219,44 @@ print_login_url() {
   return 0
 }
 
+# 本实例的进程有两种启动形态，都要认：
+#   形态一 `node …/dsh --profile <p> …`——脚本与 console 拉起（web2/web3/web5/daemon）。
+#   形态二 `node …/dsh web …`——正式实例 3080 的官方启动形态（`dsh web` 的默认
+#     profile 就是 web，命令行不带 --profile）。漏掉形态二，3080 的进程就对
+#     status/stop/restart 隐形：`restart web` 杀不掉它，新进程 bind 3080 失败退出，
+#     而就绪判据只看「端口在听 + HTTP 200」——旧进程答的 200 把失败误报成「就绪」
+#     （2026-09-26 事故现场：换包后旧进程继续服务，插件加载 wire 格式不同代）。
+# 形态判据用 argv 精确解析（首参 == --profile <p> 或 web），不用宽松的 `*dsh*`
+# glob：`dsh web2` 也会命中 `*dsh*web*`，那样 `status web` 会张冠李戴。
 is_running() {
   local home="$1" profile="$2"
-  for pid in $(pgrep -f 'dsh --profile' 2>/dev/null || true); do
+  for pid in $(pgrep -f 'dsh' 2>/dev/null || true); do
     local cmd; cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-    # 只认 node 主进程（命令行以 node …/dsh --profile 开头，兼容 .bin/dsh 与 alpha5 CLI）；
-    # 排除 bash 包装/gateway 子进程（同样继承 DSH_HOME 且命令行含 --profile，误匹配会 kill 错对象）。
-    case "$cmd" in
-      node*/dsh*--profile*) ;;
+    # 剥掉 argv[0]（node）与入口脚本，只看头两个参数定形态；入口必须是 dsh 本体
+    #（.bin/dsh 符号链接或 lib/bin.js），借此排除 bash 包装/gateway 子进程等
+    # 同样继承 DSH_HOME、命令行里也含 dsh 的旁支。
+    [[ "$cmd" == node\ * ]] || continue
+    # 逐条 local 赋值（`local a=… b=${a}` 的实参在 local 执行前就展开，set -u 下报 unbound）。
+    local rest="${cmd#node }"
+    local bin="${rest%% *}"
+    rest="${rest#* }"
+    local first="${rest%% *}"
+    local cmd_profile=""
+    case "$bin" in
+      */dsh | */dsh.js | */bin.js) ;;
+      *) continue ;;
+    esac
+    case "$first" in
+      --profile)
+        cmd_profile="${rest#--profile }"; cmd_profile="${cmd_profile%% *}"
+        ;;
+      web) cmd_profile="web" ;;
       *) continue ;;
     esac
     # profile 必须精确同名（`--profile web` 不得命中 `--profile web2`）：一个 home 下
     # 可有多个 profile（~/.dsh 的 web 与 daemon），只按 home 匹配会把 GUI 与守护混为
     # 一谈——`stop daemon` 可能命中 3080 GUI。
-    if [[ "$cmd" =~ --profile[[:space:]]+([^[:space:]]+) ]]; then
-      [[ "${BASH_REMATCH[1]}" == "$profile" ]] || continue
-    else
-      continue
-    fi
+    [[ "$cmd_profile" == "$profile" ]] || continue
     if [[ "$(cat /proc/$pid/environ 2>/dev/null | tr '\0' '\n' | grep '^DSH_HOME=' | cut -d= -f2)" == "$home" ]]; then
       echo "$pid"
       return 0

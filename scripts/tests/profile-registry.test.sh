@@ -88,6 +88,37 @@ rm -rf "$H/.dsh-web2"
 out="$(bash "$PROFILE" status 2>&1)"
 has "web2 标为不可用" "web2: 不可用" "$out"
 
+echo "== is_running：正式实例的官方启动形态 \`dsh web\`（命令行无 --profile）也要认得 =="
+# 假 dsh：被误启动时留记录，用来断言 start 没有拉起第二个进程。
+FAKE_BIN="$TMP/fake-dsh"
+cat > "$FAKE_BIN" <<'SH'
+#!/usr/bin/env bash
+echo "invoked $*" >> "${FAKE_DSH_LOG:?}"
+exit 1
+SH
+chmod +x "$FAKE_BIN"
+export DSH_BIN="$FAKE_BIN" FAKE_DSH_LOG="$TMP/launched.log" READY_TIMEOUT=1
+: > "$FAKE_DSH_LOG"
+# 造一个 cmdline = `node /fake/bin/dsh web`、DSH_HOME=$H/.dsh 的进程（exec -a 改 argv[0]）。
+( DSH_HOME="$H/.dsh" exec -a "node /fake/bin/dsh web" sleep 30 ) &
+FAKE=$!
+sleep 0.5
+out="$(bash "$PROFILE" status 2>&1)"
+has "status 认出 \`dsh web\` 形态（RUNNING）" "web: RUNNING pid=$FAKE" "$out"
+out="$(bash "$PROFILE" start web 2>&1)"; rc=$?
+[[ $rc -eq 0 ]] || { printf '  ✗ start 退出码 %s\n' "$rc"; printf '%s\n' "$out" | sed 's/^/      /'; FAIL=$((FAIL + 1)); }
+has "start 认出已在运行，不重复拉起" "已在运行 pid=$FAKE" "$out"
+if [[ -s "$FAKE_DSH_LOG" ]]; then
+  printf '  ✗ 误启动了第二个进程：%s\n' "$(cat "$FAKE_DSH_LOG")"; FAIL=$((FAIL + 1))
+else
+  printf '  ✓ 未误启动第二个进程\n'; PASS=$((PASS + 1))
+fi
+kill "$FAKE" 2>/dev/null || true
+wait "$FAKE" 2>/dev/null || true
+sleep 0.3
+out="$(bash "$PROFILE" status 2>&1)"
+has "进程退出后回到 stopped" "web: stopped" "$out"
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   printf 'profile-registry.test: 全部通过（%d 项）\n' "$PASS"
