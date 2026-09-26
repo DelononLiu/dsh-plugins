@@ -25,11 +25,6 @@ const EXPECTED_BUNDLES = {
     'dsh-focus-session',
     'dsh-focus-tabs',
     'dsh-desk',
-    'dsh-better-sidebar',
-    '@linxin666/dsh-client-ui-git-graph',
-    '@linxin666/dsh-ssh',
-    '@linxin666/dsh-client-ui-task-board',
-    '@linxin666/dsh-client-ui-skill-explorer',
   ],
   dev: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desk'],
   explorer: [

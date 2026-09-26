@@ -22,11 +22,11 @@ ROOT="$(dirname "$SCRIPT_DIR")"
 MAIN_PKGS="$ROOT/packages"
 
 # 环境矩阵：name|DSH_HOME|profile|port|role（web=有页面；daemon=headless）
+# profile 名以实例注册表 `~/.dsh-home/registry.json` 的 profileDir 为准（web2/web5 各自
+# 是 `web2`/`web5` 目录，不是 `web`）。
 ENVS=(
-  "web2|$HOME/.dsh-web2|web|3082|web"
-  "web3|$HOME/.dsh-web3|web|3083|web"
-  "web4|$HOME/.dsh-web4|web|3084|web"
-  "web5|$HOME/.dsh-web5|web|3085|web"
+  "web2|$HOME/.dsh-web2|web2|3082|web"
+  "web5|$HOME/.dsh-web5|web5|3085|web"
   "daemon|$HOME/.dsh|daemon|3089|headless"
 )
 
@@ -57,7 +57,9 @@ find_env() {
       return 0
     fi
   done
-  echo "未知环境: $name（可用: web2 web3 web4 web5 daemon）" >&2
+  local available=""
+  for e in "${ENVS[@]}"; do available+="${e%%|*} "; done
+  echo "未知环境: $name（可用: ${available% }）" >&2
   return 1
 }
 
@@ -196,15 +198,19 @@ for k in d.get('dependencies',{}):
     else
       fail "web 探活 HTTP $code（期望 200/401）"
     fi
-    # 管理端 API（console 实例表）
-    if [[ "$name" == "web2" ]]; then
+    # 管理端 API（console 实例表）——只有真装了 dsh-console 的实例才查：
+    # profile 的 bundles/patch 里没提 dsh-console 时该端点本就不该存在（401/404 都正常）。
+    local profile_dir="$home/profiles/$profile"
+    if grep -qs 'dsh-console' "$profile_dir/package.json" "$profile_dir/cordis.patch.yml"; then
       local api_code
-      api_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 'http://127.0.0.1:3082/api/console/instances' 2>/dev/null || true)"
+      api_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$port/api/console/instances" 2>/dev/null || true)"
       if [[ "$api_code" == "200" ]]; then
         pass "console API 200"
       else
         fail "console API HTTP $api_code"
       fi
+    else
+      say "  跳过 console API（本实例未装 dsh-console）"
     fi
   fi
 }
@@ -214,7 +220,8 @@ main() {
   if [[ $# -gt 0 ]]; then
     targets=("$@")
   else
-    targets=(web2 web3 web4 web5 daemon)
+    # 无参 = 矩阵里登记的全部环境（别再硬编码：web3/web4 早已 deleted）。
+    for e in "${ENVS[@]}"; do targets+=("${e%%|*}"); done
   fi
   for t in "${targets[@]}"; do
     check_env "$t"

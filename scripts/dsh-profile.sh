@@ -30,8 +30,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY_CLI="$SCRIPT_DIR/dsh-registry.mjs"
 
-# 内核 0.1.2-rc.1 独立 CLI（测试环境不与正式 ~/.dsh 共用内核；覆盖用 DSH_BIN）。
-DSH_BIN="${DSH_BIN:-/home/long2015/dsh-alpha5-cli/node_modules/.bin/dsh}"
+# 内核 0.1.7-rc.2 独立 CLI（测试环境不与正式 ~/.dsh 共用内核；覆盖用 DSH_BIN）。
+# 旧基线 ~/dsh-alpha5-cli（0.1.2-rc.1）已退役——自研包 peer 已要求 ^0.1.7-rc.2，
+# 用旧内核启动会被 peer 闸门禁用插件。
+DSH_BIN="${DSH_BIN:-/home/long2015/dsh-017-cli/node_modules/.bin/dsh}"
 
 # 启动后就绪等待上限（秒）：轮询「进程在 + 端口监听」；超时打印日志尾部并非零退出。
 READY_TIMEOUT="${READY_TIMEOUT:-20}"
