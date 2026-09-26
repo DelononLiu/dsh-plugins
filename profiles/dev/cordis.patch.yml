@@ -50,11 +50,6 @@
       name: dsh-focus-tabs
     - id: dsh-quick-nav
       name: dsh-quick-nav
-- insert:
-    - id: dsh-better-sidebar
-      name: dsh-better-sidebar
-    - id: '@linxin666/dsh-client-ui-git-graph'
-      name: '@linxin666/dsh-client-ui-git-graph'
 - id: webserver
   config:
     host: '127.0.0.1'

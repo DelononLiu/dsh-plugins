@@ -1,15 +1,15 @@
 /**
- * dsh-focus-session：UI·会话关注层（host 面）——钉住列表与胶囊标签的 settings
- * 持久化。
+ * dsh-focus-session：UI·会话关注层（host 面）——钉住列表与胶囊标签的配置面。
  *
- * 本包拥有两份会话关注数据（settings 命名空间），client 半区据此渲染侧栏
- * 「置顶区」与「活跃区」，dsh-focus-tabs 只读消费同一份数据渲染顶部会话 tab 行：
- * - `dsh-focus-pinned`：钉住的会话 id 列表（顺序即置顶区行序与 tab 行序）。
- * - `dsh-focus-tags`：会话 → 胶囊标签（人工自定义文字 + 可选色调）。
+ * 本包拥有两份会话关注数据（本插件 Config 的 volatile 字段——官方 0.1.7 起设置 =
+ * 插件自身 Config，按 profile 条目 id 定位、持久化进当前 profile patch），client
+ * 半区据此渲染侧栏「置顶区」与「活跃区」，dsh-focus-tabs 只读消费同一份数据渲染
+ * 顶部会话 tab 行：
+ * - `pinned`：钉住的会话 id 列表（顺序即置顶区行序与 tab 行序）。
+ * - `tags`：会话 → 胶囊标签（人工自定义文字 + 可选色调）。
  *
- * 旧命名空间 `dsh-tabs-pinned`（本包从 dsh-tabs 拆出前的归属）同样注册，供 client
- * 半区在 scope 就绪后一次性把旧值搬进新命名空间并清空旧值——用户既有钉不丢，且
- * 「全部取消钉」之后旧钉不会复活。
+ * （0.1.7 前这两份数据是独立 settings 命名空间 `dsh-focus-pinned` / `dsh-focus-tags`
+ * 与迁移源 `dsh-tabs-pinned`；新模型下并入本插件 Config。）
  * @module dsh-focus-session
  */
 
@@ -17,14 +17,8 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-settings'
 
-/** 钉住会话命名空间（settings 持久化）。 */
-export const PINNED_NAMESPACE = 'dsh-focus-pinned'
-
-/** 拆分前的旧钉住命名空间（一次性迁移源；迁移完成后由 client 清空）。 */
-export const LEGACY_PINNED_NAMESPACE = 'dsh-tabs-pinned'
-
-/** 会话胶囊标签命名空间。 */
-export const TAGS_NAMESPACE = 'dsh-focus-tags'
+/** 本插件的 profile 条目 id（= 设置命名空间；消费方按此 id 读同一份配置）。 */
+export const FOCUS_SESSION_ENTRY_ID = 'dsh-focus-session'
 
 /** 钉住会话 settings 结构。 */
 export interface PinnedSettings {
@@ -62,13 +56,23 @@ export const TagsSchema = z.object({
   }))).default({}),
 }) as z<TagsSettings>
 
-/** Host 插件体：注册三份命名空间（settings 服务缺席时跳过）。 */
+/**
+ * 插件 Config：两份关注数据合成一份 volatile 配置（官方 0.1.7 设置模型——只有
+ * volatile 字段可按 profile 条目 id 经表单读写，且写入不触发重挂载）。
+ * `as unknown as`：`.volatile()` 会把 schema 的第三个类型参数标成 "volatile-defined"，
+ * 与 `z<T>` 不重叠（官方同款写法不做断言，本仓库统一以断言保持既有类型口径）。
+ */
+export const Config = z.object({
+  pinned: z.array(z.string()).default([]).volatile(),
+  tags: z.dict(z.array(z.object({
+    text: z.string().required(),
+    tone: z.string(),
+  }))).default({}).volatile(),
+}) as unknown as z<PinnedSettings & TagsSettings>
+
+/** Host 插件体：两区由 client 半区自绘，故不生成自动设置页（官方同款写法）。 */
 export function apply(ctx: Context): void {
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.register(PINNED_NAMESPACE, PinnedSchema)
-    // 旧命名空间同样注册，只是为了 client 能读到旧值做一次性迁移（迁移完成后
-    // client 会把它清空）。
-    settingsCtx.settings.register(LEGACY_PINNED_NAMESPACE, PinnedSchema)
-    settingsCtx.settings.register(TAGS_NAMESPACE, TagsSchema)
+    settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, ctx.fiber))
   })
 }

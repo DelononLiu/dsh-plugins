@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-typert-protocol",
-  "version": "0.1.2-alpha.5",
-  "description": "Typert protocol（官方 alpha.5 源码 vendored——构建期 generator 需源码解析 @Remote；运行时用内核自带版）",
+  "version": "0.1.7-rc.2",
+  "description": "Typert protocol（官方 0.1.7-rc.2 源码 vendored——构建期 generator 需源码解析 @Remote；运行时用内核自带版）",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -26,11 +26,14 @@
     "typecheck": "tsc --noEmit",
     "test": "echo 'no tests (vendored source)'"
   },
+  "dependencies": {
+    "@deepseek-ai/dsh-brand": "^0.1.7-rc.2"
+  },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": "^4.0.4"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis": "^4.0.4",
     "typescript": "^6.0.3"
   }
 }

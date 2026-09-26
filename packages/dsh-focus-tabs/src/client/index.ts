@@ -28,8 +28,8 @@ import { SessionView, type SessionViewInjected } from './SessionView'
 import { normalizePendingKind, resolveRowStatus, indexRunningSubagents, type SummaryRow, type PendingInteractionKind } from './session-status'
 import { renderTabStatusDot, TAB_STATUS_ATTR } from './tab-status'
 
-/** 需要的 client 服务：插槽 + sessions + settings + uiSession。 */
-export const inject = ['slots', 'sessions', 'settingsScope', 'uiSession']
+/** 需要的 client 服务：插槽 + sessions + configForms + uiSession。 */
+export const inject = ['slots', 'sessions', 'configForms', 'uiSession']
 
 /** 会话 tab 标识标记（区分官方「对话/轨迹」tab）。 */
 const SESSION_MARK = '\u200b'
@@ -37,10 +37,12 @@ const SESSION_MARK = '\u200b'
 const ACTIVE_CLASS = 'dsh-focus-tabs-active'
 /** 抑制官方划线状态类名（body 级：当前会话固定时生效，单一划线）。 */
 const PINNED_ACTIVE_CLASS = 'dsh-focus-tabs-pinned-active'
-/** 钉住列表 settings 命名空间（由 dsh-focus-session 拥有并注册；本包只读写）。 */
-const PINNED_NS = 'dsh-focus-pinned'
+/** 钉住列表所在 profile 条目 id（dsh-focus-session 拥有 Config 字段 `pinned`；本包只读）。 */
+const FOCUS_SESSION_ENTRY_ID = 'dsh-focus-session'
+/** 布局所在 profile 条目 id（dsh-desk 拥有 Config 字段 `layout`；本包只读 `layout.tabs.visible`）。 */
+const DESK_ENTRY_ID = 'dsh-desk'
 
-/** settingsScope 绑定的固定列表。 */
+/** 配置表单绑定的固定列表。 */
 interface PinnedValue { pinned?: string[] }
 
 /**
@@ -64,19 +66,19 @@ function sessionsOf(ctx: { sessions: unknown }): TabsSessions {
 }
 
 export function apply(ctx: ClientContext): void {
-  const settings = ctx.settingsScope.bind<{ pinned: string[] }>({ namespace: PINNED_NS })
+  const settings = ctx.configForms.get<{ pinned: string[] }>(FOCUS_SESSION_ENTRY_ID)
   const pinnedOf = (): string[] => (settings.getSnapshot().value as PinnedValue | undefined)?.pinned ?? []
 
-  // 依赖诊断：`dsh-focus-pinned` 由 dsh-focus-session 注册（会话关注数据的所有者）。
-  // 只装本包时 scope 会停在 'unavailable'，本包会静默显示空标签行、Alt+P 写入也
-  // 静默失败——这里提示一次，避免无声失效（成对安装是部署约束，见拆分 note）。
+  // 依赖诊断：`dsh-focus-session` 条目携带钉住数据（会话关注数据的所有者）。只装
+  // 本包时该表单会停在 'unavailable'，本包会静默显示空标签行、Alt+P 写入也静默
+  // 失败——这里提示一次，避免无声失效（成对安装是部署约束，见拆分 note）。
   let warnedUnavailable = false
   const warnIfNamespaceUnavailable = (): void => {
     if (warnedUnavailable) return
     if ((settings.getSnapshot() as { status?: string }).status !== 'unavailable') return
     warnedUnavailable = true
     console.warn(
-      '[dsh-focus-tabs] settings 命名空间 "dsh-focus-pinned" 不可用——'
+      '[dsh-focus-tabs] 配置表单 "dsh-focus-session" 不可用——'
       + '请确认已安装 dsh-focus-session（会话钉住数据的拥有者）。会话标签行将为空。',
     )
   }
@@ -86,13 +88,14 @@ export function apply(ctx: ClientContext): void {
 
   // 会话 tab/置顶区共用：会话 pending 交互 kind（无则 undefined）。
   const pendingKindOf = (id: string): PendingInteractionKind | undefined => {
-    const entry = ctx.uiSession.pendingInteractions.getSnapshot().get(id as never) as { kind?: string } | undefined
-    return normalizePendingKind(entry?.kind)
+    const entry = ctx.uiSession.sessionStatus.getSnapshot().get(id as never) as { pendingInteraction?: { kind?: string } } | undefined
+    return normalizePendingKind(entry?.pendingInteraction?.kind)
   }
 
-  // 布局配置（dsh-desk my-ui-layout）：tabs.visible=false → 不注册会话 tab
-  // （跨插件契约 = 共享 settings 配置；原 dsh-desk「布局」设置页已删，仅实例配置/缺省）。
-  const layoutScope = ctx.settingsScope.bind<{ layout?: { tabs?: { visible?: boolean } } }>({ namespace: 'my-ui-layout' })
+  // 布局配置（dsh-desk 的 Config `layout`）：tabs.visible=false → 不注册会话 tab
+  // （跨插件契约 = 读同一个 profile 条目的 volatile 配置；原 dsh-desk「布局」设置页
+  // 已删，仅实例配置/缺省）。
+  const layoutScope = ctx.configForms.get<{ layout?: { tabs?: { visible?: boolean } } }>(DESK_ENTRY_ID)
   const tabsVisible = (): boolean => layoutScope.getSnapshot().value?.layout?.tabs?.visible ?? true
 
   // —— 选中划线：注入官方 tabActive 同款样式（仅会话 tab）+ 抑制官方划线 ——
@@ -171,7 +174,7 @@ export function apply(ctx: ClientContext): void {
   }, 'dsh-focus-tabs: active-tab observer')
 
   // 会话 tab 状态圆点：pending 变更（审批/plan/提问）也要实时刷新。
-  const unsubTabPending = ctx.uiSession.pendingInteractions.subscribe(() => applyActive())
+  const unsubTabPending = ctx.uiSession.sessionStatus.subscribe(() => applyActive())
   ctx.effect(() => () => unsubTabPending(), 'dsh-focus-tabs: tab status pending sync')
 
   // —— 会话切换（含左侧点击）：清新当前残留视图（如轨迹）→ 默认对话 ——

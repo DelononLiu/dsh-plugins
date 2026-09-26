@@ -1,7 +1,7 @@
 {
   "name": "dsh-desk",
   "version": "0.0.0",
-  "description": "UI 平台：自定义 UI（四区布局/插件组合，不做换肤——皮肤否决）；默认全家桶（侧边栏/Git/文件浏览/任务看板），meta-package 定位，改造自社区 dsh-web-ui",
+  "description": "UI 平台：布局配置服务（四区显隐/顺序/宽度，不做换肤——皮肤否决）；供 dsh-quick-nav / dsh-focus-session / dsh-focus-tabs 消费，meta-package 定位",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -9,10 +9,6 @@
     ".": {
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
-    },
-    "./client": {
-      "types": "./lib/types/client/index.d.ts",
-      "default": "./lib/client.js"
     },
     "./package.json": "./package.json"
   },
@@ -22,44 +18,29 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-desk",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-renderer"
-      ],
-      "platform": "web"
     }
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.0.0",
+    "@deepseek-ai/schemastery": "^3.18.4",
     "dsh-focus-session": "workspace:*",
     "dsh-focus-tabs": "workspace:*",
     "dsh-quick-nav": "workspace:*"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": "^4.0.4"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-layout": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-settings": "^0.1.7-rc.2",
     "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "happy-dom": "^20.11.6",
-    "react": "^19.0.0",
     "typescript": "^6.0.3",
-    "vitest": "^3.0.0",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-store": "^0.1.2-rc.1"
+    "vitest": "^3.0.0"
   }
 }

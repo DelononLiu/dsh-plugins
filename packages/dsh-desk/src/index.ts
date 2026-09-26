@@ -1,10 +1,13 @@
 /**
- * dsh-desk：UI 平台（host 面）——布局 + 插件组合自定义。
+ * dsh-desk：UI 平台（host 面）——布局配置（四区显隐/顺序/宽度）。
  *
- * meta-package 定位：聚合 UI 插件（dsh-quick-nav / dsh-focus-session / dsh-focus-tabs），提供布局
- * （顶部/tab/侧边栏/左侧按钮区）的显隐/顺序/宽度配置（Config，实例级
- * 本地配置——cordis.yml 可配；"my"= personal 哲学，不做换肤）。
- * 浏览器半区经 exports["./client"] 提供。
+ * meta-package 定位：为 UI 插件（dsh-quick-nav / dsh-focus-session / dsh-focus-tabs）
+ * 提供布局配置服务 `ctx.myUi`（实例级 Config；"my" = personal 哲学，不做换肤）。
+ *
+ * 2026-09-26：vendored 全家桶 UI 应用（task-board / ssh / git-graph / skill-explorer）
+ * 移除后，原「工具入口组装器」与「slots 型插件显隐」随之下线（它们只为那些插件的
+ * `data-dsh-*-entry` 入口与 git-graph chip 服务），本包只剩布局配置；浏览器半区
+ * 不再存在（消费方自己读同一份配置的 volatile 表单）。
  * @module dsh-desk
  */
 
@@ -28,69 +31,37 @@ export interface RegionLayout {
 /** 布局配置（实例级，v1 本地配置）。 */
 export type LayoutConfig = Record<LayoutRegion, RegionLayout>
 
-/** 组装器工具（data-dsh-*-entry 注入型，v1 三家 + 可扩展）。 */
-export type AssembledToolId = 'taskboard' | 'ssh' | 'skill'
-
-/**
- * 组装器 slots 型插件（官方插槽 occupant，无 entry 可搬——只能显隐）。
- * git-graph：会话前分支选择 chip + 图谱对话框（官方输入区插槽）。
- * better-sidebar：整体工作台框架（自带面板 toggle），不纳入组装（它自己的配置管）。
- */
-export type AssembledSlotId = 'gitGraph'
-
-/** 组装器配置（工具显隐 + slots 型插件显隐；通用性 = 运行时发现 + 配置排除）。 */
-export interface AssemblerConfig {
-  /** 工具显隐（缺省可见；false = 组装器不摆位该工具）。 */
-  tools: Partial<Record<AssembledToolId, { visible: boolean }>>
-  /** slots 型插件显隐（缺省可见；false = 隐藏该插件界面，CSS 覆盖）。 */
-  slots: Partial<Record<AssembledSlotId, { visible: boolean }>>
-}
-
-/** 默认组装器配置。 */
-export const DEFAULT_ASSEMBLER: AssemblerConfig = {
-  tools: {},
-  slots: {},
-}
-
 declare module '@deepseek-ai/cordis' {
   interface Context {
     myUi: MyUiService
   }
 }
 
-/** 插件配置：布局 + 组装器（默认全部可见，顺序 topbar/tabs/sidebar）。 */
+/** 插件配置：布局（默认三区全可见，顺序 topbar/tabs/sidebar）。 */
 export interface Config {
   layout: LayoutConfig
-  assembler: AssemblerConfig
 }
 
-/** 布局 schema 段（复用：Config 与 LayoutSettingsSchema 各一份）。 */
+/** 布局 schema 段。 */
 const layoutSchema = z.object({
   topbar: z.object({ visible: z.boolean().default(true), order: z.number().default(0), size: z.string().default('') }).default({ visible: true, order: 0, size: '' }),
   tabs: z.object({ visible: z.boolean().default(true), order: z.number().default(1), size: z.string().default('') }).default({ visible: true, order: 1, size: '' }),
   sidebar: z.object({ visible: z.boolean().default(true), order: z.number().default(2), size: z.string().default('260px') }).default({ visible: true, order: 2, size: '260px' }),
 }).default({ topbar: { visible: true, order: 0, size: '' }, tabs: { visible: true, order: 1, size: '' }, sidebar: { visible: true, order: 2, size: '260px' } })
 
-/** 组装器 schema 段（tools/slots 为 dict，键可缺省，缺省 = 可见）。 */
-const assemblerSchema = z.object({
-  tools: z.dict(z.object({ visible: z.boolean().default(true) }).default({ visible: true })).default({}),
-  slots: z.dict(z.object({ visible: z.boolean().default(true) }).default({ visible: true })).default({}),
-}).default(DEFAULT_ASSEMBLER)
-
-/** 运行时 schema。 */
+/**
+ * 运行时 schema。`layout` 声明 `volatile()`：官方 0.1.7 起「设置」= 插件自身 Config 的
+ * volatile 字段（表单按 profile 条目 id 定位、写入当前 profile patch、无需重挂载），
+ * 消费方（dsh-quick-nav / dsh-focus-tabs）按条目 id `dsh-desk` 经 `ctx.configForms.get()` 读。
+ * `as unknown as`：`.volatile()` 会把 schema 的第三个类型参数标成 "volatile-defined"，
+ * 与 `z<T>` 不重叠。
+ */
 export const Config = z.object({
-  layout: layoutSchema,
-  assembler: assemblerSchema,
-}) as z<Config>
+  layout: layoutSchema.volatile(),
+}) as unknown as z<Config>
 
-/** 布局设置命名空间（settings 持久化，client settingsScope 读写）。 */
-export const LAYOUT_NAMESPACE = 'my-ui-layout'
-
-/** 布局设置 schema（settings 注册用）。 */
-export const LayoutSettingsSchema = z.object({
-  layout: layoutSchema,
-  assembler: assemblerSchema,
-}) as z<{ layout: LayoutConfig; assembler: AssemblerConfig }>
+/** 布局数据的 profile 条目 id（= 设置命名空间；消费方按此 id 读同一份配置）。 */
+export const DESK_ENTRY_ID = 'dsh-desk'
 
 /** 默认布局（全部可见，标准顺序）。 */
 export const DEFAULT_LAYOUT: LayoutConfig = {
@@ -108,9 +79,11 @@ export class MyUiService extends Service {
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'myUi')
-    // 可选注入：settings 服务缺席（如单测）时不注册布局命名空间。
+    // 可选注入：settings 服务缺席（如单测）时不声明设置页策略。本插件的布局设置
+    // 自带消费方（quick-nav/focus-tabs 读同一份配置），不生成自动设置页
+    // （官方同款写法：configure({ auto: false })）。
     ctx.inject(['settings'], (settingsCtx) => {
-      settingsCtx.settings.register(LAYOUT_NAMESPACE, LayoutSettingsSchema)
+      settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, ctx.fiber))
     })
   }
 
@@ -126,14 +99,6 @@ export class MyUiService extends Service {
   /** 查询单区布局配置。 */
   region(region: LayoutRegion): RegionLayout {
     return this.layout()[region]
-  }
-
-  /** 读取组装器配置（工具/slots 显隐）。 */
-  assembler(): AssemblerConfig {
-    return {
-      tools: this.config.assembler.tools,
-      slots: this.config.assembler.slots,
-    }
   }
 }
 

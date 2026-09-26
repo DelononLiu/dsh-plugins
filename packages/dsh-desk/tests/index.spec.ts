@@ -1,5 +1,5 @@
 /**
- * dsh-desk 行为测试：布局配置 + 组装器配置（默认/自定义/单区查询）。
+ * dsh-desk 行为测试：布局配置（默认/自定义/单区查询）。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -13,7 +13,6 @@ function boot(config: Partial<Config> = {}): MyUiService {
       tabs: { visible: true, order: 1 },
       sidebar: { visible: true, order: 2, size: '260px' },
     },
-    assembler: { tools: {} },
     ...config,
   })
 }
@@ -36,19 +35,5 @@ describe('布局配置', () => {
   it('单区查询', () => {
     const svc = boot()
     expect(svc.region('sidebar').size).toBe('260px')
-  })
-})
-
-describe('组装器配置', () => {
-  it('默认：无工具排除', () => {
-    const svc = boot()
-    const assembler = svc.assembler()
-    expect(assembler.tools).toEqual({})
-  })
-
-  it('自定义：工具显隐', () => {
-    const svc = boot({ assembler: { tools: { ssh: { visible: false } } } })
-    const assembler = svc.assembler()
-    expect(assembler.tools.ssh?.visible).toBe(false)
   })
 })

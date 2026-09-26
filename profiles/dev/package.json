@@ -2,11 +2,7 @@
   "name": "dsh-profile-dev",
   "private": true,
   "dependencies": {
-    "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1",
-    "@linxin666/dsh-client-ui-git-graph": "0.3.12",
-    "@linxin666/dsh-client-ui-skill-explorer": "0.3.12",
-    "@linxin666/dsh-ssh": "0.3.12",
-    "dsh-better-sidebar": "0.18.0-alpha.0",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.7-rc.2",
     "dsh-channel": "link:/home/long2015/Code/dsh-plugins/packages/dsh-channel",
     "dsh-console": "link:/home/long2015/Code/dsh-plugins/packages/dsh-console",
     "dsh-desk": "link:/home/long2015/Code/dsh-plugins/packages/dsh-desk",

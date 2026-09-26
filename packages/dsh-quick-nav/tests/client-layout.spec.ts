@@ -5,13 +5,13 @@
 import { describe, expect, it } from 'vitest'
 import { apply } from '../src/client/index.ts'
 
-/** mock ClientContext（apply 需要 settingsScope + slots）。 */
+/** mock ClientContext（apply 需要 configForms + slots）。 */
 function makeCtx(initial: { topbar?: { visible?: boolean } }) {
   let value = { layout: initial }
   const listeners: Array<() => void> = []
   const registered: string[] = []
-  const scope = {
-    bind() {
+  const forms = {
+    get() {
       return {
         getSnapshot: () => ({ value }),
         subscribe: (fn: () => void) => { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1) } },
@@ -19,7 +19,7 @@ function makeCtx(initial: { topbar?: { visible?: boolean } }) {
     },
   }
   const ctx = {
-    settingsScope: scope,
+    configForms: forms,
     slots: {
       inject(_slot: string, cb: () => void): void {
         const dispose = cb()
