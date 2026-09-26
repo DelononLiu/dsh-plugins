@@ -14,6 +14,21 @@ description: Use when reviewing a pull request or branch in this repository (dsh
 - [.agents/notes/](../../notes/README.md)：设计决策记录——与 Agent Note 分歧是设计讨论，不是自动否决。
 - 变更的 Agent Note（非平凡变更必须同提交附 note）与实现一致。
 
+## Establish the change facts（先跑命令建立事实，不靠读感）
+
+评审前先用确切命令确定变更范围（命令输出即讨论基础；worktree 分支用 `main...HEAD`，main 直提用 `HEAD`）：
+
+```sh
+git log --oneline main...HEAD                # 变更提交
+git diff main...HEAD --stat                  # 改动文件与规模
+git diff --name-only main...HEAD             # 只列文件
+git diff main...HEAD --name-only | grep -E '\.agents/notes/|^docs/|AGENTS\.md' || echo '无 note/文档提交'
+git diff main...HEAD -- packages/*/package.json   # 依赖是否变化（跨层审查触发点）
+git diff --check main...HEAD                 # 空白卫生
+```
+
+判读：src 有改动但无 note/文档提交 → 触发 Blocking 1/2 核查；依赖 diff 涉及跨层 → 触发 Blocking 3。
+
 ## Blocking requirements
 
 1. **文档同步**：行为/配置/默认值/接口变更必须同步更新对应文档（architecture.md / README / AGENTS.md / 相关 note）——同提交。
