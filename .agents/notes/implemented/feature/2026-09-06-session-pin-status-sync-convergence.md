@@ -30,6 +30,11 @@ Status: implemented
 - **observer 忽略本区内部写入**：回调只响应置顶区之外（`target` 不在
   `[data-dsh-pinned-strip]` 内）的变更——本区内容完全自持、无他人改动，忽略
   自身写入不影响 React 重排后的自愈重插。
+- **观察面收敛**：`childList/subtree` 之外只额外观察 `attributes: true,
+  attributeFilter: ['aria-selected']`（读官方会话行选中态反推当前会话，见
+  [session-pin-sidebar-strip](./2026-09-06-session-pin-sidebar-strip.md)）。官方切会话
+  只改这个属性、不产生 childList；我们的行只写 `aria-current`，不在过滤器内，故不会
+  触发自身观察。
 - 同为高频率同步热点的 `title`/可见文本写入也加等值守卫，避免属性/文本抖动。
 - **回归测试**：`tests/pinned-strip.spec.ts` 加「状态点已渲染后，状态不变再次
   同步零 DOM 变更」用例（`MutationObserver.takeRecords()` 同步断言零 childList

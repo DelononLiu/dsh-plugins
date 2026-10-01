@@ -4,7 +4,7 @@
  * （无置顶区时在列表区之前），点击打开会话，订阅变更实时同步。
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ACTIVE_LIMIT,
   deriveActiveRows,
@@ -59,7 +59,6 @@ type Row = {
 interface Harness {
   pinned: string[]
   ids: string[]
-  current?: string
   byId: Record<string, Row>
   opened: string[]
   settingCbs: Array<() => void>
@@ -68,13 +67,13 @@ interface Harness {
   tags: Record<string, { text: string; tone?: string }[]>
   tagCbs: Array<() => void>
   pending: Record<string, PendingInteractionKind>
+  renamed: Array<{ id: string; title: string }>
 }
 
 function makeHarness(): Harness {
   return {
     pinned: [],
     ids: [],
-    current: undefined,
     byId: {},
     opened: [],
     settingCbs: [],
@@ -83,11 +82,31 @@ function makeHarness(): Harness {
     tags: {},
     tagCbs: [],
     pending: {},
+    renamed: [],
   }
 }
 
 function snapshotOf(h: Harness): ActiveListSnapshot {
-  return { current: h.current, ids: h.ids, byId: h.byId }
+  return { ids: h.ids, byId: h.byId }
+}
+
+/** 在官方侧栏里渲染官方会话行（`data-row-key=session:<id>` + `aria-selected`）。 */
+function renderOfficialRows(ids: string[], selected?: string): void {
+  const browser = document.querySelector('[class*="regionArea"]') ?? document.body
+  for (const id of ids) {
+    const row = document.createElement('div')
+    row.setAttribute('data-row-key', `session:${id}`)
+    row.setAttribute('role', 'treeitem')
+    row.setAttribute('aria-selected', String(id === selected))
+    browser.appendChild(row)
+  }
+}
+
+/** 切换官方选中行（只改 `aria-selected`，模拟用户切会话）。 */
+function selectOfficial(id: string | null): void {
+  document.querySelectorAll('[data-row-key^="session:"]').forEach((row) => {
+    row.setAttribute('aria-selected', String(row.getAttribute('data-row-key') === `session:${id}`))
+  })
 }
 
 function makeDeps(h: Harness, limit?: number): ActiveStripDeps {
@@ -113,6 +132,11 @@ function makeDeps(h: Harness, limit?: number): ActiveStripDeps {
     subscribeTags: (fn) => { h.tagCbs.push(fn); return () => {} },
     pendingKindOf: (id) => h.pending[id],
     subscribePending: (fn) => { h.pendingCbs.push(fn); return () => {} },
+    officialActions: {
+      fork: async () => {},
+      displayTitleOf: (id) => h.byId[id]?.displayTitle ?? id,
+      rename: async (id, title) => { h.renamed.push({ id, title }) },
+    },
     ...limit === undefined ? {} : { limit },
   }
 }
@@ -177,10 +201,9 @@ describe('deriveActiveRows', () => {
 
   it('标记当前会话 + 标题回退到 id', () => {
     const rows = deriveActiveRows([], {
-      current: 'a',
       ids: ['a', 'b'],
       byId: { a: { displayTitle: '会话 A', updatedAt: 2 }, b: { updatedAt: 1 } },
-    })
+    }, ACTIVE_LIMIT, 'a')
     expect(rows[0]).toEqual({ id: 'a', title: '会话 A', current: true })
     expect(rows[1]).toEqual({ id: 'b', title: 'b', current: false })
   })
@@ -293,15 +316,57 @@ describe('startActiveStrip', () => {
     dispose()
   })
 
-  it('当前会话行带标记属性', () => {
+  it('当前会话行带标记属性（官方选中行反推）', () => {
     buildSidebar()
-    h.current = 'a'
+    renderOfficialRows(['a'], 'a')
     h.ids = ['a']
     h.byId = { a: { displayTitle: 'A', updatedAt: 1 } }
     const dispose = startActiveStrip(makeDeps(h))
     expect(rowEls()[0].hasAttribute('data-dsh-active-current')).toBe(true)
     expect(rowEls()[0].getAttribute('aria-current')).toBe('true')
     dispose()
+  })
+
+  it('官方选中切到另一会话 → 标记移动（观察 aria-selected）', async () => {
+    buildSidebar()
+    renderOfficialRows(['a', 'b'], 'a')
+    h.ids = ['a', 'b']
+    h.byId = { a: { updatedAt: 2 }, b: { updatedAt: 1 } }
+    const dispose = startActiveStrip(makeDeps(h))
+    expect(rowEls()[0].hasAttribute('data-dsh-active-current')).toBe(true)
+
+    selectOfficial('b')
+    await vi.waitFor(() => {
+      expect(rowEls()[0].hasAttribute('data-dsh-active-current')).toBe(false)
+      expect(rowEls()[1].hasAttribute('data-dsh-active-current')).toBe(true)
+    })
+    dispose()
+  })
+
+  it('官方无选中行 → 我们所有行都不带标记', () => {
+    buildSidebar()
+    renderOfficialRows(['a', 'b']) // 全 aria-selected="false"
+    h.ids = ['a', 'b']
+    h.byId = { a: { updatedAt: 2 }, b: { updatedAt: 1 } }
+    const dispose = startActiveStrip(makeDeps(h))
+    expect(rowEls().every((el) => !el.hasAttribute('data-dsh-active-current'))).toBe(true)
+    expect(rowEls().every((el) => !el.hasAttribute('aria-current'))).toBe(true)
+    dispose()
+  })
+
+  it('dispose 后官方选中变化不再触发同步（观察者已断开）', async () => {
+    buildSidebar()
+    renderOfficialRows(['a', 'b'], 'a')
+    h.ids = ['a', 'b']
+    h.byId = { a: { updatedAt: 2 }, b: { updatedAt: 1 } }
+    const dispose = startActiveStrip(makeDeps(h))
+    expect(stripEl()).not.toBeNull()
+    dispose()
+    expect(stripEl()).toBeNull()
+
+    selectOfficial('b')
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(stripEl()).toBeNull()
   })
 
   it('标签胶囊在行首（标题之前），文字带 # 前缀', () => {
@@ -321,7 +386,7 @@ describe('startActiveStrip', () => {
     dispose()
   })
 
-  it('行尾 ⋯ 菜单「添加到置顶区」：写回钉列表且不切换会话', () => {
+  it('行尾 ⋯ 菜单：官方 rename/fork 前置，后接编辑标签与「添加到置顶区」', () => {
     buildSidebar()
     h.ids = ['a']
     h.byId = { a: { displayTitle: 'A', updatedAt: 1 } }
@@ -329,8 +394,13 @@ describe('startActiveStrip', () => {
     rowEls()[0].querySelector<HTMLElement>('[data-dsh-row-menu-button]')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     const items = Array.from(document.querySelectorAll<HTMLElement>('[data-dsh-row-menu-item]'))
-    expect(items.map((el) => el.dataset.menuItem)).toEqual(['edit-tags', 'pin'])
-    items.find((el) => el.dataset.menuItem === 'pin')!
+    expect(items.map((el) => el.dataset.menuItem)).toEqual(['rename', 'fork', 'edit-tags', 'focus-pin'])
+    expect(items[0]?.textContent).toBe('重命名')
+    expect(items[1]?.textContent).toBe('分叉会话')
+    expect(items[2]?.textContent).toBe('编辑标签')
+    expect(items[3]?.textContent).toBe('添加到置顶区')
+    // 我们的置顶行 = 关注区 pinned（官方动作项不写它）
+    items.find((el) => el.dataset.menuItem === 'focus-pin')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(h.pinned).toEqual(['a'])
     expect(h.opened).toEqual([])
@@ -338,7 +408,7 @@ describe('startActiveStrip', () => {
     dispose()
   })
 
-  it('行尾 ⋯ 菜单「编辑标签…」：打开标签面板', () => {
+  it('行尾 ⋯ 菜单「编辑标签」：打开标签面板', () => {
     buildSidebar()
     h.ids = ['a']
     h.byId = { a: { displayTitle: 'A', updatedAt: 1 } }

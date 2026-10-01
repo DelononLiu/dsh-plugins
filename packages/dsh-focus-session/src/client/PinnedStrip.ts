@@ -9,9 +9,11 @@
  * - 只显示仍存在的会话（按当前会话快照的 ids 过滤）＋ 标题取 byId.displayTitle。
  * - 行可见文本带 `N.` 编号前缀（钉序第 N；行增删自动
  *   重编号）；tooltip/aria-label 保持纯标题。
- * - 点击行 = 打开该会话（ctx.sessions.open，与点击左侧会话同路径）。
+ * - 点击行 = 打开该会话（官方 `uiWorkspace.openSession`，与官方左侧栏会话行同一入口）。
  * - 拖拽排序：整行 HTML5 拖拽，drop 时把可见钉序写回 settings；行内不实时搬移
  *   DOM（避免与 sync 的重排打架）。
+ * - 行选中态 = 当前会话（读官方侧栏 DOM 反推，见 currentSession.ts；内核未经公开
+ *   client 服务暴露当前选择）。
  *
  * 行带官方同款状态圆点（运行/子代理/完成/pending），槽 16px 保位。
  *
@@ -29,6 +31,11 @@ import {
 import {
   MENU_ATTR, MENU_BUTTON_ATTR, closeRowMenu, injectMenuCss, makeMenuButton, openRowMenu,
 } from './menu'
+import { focusSessionPinMenuItem, officialSessionMenuItems } from './sessionActions'
+import { createElement } from 'react'
+import { IconListPenOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { OfficialSessionActionDeps } from './sessionActions'
+import { readCurrentSessionId } from './currentSession'
 import type { SessionTag } from './tags'
 
 /** 置顶区根标记（幂等定位 + 自愈锚点）。 */
@@ -46,14 +53,14 @@ const PINNED_ROW_ATTR = 'data-dsh-pinned-row'
 const DRAGGING_ATTR = 'data-dsh-pinned-dragging'
 /** 拖放落点标记（值 before/after）。 */
 const DROP_ATTR = 'data-dsh-pinned-drop'
-/** 当前会话行标记（行内标题着色，对齐会话 tab 的划线色）。 */
+/** 当前会话行标记（照官方选中行：底色 `--dsw-alias-interactive-bg-hover`）。 */
 const PINNED_CURRENT_ATTR = 'data-dsh-pinned-current'
 /** 幂等样式标签标记（沿用本仓 `data-plugin-css` 约定）。 */
 const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/pinned-strip"]'
 
-/** 置顶区需要的最小会话列表快照（绕开官方 SessionId 品牌类型）。 */
+/** 置顶区需要的最小会话列表快照（绕开官方 SessionId 品牌类型；官方 `ISessions.list`
+ *  快照即结构兼容子集）。 */
 export interface PinnedListSnapshot {
-  current?: string | undefined
   ids: readonly string[]
   byId: Record<string, SummaryRow>
 }
@@ -68,6 +75,7 @@ export interface PinnedList {
 export interface PinnedRow {
   id: string
   title: string
+  /** 是否当前会话（入参 `current` 来自官方 DOM 反推，非会话快照）。 */
   current: boolean
 }
 
@@ -79,7 +87,7 @@ export interface PinnedStripDeps {
   subscribeSettings(fn: () => void): () => void
   /** 会话列表（快照 + 变更订阅）。 */
   sessions: PinnedList
-  /** 打开会话（点击置顶条目 = ctx.sessions.open）。 */
+  /** 打开会话（点击置顶条目 = 官方 `uiWorkspace.openSession`）。 */
   open(id: string): void
   /** 写回钉顺序/取消钉（settings.set('pinned', …)）。 */
   setPinned(ids: readonly string[]): void
@@ -93,6 +101,8 @@ export interface PinnedStripDeps {
   setTags(sessionId: string, tags: readonly SessionTag[]): void
   /** 订阅标签变更。 */
   subscribeTags(fn: () => void): () => void
+  /** 官方会话动作面（行菜单前置的 rename/fork；由 index.ts 从官方服务装配）。 */
+  officialActions: OfficialSessionActionDeps
 }
 
 /**
@@ -100,10 +110,14 @@ export interface PinnedStripDeps {
  * 标题取 displayTitle（缺省回退 id）、标记当前会话。纯函数，便于单测。
  * @param pinned - settings 里的固定 id 列表。
  * @param list - 会话列表快照。
+ * @param current - 当前会话 id（官方 DOM 反推，见 currentSession.ts）；null = 无。
  * @returns 派生置顶行。
  */
-export function derivePinnedRows(pinned: readonly string[], list: PinnedListSnapshot): PinnedRow[] {
-  const current = list.current === undefined ? undefined : String(list.current)
+export function derivePinnedRows(
+  pinned: readonly string[],
+  list: PinnedListSnapshot,
+  current: string | null = null,
+): PinnedRow[] {
   const byId = list.byId
   const existing = new Set(list.ids.map((id) => String(id)))
   const seen = new Set<string>()
@@ -146,9 +160,8 @@ function pinnedCss(): string {
     `[${PINNED_STRIP_ATTR}] [data-dsh-pinned-label]{padding:4px 8px 0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary)}`,
     `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}]{display:flex;align-items:center;gap:0;box-sizing:border-box;width:100%;height:32px;padding:0 8px;border:none;border-radius:8px;background:transparent;cursor:pointer;overflow:hidden;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:20px;text-align:left}`,
     `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}]:hover{background:var(--dsw-alias-interactive-bg-hover)}`,
-    // 当前会话行：悬停同款底 + 标题用会话 tab 划线的品牌色（单一强调）。
+    // 当前会话行：照官方选中态（`.sessionRow._selected` 只改底色，标题不改色）。
     `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${PINNED_CURRENT_ATTR}]{background:var(--dsw-alias-interactive-bg-hover)}`,
-    `[${PINNED_STRIP_ATTR}] [${PINNED_ROW_ATTR}][${PINNED_CURRENT_ATTR}] [data-dsh-pinned-title]{color:var(--dsw-alias-state-business-primary)}`,
     `[${PINNED_STRIP_ATTR}] [data-dsh-pinned-title]{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
     // 状态槽/圆点（照官方 ui-workspace .slot + ui-primitives StateDot 契约：槽 16×20，
     // dot 10px：currentColor 外晕 10% + 20% inset 实心核；ongoing = 8 格像素追逐）。
@@ -288,7 +301,7 @@ export function syncStatusSlot(slot: HTMLElement, status: RowStatusView, doc: Do
 /** 幂等同步：按派生行补齐/删除/更新/排序置顶区 DOM；无钉或座位缺席时移除。 */
 function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElement | null }): void {
   const snapshot = deps.sessions.getSnapshot()
-  const rows = derivePinnedRows(deps.getPinned(), snapshot)
+  const rows = derivePinnedRows(deps.getPinned(), snapshot, readCurrentSessionId(doc))
   if (rows.length === 0) {
     stripRef.el?.remove()
     stripRef.el = null
@@ -336,12 +349,18 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
       existing.set(row.id, rowEl)
     }
     // 轻量字段同步（标题/当前标记/状态；滚动/悬停不打断——行不重建）。
-    if (row.current) {
-      rowEl.setAttribute(PINNED_CURRENT_ATTR, '')
-      rowEl.setAttribute('aria-current', 'true')
-    } else {
-      rowEl.removeAttribute(PINNED_CURRENT_ATTR)
-      rowEl.removeAttribute('aria-current')
+    // 当前标记幂等：已一致时不碰 DOM（属性写入也会产生 MutationRecord）。
+    // ARIA：本行是 `role="button"`——`aria-selected` 在 button 上无效，故用
+    // `aria-current="true"`；官方行是 treeitem 才用 `aria-selected`（见 currentSession.ts）。
+    const marked = rowEl.hasAttribute(PINNED_CURRENT_ATTR)
+    if (row.current !== marked) {
+      if (row.current) {
+        rowEl.setAttribute(PINNED_CURRENT_ATTR, '')
+        rowEl.setAttribute('aria-current', 'true')
+      } else {
+        rowEl.removeAttribute(PINNED_CURRENT_ATTR)
+        rowEl.removeAttribute('aria-current')
+      }
     }
     rowEl.setAttribute('aria-label', row.title)
     const statusSlot = rowEl.querySelector<HTMLElement>('[data-dsh-pinned-status]')
@@ -397,6 +416,8 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
     // 写入全是我们自己 sync 产生的，忽略它们。否则「sync 写 DOM → observer
     // → sync」自触发回环会把渲染主线程饿死（整页卡死）；本区内容完全自持，
     // 无他人改动，忽略自身写入不影响 React 重排后的自愈重插。
+    // 属性只观察 `aria-selected`：官方会话行的选中态切换（用户切会话）只改这个
+    // 属性、不产生 childList；我们自己的行只写 `aria-current`，永不自触发。
     for (const record of records) {
       const target = record.target
       if (!(target instanceof Element) || target.closest(`[${PINNED_STRIP_ATTR}]`) === null) {
@@ -405,7 +426,7 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
       }
     }
   })
-  observer.observe(doc.body, { childList: true, subtree: true })
+  observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] })
 
   // —— 行交互（容器/文档级事件委托：行可被 sync 反复重建，委托在文档级一次挂载）——
   const rowOf = (target: EventTarget | null): HTMLElement | null =>
@@ -415,15 +436,17 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
   const insideStrip = (target: EventTarget | null): boolean =>
     target instanceof Element && target.closest(`[${PINNED_STRIP_ATTR}]`) !== null
 
-  /** 打开该行的行菜单（编辑标签 / 从置顶区移除）——置顶区不支持"添加到置顶区"。 */
+  /** 打开该行的行菜单（官方 rename/fork 前置，后接编辑标签与我们的置顶项）。 */
   const openMenuFor = (row: HTMLElement, button: HTMLElement | null, id: string): void => {
     openRowMenu({
       anchor: row,
       button,
       items: [
+        ...officialSessionMenuItems(id, deps.officialActions),
         {
           id: 'edit-tags',
-          label: '编辑标签…',
+          label: '编辑标签',
+          icon: createElement(IconListPenOutlineRegular, {}),
           onSelect: () => {
             openTagEditor({
               sessionId: id,
@@ -432,13 +455,7 @@ export function startPinnedStrip(deps: PinnedStripDeps): () => void {
             })
           },
         },
-        {
-          id: 'unpin',
-          label: '从置顶区移除',
-          onSelect: () => {
-            deps.setPinned([...deps.getPinned()].filter((x) => String(x) !== id))
-          },
-        },
+        focusSessionPinMenuItem(id, { getPinned: () => deps.getPinned(), setPinned: (ids) => { deps.setPinned(ids) } }),
       ],
     })
   }

@@ -61,7 +61,7 @@ UI 不自建布局层：区域结构用**官方原生三列**（sidebar | center
 | 区域 | 职责 | 插件 |
 | --- | --- | --- |
 | 顶部区域 | 全局导航与状态（实例跳转/在线）、全局操作入口 | dsh-quick-nav（**保留但不加载**，实例跳转收敛到 console 面板） |
-| 侧边栏（列表上方） | 手动钉住的会话（置顶区，可排序/取消）+ 最近活跃会话（活跃区） | dsh-focus-session |
+| 侧边栏（列表上方） | 手动钉住的会话（置顶区，可排序/取消）+ 最近活跃会话（活跃区）；两个区的行菜单**前置官方 rename/fork**（动作落官方数据面）再接自研项（编辑标签、添加到置顶区/从置顶区移除；置顶由本插件承担，归档在官方行里做）；另经官方 slot 在官方会话行的「⋯」菜单追加**添加到置顶区/从置顶区移除**入口——官方图钉只把会话在其所在列表内置前（分组视图 = 所属工作区分组内），本入口钉入跨工作区的置顶区 | dsh-focus-session |
 | 侧边栏 | 工作区/会话树管理 | 官方原生 |
 | 侧边栏底部 | 功能区快捷入口（控制台 + 设置） | console 入口 + 设置 |
 | 侧边栏底部·用户徽标 | 当前用户（人形图标 + 用户名 + 角色 + 经网关时登出），**设置下方**，只消费身份模型 | dsh-user client 半区（/api/user/me） |
@@ -234,7 +234,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**内置通信面**（原 dsh-channel：发现/心跳、事件总线、鉴权、控制指令、多机 hub/worker 回路）；**实例服务提供者**（扩展类型 + 发现/状态/生命周期/部署服务） | ✅ 已实现（**232 测试**（含原 channel 38 项）；HTTP 端点 instances/control + registry/池/删除恢复的 @Remote 面；daemon/instance/agent 四角色 + 多机 hub 接入；升级回滚见 §9） |
 | dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示）；实例行显示**磁盘 runtime 池版本**（读 profile 池软链，离线也有；自带安装/无 dshHome 回退实例自报版本） | ✅ 已并入（非独立包） |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ⏸ **保留但不加载**（不进任何 profile；单测保真） |
-| dsh-focus-session | UI | **会话关注层**：侧栏「置顶」区（钉住/拖拽排序/行尾取消钉）+「活跃」区（最近活跃会话，`updatedAt` 序，上限 5）+ 会话标题**胶囊标签**（人工标签）；行菜单与标签弹框照官方 Menu/Modal 契约；拥有钉住/标签 settings 数据 | ✅ 已实现（101 测试） |
+| dsh-focus-session | UI | **会话关注层**：侧栏「置顶」区（钉住/拖拽排序/行尾取消钉）+「活跃」区（最近活跃会话，`updatedAt` 序，上限 5）+ 会话标题**胶囊标签**（人工标签）+ 经官方 slot（`sidebar.workspaces.session.menu.item` order 500）在官方会话行「⋯」菜单里提供**添加到置顶区 / 从置顶区移除**入口（地球字形：点 = 钉入/移出本插件的置顶区），不在行 hover 动作区加图标；两个区的行菜单前置官方 `rename`(200)/`fork`(300)（同 id/顺序/图标/文案，动作落官方 `ctx.uiWorkspace` 与官方改名调用路径）再接自研项（编辑标签、添加到置顶区/从置顶区移除；官方 pin/archive 不进关注区菜单——置顶由本插件承担，归档在官方行里做）；两个区的菜单项是 `menu.ts` 手写 DOM 克隆、非官方 `MenuItemButton`（后者只用在官方会话行 slot）；标签弹框照官方 Modal 契约；拥有钉住/标签 settings 数据。**两套置顶的区别**：官方行级图钉把会话 id 写进 `dsh-workspace` registry 的注册表级 `pinnedSessionIds`，效果是把会话排到**它所在列表的前列**（分组视图 = 它所属工作区分组内，平铺视图 = 整表前），会话不离开原工作区、不形成跨工作区聚合；本插件的 `pinned` 是侧栏列表上方**跨工作区的独立置顶区**。两者数据独立、语义不同、并存。两个区的「当前会话」选中态 = **观察官方侧栏 DOM 反推**（读 `[data-row-key^="session:"][aria-selected="true"]` 行的 id——内核未经公开 client 服务暴露当前选择，ui-workspace 的 selection store 是私有的）；视觉照官方选中 token `--dsw-alias-interactive-bg-hover`，ARIA 用 `aria-current` 而非 `aria-selected`（我们的行是 `role=button`，后者在 button 上无效；官方行是 treeitem） | ✅ 已实现（130 测试） |
 | ~~dsh-focus-tabs~~ | UI | ~~顶部会话标签行（Alt+P 固定、Alt+1..9 切换、编号标题、状态圆点）；只读消费 dsh-focus-session 的钉住数据~~ | 🗑 2026-10 删除，见 [note](../.agents/notes/implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md) |
 | dsh-show-me | UI | **复杂内容呈现层（show-me）**：约定围栏 ```show-me + 提示词段（内容复杂到读不下去时改用"一张图"交付）→ 客户端观察会话 DOM（照官方 `CodeBlock` 形状：`md-code-block` + `infostring` 类名子串 + 祖先 `data-streaming`）→ **消息内就地渲染成图片**（自绘 SVG → `data:image/svg+xml` → `<img>` 惰性图片；图/源码/复制切换）；只作用于 **AI 输出**（用户消息走官方 `MessageText`，不做 markdown）；旧围栏名 `plan-show` 作 legacy 别名继续渲染；验收硬规则：**无证据 = 未验证**。无独立界面（侧栏入口与面板已删除） | ✅ 已实现（32 测试 + dev 实例（web2/3082）真机自验；命名与对外叙事见 [note](../.agents/notes/implemented/process/2026-10-01-dsh-show-me-naming.md)，场景/分期/调研见 [note](../.agents/notes/proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)，DOM 钩子契约见 [note](../.agents/notes/implemented/feature/2026-09-13-plan-show-inline-dom-hooks.md)） |
 | ~~dsh-desk~~ | UI（平台） | ~~布局/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；工具入口组装器~~ | 🗑 2026-10 删除，见 [note](../.agents/notes/implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md) |
@@ -378,7 +378,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-console（档案/生命周期/inbox/四角色 daemon·instance·console·agent + 3 HTTP 端点 + 内置通信面：发现/心跳/事件总线 at-least-once/鉴权/控制指令） | 232 测试（含原 channel 38 项） |
 | console UI（并入 dsh-console client 半区：ConsoleBadge + 控制面板） | sidebar.footer.action，仅管理端 |
 | dsh-quick-nav 顶栏导航（**保留但不加载**，不进任何 profile） | 单测保真 |
-| dsh-focus-session 侧栏置顶区 + 活跃区 + 会话胶囊标签（钉/排序/取消钉 + 最近活跃时间序 + 行尾 ⋯ 菜单：编辑标签/加入/移出置顶 + 标签弹框；菜单/弹框照官方 Menu/Modal 契约） | 101 测试 |
+| dsh-focus-session 侧栏置顶区 + 活跃区 + 会话胶囊标签 + 官方会话行「⋯」菜单里的添加到置顶区/从置顶区移除入口（钉/排序/取消钉 + 最近活跃时间序 + 行菜单前置官方 rename/fork 再接编辑标签与添加到置顶区/从置顶区移除 + 标签弹框 + 会话行菜单里的跨工作区钉入 + 当前会话选中态读官方侧栏 DOM 反推；菜单/弹框照官方 Menu/Modal 契约） | 130 测试 |
 | dsh-show-me 复杂内容呈现层（约定围栏 + 提示词段 + 消息内图片化 + 验收硬规则"无证据=未验证" + legacy 围栏别名） | 32 测试 + dev 实例（web2/3082）自验 |
 | 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh 读实例注册表 | scripts/ 已实测（registry.test.mjs 7 项 + profile-registry.test.sh 14 项） |
 | 内核新版本检测（开发侧脚本闸门 + 管理端 console 只读展示；顺带修升级对话框硬编码目标版本） | scripts/tests/kernel-version.test.mjs 14 项 + packages/dsh-console/tests/kernel-update.spec.ts 17 项；见 [kernel-version-detection](../.agents/notes/implemented/feature/2026-10-01-kernel-version-detection.md) |

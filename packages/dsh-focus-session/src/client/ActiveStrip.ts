@@ -10,8 +10,10 @@
  * - 剔除已在「置顶」区的会话（两区不重复显示同一会话）、子代理会话
  *   （`origin === 'subagent'`，它们挂在祖先行下）与空白会话（`blank`）。
  * - 上限 `ACTIVE_LIMIT` 条（默认 5），超出不显示。
- * - 点击行 = 打开该会话（`ctx.sessions.open`，与侧栏点击同路径）。
+ * - 点击行 = 打开该会话（官方 `uiWorkspace.openSession`，与官方左侧栏会话行同一入口）。
  * - 行带官方同款状态圆点（运行/子代理/完成/pending），与置顶区一致。
+ * - 行选中态 = 当前会话（读官方侧栏 DOM 反推，见 currentSession.ts；内核未经公开
+ *   client 服务暴露当前选择）。
  *
  * 挂载机制（与置顶区同款，官方侧栏没有这个 seat，故用 DOM 注入）：MutationObserver
  * + 直接 DOM 注入——插到「置顶」区之后（无置顶区时插到 regionArea 之前）；
@@ -32,6 +34,11 @@ import {
 import {
   MENU_ATTR, MENU_BUTTON_ATTR, closeRowMenu, injectMenuCss, makeMenuButton, openRowMenu,
 } from './menu'
+import { focusSessionPinMenuItem, officialSessionMenuItems } from './sessionActions'
+import { createElement } from 'react'
+import { IconListPenOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { OfficialSessionActionDeps } from './sessionActions'
+import { readCurrentSessionId } from './currentSession'
 import type { SessionTag } from './tags'
 
 /** 活跃区根标记（幂等定位 + 自愈锚点）。 */
@@ -40,7 +47,7 @@ export const ACTIVE_STRIP_ATTR = 'data-dsh-active-strip'
 const ACTIVE_LABEL = '活跃区'
 /** 行按钮标记。 */
 const ACTIVE_ROW_ATTR = 'data-dsh-active-row'
-/** 当前会话行标记。 */
+/** 当前会话行标记（照官方选中行：底色 `--dsw-alias-interactive-bg-hover`）。 */
 const ACTIVE_CURRENT_ATTR = 'data-dsh-active-current'
 /** 幂等样式标签标记（沿用本仓 `data-plugin-css` 约定）。 */
 const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/active-strip"]'
@@ -48,9 +55,8 @@ const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/active-strip
 /** 活跃区默认条数上限。 */
 export const ACTIVE_LIMIT = 5
 
-/** 活跃区需要的最小会话列表快照（与置顶区同构）。 */
+/** 活跃区需要的最小会话列表快照（与置顶区同构；官方 `ISessions.list` 快照即结构兼容子集）。 */
 export interface ActiveListSnapshot {
-  current?: string | undefined
   ids: readonly string[]
   byId: Record<string, SummaryRow>
 }
@@ -65,6 +71,7 @@ export interface ActiveList {
 export interface ActiveRow {
   id: string
   title: string
+  /** 是否当前会话（入参 `current` 来自官方 DOM 反推，非会话快照）。 */
   current: boolean
 }
 
@@ -72,7 +79,7 @@ export interface ActiveRow {
 export interface ActiveStripDeps {
   /** 会话列表（快照 + 变更订阅）。 */
   sessions: ActiveList
-  /** 打开会话（点击活跃条目 = ctx.sessions.open）。 */
+  /** 打开会话（点击活跃条目 = 官方 `uiWorkspace.openSession`）。 */
   open(id: string): void
   /** 读取钉住列表（用于剔除置顶区已显示的会话）。 */
   getPinned(): readonly string[]
@@ -90,6 +97,8 @@ export interface ActiveStripDeps {
   setTags(sessionId: string, tags: readonly SessionTag[]): void
   /** 订阅标签变更。 */
   subscribeTags(fn: () => void): () => void
+  /** 官方会话动作面（行菜单前置的 rename/fork；由 index.ts 从官方服务装配）。 */
+  officialActions: OfficialSessionActionDeps
   /** 条数上限（缺省 {@link ACTIVE_LIMIT}）。 */
   limit?: number
 }
@@ -100,14 +109,15 @@ export interface ActiveStripDeps {
  * @param pinned - 钉住列表（置顶区显示的会话，本区剔除）。
  * @param list - 会话列表快照。
  * @param limit - 条数上限。
+ * @param current - 当前会话 id（官方 DOM 反推，见 currentSession.ts）；null = 无。
  * @returns 派生活跃行（时间序，最新在前）。
  */
 export function deriveActiveRows(
   pinned: readonly string[],
   list: ActiveListSnapshot,
   limit: number = ACTIVE_LIMIT,
+  current: string | null = null,
 ): ActiveRow[] {
-  const current = list.current === undefined ? undefined : String(list.current)
   const pinnedSet = new Set(pinned.map((id) => String(id)))
   const candidates: Array<{ id: string; updatedAt: number }> = []
   for (const raw of list.ids) {
@@ -135,8 +145,8 @@ function activeCss(): string {
     `[${ACTIVE_STRIP_ATTR}] [data-dsh-active-label]{padding:4px 8px 0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary)}`,
     `[${ACTIVE_STRIP_ATTR}] [${ACTIVE_ROW_ATTR}]{display:flex;align-items:center;gap:0;box-sizing:border-box;width:100%;height:32px;padding:0 8px;border:none;border-radius:8px;background:transparent;cursor:pointer;overflow:hidden;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:20px;text-align:left}`,
     `[${ACTIVE_STRIP_ATTR}] [${ACTIVE_ROW_ATTR}]:hover{background:var(--dsw-alias-interactive-bg-hover)}`,
+    // 当前会话行：照官方选中态（`.sessionRow._selected` 只改底色，标题不改色）。
     `[${ACTIVE_STRIP_ATTR}] [${ACTIVE_ROW_ATTR}][${ACTIVE_CURRENT_ATTR}]{background:var(--dsw-alias-interactive-bg-hover)}`,
-    `[${ACTIVE_STRIP_ATTR}] [${ACTIVE_ROW_ATTR}][${ACTIVE_CURRENT_ATTR}] [data-dsh-active-title]{color:var(--dsw-alias-state-business-primary)}`,
     `[${ACTIVE_STRIP_ATTR}] [data-dsh-active-title]{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`,
     `[${ACTIVE_STRIP_ATTR}] [data-dsh-active-status]{flex:none;width:16px;height:20px;display:inline-flex;align-items:center;justify-content:center}`,
     `[${ACTIVE_STRIP_ATTR}] .dsh-pinned-dot{position:relative;display:inline-block;flex:none;width:10px;height:10px;color:var(--dsw-alias-state-success-primary)}`,
@@ -204,7 +214,7 @@ function makeRow(doc: Document, row: ActiveRow): HTMLElement {
 /** 幂等同步：按派生行补齐/删除/更新/排序活跃区 DOM；无行或座位缺席时移除。 */
 function syncRows(deps: ActiveStripDeps, doc: Document, stripRef: { el: HTMLElement | null }): void {
   const snapshot = deps.sessions.getSnapshot()
-  const rows = deriveActiveRows(deps.getPinned(), snapshot, deps.limit ?? ACTIVE_LIMIT)
+  const rows = deriveActiveRows(deps.getPinned(), snapshot, deps.limit ?? ACTIVE_LIMIT, readCurrentSessionId(doc))
   if (rows.length === 0) {
     stripRef.el?.remove()
     stripRef.el = null
@@ -253,12 +263,17 @@ function syncRows(deps: ActiveStripDeps, doc: Document, stripRef: { el: HTMLElem
     const wantNext: Element | null = prev === null ? listEl.firstElementChild : prev.nextElementSibling
     if (rowEl !== wantNext) listEl.insertBefore(rowEl, wantNext)
     prev = rowEl
-    if (row.current) {
-      rowEl.setAttribute(ACTIVE_CURRENT_ATTR, '')
-      rowEl.setAttribute('aria-current', 'true')
-    } else {
-      rowEl.removeAttribute(ACTIVE_CURRENT_ATTR)
-      rowEl.removeAttribute('aria-current')
+    // 当前标记幂等：已一致时不碰 DOM（属性写入也会产生 MutationRecord）。
+    // ARIA：本行是 `role="button"`——`aria-selected` 在 button 上无效，故用
+    // `aria-current="true"`；官方行是 treeitem 才用 `aria-selected`（见 currentSession.ts）。
+    if (row.current !== rowEl.hasAttribute(ACTIVE_CURRENT_ATTR)) {
+      if (row.current) {
+        rowEl.setAttribute(ACTIVE_CURRENT_ATTR, '')
+        rowEl.setAttribute('aria-current', 'true')
+      } else {
+        rowEl.removeAttribute(ACTIVE_CURRENT_ATTR)
+        rowEl.removeAttribute('aria-current')
+      }
     }
     const titleEl = rowEl.querySelector<HTMLElement>('[data-dsh-active-title]')
     if (titleEl !== null && titleEl.textContent !== row.title) titleEl.textContent = row.title
@@ -293,7 +308,9 @@ export function startActiveStrip(deps: ActiveStripDeps): () => void {
 
   // 只响应活跃区之外的变更（React 重排/会话页流式渲染等）——本区内的写入全是
   // 我们自己的 sync 产生的，忽略它们，避免「sync 写 DOM → observer → sync」自触发
-  // 回环（与置顶区同契约，见 session-pin-status-sync-convergence）。
+  // 回环（与置顶区同契约，见 session-pin-status-sync-convergence）。属性只观察
+  // `aria-selected`：官方会话行选中态切换（用户切会话）只改它、不产生 childList；
+  // 我们的行只写 `aria-current`，永不自触发。
   const observer = new MutationObserver((records) => {
     for (const record of records) {
       const target = record.target
@@ -303,7 +320,7 @@ export function startActiveStrip(deps: ActiveStripDeps): () => void {
       }
     }
   })
-  observer.observe(doc.body, { childList: true, subtree: true })
+  observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] })
 
   const unsubSessions = deps.sessions.subscribe(sync)
   const unsubSettings = deps.subscribeSettings(sync)
@@ -317,15 +334,17 @@ export function startActiveStrip(deps: ActiveStripDeps): () => void {
   const insideStrip = (target: EventTarget | null): boolean =>
     target instanceof Element && target.closest(`[${ACTIVE_STRIP_ATTR}]`) !== null
 
-  /** 打开该行的行菜单（编辑标签 / 添加到置顶区）。 */
+  /** 打开该行的行菜单（官方 rename/fork 前置，后接编辑标签与我们的置顶项）。 */
   const openMenuFor = (row: HTMLElement, button: HTMLElement | null, id: string): void => {
     openRowMenu({
       anchor: row,
       button,
       items: [
+        ...officialSessionMenuItems(id, deps.officialActions),
         {
           id: 'edit-tags',
-          label: '编辑标签…',
+          label: '编辑标签',
+          icon: createElement(IconListPenOutlineRegular, {}),
           onSelect: () => {
             openTagEditor({
               sessionId: id,
@@ -334,15 +353,7 @@ export function startActiveStrip(deps: ActiveStripDeps): () => void {
             })
           },
         },
-        {
-          id: 'pin',
-          label: '添加到置顶区',
-          onSelect: () => {
-            const pinned = [...new Set([...deps.getPinned()].map((x) => String(x)))]
-            if (pinned.includes(id)) return
-            deps.setPinned([...pinned, id])
-          },
-        },
+        focusSessionPinMenuItem(id, { getPinned: () => deps.getPinned(), setPinned: (ids) => { deps.setPinned(ids) } }),
       ],
     })
   }

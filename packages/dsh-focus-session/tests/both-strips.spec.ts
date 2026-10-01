@@ -33,7 +33,6 @@ function buildSidebar(): HTMLElement {
 interface State {
   pinned: string[]
   ids: string[]
-  current?: string
   byId: Record<string, { displayTitle?: string; updatedAt?: number; running?: boolean }>
   opened: string[]
   settingsCbs: Array<() => void>
@@ -45,14 +44,26 @@ interface State {
 
 function makeState(): State {
   return {
-    pinned: [], ids: [], current: undefined, byId: {}, opened: [],
+    pinned: [], ids: [], byId: {}, opened: [],
     settingsCbs: [], listCbs: [], pendingCbs: [], tagCbs: [], tags: {},
+  }
+}
+
+/** 在官方侧栏里渲染官方会话行（`data-row-key=session:<id>` + `aria-selected`）。 */
+function renderOfficialRows(ids: string[], selected?: string): void {
+  const region = document.querySelector('[class*="regionArea"]') ?? document.body
+  for (const id of ids) {
+    const row = document.createElement('div')
+    row.setAttribute('data-row-key', `session:${id}`)
+    row.setAttribute('role', 'treeitem')
+    row.setAttribute('aria-selected', String(id === selected))
+    region.appendChild(row)
   }
 }
 
 function sessionsList(h: State) {
   return {
-    getSnapshot: () => ({ current: h.current, ids: h.ids, byId: h.byId }),
+    getSnapshot: () => ({ ids: h.ids, byId: h.byId }),
     subscribe: (fn: () => void) => { h.listCbs.push(fn); return () => { h.listCbs = h.listCbs.filter((f) => f !== fn) } },
   }
 }
@@ -67,6 +78,17 @@ function commonDeps(h: State) {
     getTags: (id: string) => h.tags[id] ?? [],
     setTags: (id: string, tags: readonly { text: string }[]) => { h.tags[id] = [...tags]; h.tagCbs.forEach((cb) => cb()) },
     subscribeTags: (fn: () => void) => { h.tagCbs.push(fn); return () => {} },
+    officialActions: {
+      isPinned: () => false,
+      isArchived: () => false,
+      setPinned: () => {},
+      archive: async () => {},
+      unarchive: async () => {},
+      stopAndArchive: async () => {},
+      fork: async () => {},
+      displayTitleOf: (id: string) => id,
+      rename: async () => {},
+    },
   }
 }
 
@@ -102,7 +124,7 @@ describe('置顶区 + 活跃区同时挂载', () => {
       b: { displayTitle: '会话 B', updatedAt: 2 },
       c: { displayTitle: '会话 C', updatedAt: 1 },
     }
-    h.current = 'b'
+    renderOfficialRows(['a', 'b', 'c'], 'b')
     h.tags = { b: [{ text: '重要' }], a: [{ text: '待办' }] }
     const pinned = startPinnedStrip({ ...commonDeps(h), sessions: sessionsList(h), setPinned: (ids) => { h.pinned = [...ids] } } as PinnedStripDeps)
     const active = startActiveStrip({ ...commonDeps(h), sessions: sessionsList(h), setPinned: (ids) => { h.pinned = [...ids] } } as ActiveStripDeps)

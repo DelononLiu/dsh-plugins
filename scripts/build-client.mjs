@@ -32,7 +32,7 @@ const result = await build({
   target: 'es2022',
   jsx: 'automatic',
   outfile: join(root, 'lib/.client.tmp.js'),
-  external: ['react', 'react-dom/client', 'react/jsx-runtime', '@deepseek-ai/dsh-client-runtime/client', '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-locale/client'],
+  external: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', '@deepseek-ai/dsh-client-runtime/client', '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-locale/client'],
   write: true,
   logLevel: 'silent',
 })

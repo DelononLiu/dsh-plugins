@@ -39,11 +39,30 @@ function buildSidebar(): HTMLElement {
   return root
 }
 
+/** 在官方侧栏里渲染官方会话行（`data-row-key=session:<id>` + `aria-selected`）——
+ *  模拟官方侧栏的当前会话选中态（见 src/client/currentSession.ts）。 */
+function renderOfficialRows(ids: string[], selected?: string): void {
+  const region = document.querySelector('[class*="regionArea"]') ?? document.body
+  for (const id of ids) {
+    const row = document.createElement('div')
+    row.setAttribute('data-row-key', `session:${id}`)
+    row.setAttribute('role', 'treeitem')
+    row.setAttribute('aria-selected', String(id === selected))
+    region.appendChild(row)
+  }
+}
+
+/** 切换官方选中行（只改 `aria-selected`，模拟用户切会话）。 */
+function selectOfficial(id: string | null): void {
+  document.querySelectorAll('[data-row-key^="session:"]').forEach((row) => {
+    row.setAttribute('aria-selected', String(row.getAttribute('data-row-key') === `session:${id}`))
+  })
+}
+
 /** 状态 + 订阅记录 harness（settings/list/pending 三个可手动触发的变更源）。 */
 interface Harness {
   pinned: string[]
   ids: string[]
-  current?: string
   byId: Record<string, { displayTitle?: string; running?: boolean; completed?: boolean; parentId?: string; origin?: string }>
   opened: string[]
   settingCbs: Array<() => void>
@@ -52,13 +71,13 @@ interface Harness {
   tags: Record<string, { text: string; tone?: string }[]>
   tagCbs: Array<() => void>
   pending: Record<string, PendingInteractionKind>
+  renamed: Array<{ id: string; title: string }>
 }
 
 function makeHarness(): Harness {
   return {
     pinned: [],
     ids: [],
-    current: undefined,
     byId: {},
     opened: [],
     settingCbs: [],
@@ -67,12 +86,13 @@ function makeHarness(): Harness {
     tags: {},
     tagCbs: [],
     pending: {},
+    renamed: [],
   }
 }
 
 function makeDeps(h: Harness): PinnedStripDeps {
   const list: PinnedList = {
-    getSnapshot: () => ({ current: h.current, ids: h.ids, byId: h.byId as Record<string, { displayTitle?: string; running?: boolean; completed?: boolean; parentId?: string; origin?: string }> }),
+    getSnapshot: () => ({ ids: h.ids, byId: h.byId as Record<string, { displayTitle?: string; running?: boolean; completed?: boolean; parentId?: string; origin?: string }> }),
     subscribe: (fn) => { h.listCbs.push(fn); return () => {} },
   }
   return {
@@ -94,6 +114,11 @@ function makeDeps(h: Harness): PinnedStripDeps {
     subscribeTags: (fn) => { h.tagCbs.push(fn); return () => {} },
     pendingKindOf: (id) => h.pending[id],
     subscribePending: (fn) => { h.pendingCbs.push(fn); return () => {} },
+    officialActions: {
+      fork: async () => {},
+      displayTitleOf: (id) => h.byId[id]?.displayTitle ?? id,
+      rename: async (id, title) => { h.renamed.push({ id, title }) },
+    },
   }
 }
 
@@ -124,12 +149,12 @@ describe('derivePinnedRows', () => {
   const byId = { a: { displayTitle: '会话甲' }, b: {}, c: { displayTitle: '会话丙' } }
 
   it('按钉顺序派生，剔除已不存在的会话并去重', () => {
-    const rows = derivePinnedRows(['b', 'a', 'b', 'ghost'], { ids: ['a', 'b', 'c'], byId, current: 'a' })
+    const rows = derivePinnedRows(['b', 'a', 'b', 'ghost'], { ids: ['a', 'b', 'c'], byId }, 'a')
     expect(rows.map((r) => r.id)).toEqual(['b', 'a'])
   })
 
   it('标题取 displayTitle，缺省回退 id；current 只在钉内标记', () => {
-    const rows = derivePinnedRows(['b', 'a', 'c'], { ids: ['a', 'b', 'c'], byId, current: 'c' })
+    const rows = derivePinnedRows(['b', 'a', 'c'], { ids: ['a', 'b', 'c'], byId }, 'c')
     expect(rows.map((r) => [r.title, r.current])).toEqual([
       ['b', false],
       ['会话甲', false],
@@ -137,8 +162,8 @@ describe('derivePinnedRows', () => {
     ])
   })
 
-  it('current 不在钉内 / undefined 时不标任何行', () => {
-    const rows = derivePinnedRows(['a'], { ids: ['a'], byId, current: undefined })
+  it('current 不在钉内 / null 时不标任何行', () => {
+    const rows = derivePinnedRows(['a'], { ids: ['a'], byId }, null)
     expect(rows[0].current).toBe(false)
   })
 })
@@ -185,14 +210,8 @@ describe('startPinnedStrip', () => {
     expect(h.opened).toEqual(['b'])
   })
 
-  it('settings/list 变更实时同步：取消钉删行、会话消失滤行、current 标记跟随', () => {
+  it('settings/list 变更实时同步：取消钉删行、会话消失滤行', () => {
     disposers.push(startPinnedStrip(makeDeps(h)))
-    // 当前会话 b → b 行带当前标记
-    h.current = 'b'
-    h.listCbs.forEach((cb) => cb())
-    const rows = stripEl()?.querySelectorAll('[data-dsh-pinned-row]') ?? []
-    expect((rows[1] as HTMLElement).hasAttribute('data-dsh-pinned-current')).toBe(true)
-
     // 取消钉 a（settings 变更）→ 只剩 b
     h.pinned = ['b']
     h.settingCbs.forEach((cb) => cb())
@@ -201,8 +220,50 @@ describe('startPinnedStrip', () => {
 
     // b 会话被归档消失（list 变更）→ 无钉 → 整区移除
     h.ids = ['c']
-    h.current = undefined
     h.listCbs.forEach((cb) => cb())
+    expect(stripEl()).toBeNull()
+  })
+
+  it('当前会话标记来自官方选中行（aria-selected=true）：X 行有、其它行无', () => {
+    renderOfficialRows(['a', 'b', 'c'], 'a')
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    const rows = rowEls()
+    expect(rows[0].hasAttribute('data-dsh-pinned-current')).toBe(true)
+    expect(rows[0].getAttribute('aria-current')).toBe('true')
+    expect(rows[1].hasAttribute('data-dsh-pinned-current')).toBe(false)
+    expect(rows[1].hasAttribute('aria-current')).toBe(false)
+  })
+
+  it('官方选中切到另一会话 → 标记移动（观察 aria-selected）', async () => {
+    renderOfficialRows(['a', 'b', 'c'], 'a')
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    expect(rowEls()[0].hasAttribute('data-dsh-pinned-current')).toBe(true)
+
+    selectOfficial('b')
+    await vi.waitFor(() => {
+      expect(rowEls()[0].hasAttribute('data-dsh-pinned-current')).toBe(false)
+      expect(rowEls()[1].hasAttribute('data-dsh-pinned-current')).toBe(true)
+    })
+  })
+
+  it('官方无选中行（含全 false）/ 无会话行 → 我们所有行都不带标记', () => {
+    renderOfficialRows(['a', 'b', 'c']) // 全 aria-selected="false"
+    disposers.push(startPinnedStrip(makeDeps(h)))
+    expect(rowEls().every((el) => !el.hasAttribute('data-dsh-pinned-current'))).toBe(true)
+
+    selectOfficial(null)
+    expect(rowEls().every((el) => !el.hasAttribute('aria-current'))).toBe(true)
+  })
+
+  it('dispose 后官方选中变化不再触发同步（观察者已断开，无泄漏）', async () => {
+    renderOfficialRows(['a', 'b', 'c'], 'a')
+    const dispose = startPinnedStrip(makeDeps(h))
+    expect(stripEl()).not.toBeNull()
+    dispose()
+    expect(stripEl()).toBeNull()
+
+    selectOfficial('b')
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     expect(stripEl()).toBeNull()
   })
 
@@ -301,9 +362,8 @@ describe('startPinnedStrip', () => {
     expect(rowEls()[0].querySelector('.dsh-pinned-matrix')).not.toBeNull()
     const watcher = new MutationObserver(() => {})
     watcher.observe(document.body, { childList: true, subtree: true })
-    // 触发一次不改变任何置顶行状态的变更：仅非钉会话元数据/current 变化。
+    // 触发一次不改变任何置顶行状态的变更：仅非钉会话元数据变化。
     h.byId.c = { displayTitle: '会话丙' }
-    h.current = 'c'
     h.listCbs.forEach((cb) => cb())
     // 同步取回未派发记录：修复前每次 sync 都无条件重建状态点 → 必有 childList
     // 记录；收敛后期望零记录（否则真实浏览器里 observer 微任务自触发死循环）。
@@ -323,7 +383,7 @@ describe('startPinnedStrip', () => {
     expect(css).toContain('var(--dsw-static-deepseek-450)')
   })
 
-  it('行尾 ⋯ 菜单「从置顶区移除」：写回 settings 并移除该行（不触发打开）', () => {
+  it('行尾 ⋯ 菜单：官方 rename/fork 前置，后接编辑标签与「从置顶区移除」', () => {
     buildSidebar()
     h.pinned = ['a']
     h.ids = ['a']
@@ -333,8 +393,12 @@ describe('startPinnedStrip', () => {
     expect(button).not.toBeNull()
     button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     const items = Array.from(document.querySelectorAll<HTMLElement>('[data-dsh-row-menu-item]'))
-    expect(items.map((el) => el.dataset.menuItem)).toEqual(['edit-tags', 'unpin'])
-    items.find((el) => el.dataset.menuItem === 'unpin')!
+    expect(items.map((el) => el.dataset.menuItem)).toEqual(['rename', 'fork', 'edit-tags', 'focus-pin'])
+    expect(items[0]?.textContent).toBe('重命名')
+    expect(items[1]?.textContent).toBe('分叉会话')
+    expect(items[2]?.textContent).toBe('编辑标签')
+    expect(items[3]?.textContent).toBe('从置顶区移除')
+    items.find((el) => el.dataset.menuItem === 'focus-pin')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(h.pinned).toEqual([])
     expect(h.opened).toEqual([])
@@ -342,7 +406,7 @@ describe('startPinnedStrip', () => {
     dispose()
   })
 
-  it('行尾 ⋯ 菜单「编辑标签…」：打开标签面板（不切换会话）', () => {
+  it('行尾 ⋯ 菜单「编辑标签」：打开标签面板（不切换会话）', () => {
     buildSidebar()
     h.pinned = ['a']
     h.ids = ['a']

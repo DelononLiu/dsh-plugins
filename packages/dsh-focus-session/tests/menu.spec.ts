@@ -8,6 +8,7 @@ import {
   MENU_ATTR,
   MENU_BUTTON_ATTR,
   MENU_ITEM_ATTR,
+  MENU_MATERIAL_ATTR,
   MENU_OPEN_ROW_ATTR,
   MENU_VIEWPORT_ATTR,
   POINTER_GRACE_MS,
@@ -104,7 +105,7 @@ describe('injectMenuCss', () => {
   })
 })
 
-describe('官方 Menu 契约对齐（kernel 0.1.2-rc.1 ui-primitives/Menu.module.css）', () => {
+describe('官方 Menu 契约对齐（kernel 0.1.7-rc.2 ui-primitives Menu/MenuSurface.module.css）', () => {
   let anchor: HTMLElement
   let button: HTMLButtonElement
 
@@ -125,17 +126,35 @@ describe('官方 Menu 契约对齐（kernel 0.1.2-rc.1 ui-primitives/Menu.module
     { id: 'b', label: '乙', onSelect: () => {} },
   ]
 
-  it('样式含官方卡片/项度量（r20、218/360、100vh-24、z1100、item 40/8-10）', () => {
+  it('样式含官方卡片/项度量（r-lg、144/360、frame-clearance、z1100、item 34/6-8）', () => {
     const css = menuCss()
-    expect(css).toContain('border-radius:20px')
-    expect(css).toContain('min-width:218px')
+    expect(css).toContain('border-radius:var(--dsw-radius-lg)')
+    expect(css).toContain('min-width:144px')
     expect(css).toContain('max-width:360px')
-    expect(css).toContain('max-height:calc(100vh - 24px)')
+    expect(css).toContain('max-height:calc(100vh - 12px - max(12px, var(--dsh-frame-top-clearance, 12px)))')
     expect(css).toContain('z-index:1100')
-    expect(css).toContain('min-height:40px')
-    expect(css).toContain('padding:8px 10px')
+    expect(css).toContain('min-height:34px')
+    expect(css).toContain('padding:6px 8px')
     expect(css).toContain(`[${MENU_VIEWPORT_ATTR}]`)
     expect(css).toContain('overflow-y:auto')
+  })
+
+  it('卡片底色用官方 MenuSurface 同 token/机制（材质层 --dsw-menu-surface-fill + backdrop-filter）', () => {
+    const css = menuCss()
+    // 官方把底色与模糊放在 `.material` 层（MenuSurface.module.css），卡片自身不着色。
+    expect(css).toContain(`[${MENU_MATERIAL_ATTR}]{position:absolute;inset:0;z-index:-1`)
+    expect(css).toContain('background:var(--dsw-menu-surface-fill)')
+    expect(css).toContain('backdrop-filter:var(--dsw-menu-backdrop-filter)')
+    const cardRule = css.slice(css.indexOf(`[${MENU_ATTR}]{`))
+    expect(cardRule.slice(0, cardRule.indexOf('}'))).not.toContain('background:')
+    // 旧基准的 `--dsw-specific-menu`（无 backdrop-filter 的裸底）不得再出现。
+    expect(css).not.toContain('--dsw-specific-menu')
+
+    openRowMenu({ anchor, button, items: items() })
+    const card = document.querySelector<HTMLElement>(`[${MENU_ATTR}]`)!
+    const material = card.querySelector<HTMLElement>(`[${MENU_MATERIAL_ATTR}]`)
+    expect(material).not.toBeNull()
+    expect(material!.getAttribute('aria-hidden')).toBe('true')
   })
 
   it('卡片内含滚动视口（官方 .viewport），菜单项挂在视口里', () => {
@@ -146,11 +165,22 @@ describe('官方 Menu 契约对齐（kernel 0.1.2-rc.1 ui-primitives/Menu.module
     expect(viewport!.querySelectorAll(`[${MENU_ITEM_ATTR}]`)).toHaveLength(2)
   })
 
-  it('定位：align=start 取锚点左边、side=bottom 取 rect.bottom + 4（官方 place()）', () => {
+  it('定位：无按钮时回落整行（align=start 取左边、side=bottom 取 rect.bottom + 4）', () => {
     openRowMenu({ anchor, items: items() })
     const card = document.querySelector<HTMLElement>(`[${MENU_ATTR}]`)!
     expect(card.style.left).toBe('100px')
     expect(card.style.top).toBe('236px')
+  })
+
+  it('定位锚在触发按钮（官方会话行 Menu 的 anchor=按钮），不是整行', () => {
+    // 官方 `place()` 量的是 Menu 包装 span，而该 span 收缩到 ⋯ 按钮；故左侧取按钮左边。
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      left: 220, right: 236, top: 200, bottom: 216, width: 16, height: 16, x: 220, y: 200, toJSON: () => ({}),
+    } as DOMRect)
+    openRowMenu({ anchor, button, items: items() })
+    const card = document.querySelector<HTMLElement>(`[${MENU_ATTR}]`)!
+    expect(card.style.left).toBe('220px')
+    expect(card.style.top).toBe('220px')
   })
 
   it('开着时跟随版面滚动重定位（官方 scroll capture 监听）', () => {
@@ -162,6 +192,18 @@ describe('官方 Menu 契约对齐（kernel 0.1.2-rc.1 ui-primitives/Menu.module
     window.dispatchEvent(new Event('scroll'))
     expect(card.style.left).toBe('40px')
     expect(card.style.top).toBe('46px')
+  })
+
+  it('开着时每帧 track() 跟随（官方 rAF，无需 scroll/resize）', async () => {
+    openRowMenu({ anchor, items: items() })
+    const card = document.querySelector<HTMLElement>(`[${MENU_ATTR}]`)!
+    vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({
+      left: 30, right: 190, top: 5, bottom: 37, width: 160, height: 32, x: 30, y: 5, toJSON: () => ({}),
+    } as DOMRect)
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => { resolve() }))
+    expect(card.style.left).toBe('30px')
+    expect(card.style.top).toBe('41px')
+    closeRowMenu()
   })
 
   it('打开期间行带打开标记（官方 .sessionRow.menuOpen），关闭后移除', () => {
