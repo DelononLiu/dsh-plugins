@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-10-01
+
 > 现状（2026-09-06）：本 note 的「布局消费方（LayoutConsumer）折叠官方侧边栏」能力
 > 已随设置「布局」页一起删除（功能聚焦 dsh-console/dsh-focus-tabs），见
 > [remove-layout-settings-page](../../implemented/feature/2026-09-06-remove-layout-settings-page.md)。

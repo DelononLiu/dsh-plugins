@@ -12,9 +12,7 @@
         "dsh-user",
         "dsh-channel",
         "dsh-console",
-        "dsh-quick-nav",
-        "dsh-focus-session",
-        "dsh-focus-tabs"
+        "dsh-focus-session"
       ]
     }
   }

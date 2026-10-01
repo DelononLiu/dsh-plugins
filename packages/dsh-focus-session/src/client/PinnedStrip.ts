@@ -1,24 +1,21 @@
 /**
  * dsh-focus-session 左侧栏「置顶」区（client 半区，DOM 注入）——官方左侧栏「会话/
- * 工作区列表」之上的固定会话区，镜像 dsh-focus-session 的固定会话列表（同一份
- * `dsh-focus-pinned` settings 数据，天然两边同步）。定位 = 钉子集的**管理面**：
- * 拖拽排序 + 行尾 × 取消钉都写回 settings → 顶部会话 tab 行只消费同一顺序
- * （tab 行编号 / Alt+1..9 自动跟随），两处各司其职。
+ * 工作区列表」之上的固定会话区。定位 = 钉子集的**管理面**：拖拽排序 + 行尾 ×
+ * 取消钉都写回 settings，行序即钉序。
  *
- * 数据/交互契约（与会话 tab 行同源，见 index.ts）：
- * - 固定列表 = settings 命名空间 `dsh-focus-pinned` 的 `pinned`（Alt+P 钉/取消
- *   钉由会话 tab 行负责；本区行尾 × 是同语义的第二个取消入口）。
+ * 数据/交互契约（见 index.ts）：
+ * - 固定列表 = 本插件 Config 的 `pinned` 字段（本区行尾 × 取消钉 + 拖拽排序是
+ *   钉住的唯一管理面）。
  * - 只显示仍存在的会话（按当前会话快照的 ids 过滤）＋ 标题取 byId.displayTitle。
- * - 行可见文本带 `N.` 编号前缀（钉序第 N，与会话 tab 行编号一致；行增删自动
+ * - 行可见文本带 `N.` 编号前缀（钉序第 N；行增删自动
  *   重编号）；tooltip/aria-label 保持纯标题。
- * - 点击行 = 打开该会话（ctx.sessions.open，与点击左侧会话同路径——切换后
- *   dsh-focus-session 自己的 current 订阅会更新 tab 行划线等派生状态）。
- * - 拖拽排序：整行 HTML5 拖拽，drop 时把可见钉序写回 settings（同步触发 tab
- *   行顺序更新）；行内不实时搬移 DOM（避免与 sync 的重排打架）。
+ * - 点击行 = 打开该会话（ctx.sessions.open，与点击左侧会话同路径）。
+ * - 拖拽排序：整行 HTML5 拖拽，drop 时把可见钉序写回 settings；行内不实时搬移
+ *   DOM（避免与 sync 的重排打架）。
  *
  * 行带官方同款状态圆点（运行/子代理/完成/pending），槽 16px 保位。
  *
- * 挂载机制（抄 dsh-desk 工具入口组装器先例）：MutationObserver + 直接 DOM
+ * 挂载机制（官方侧栏没有这个 seat，故用 DOM 注入）：MutationObserver + 直接 DOM
  * 注入——等官方侧边栏渲染后把本区插到 sidebar root 的 regionArea 之前
  * （列表区上方）；React 重挂/重排导致丢失时自愈重插。折叠（rail）态由
  * frame 的 `data-sidebar-collapsed` 属性经 CSS 隐藏，不干扰窄列图标。
@@ -51,7 +48,7 @@ const DRAGGING_ATTR = 'data-dsh-pinned-dragging'
 const DROP_ATTR = 'data-dsh-pinned-drop'
 /** 当前会话行标记（行内标题着色，对齐会话 tab 的划线色）。 */
 const PINNED_CURRENT_ATTR = 'data-dsh-pinned-current'
-/** 幂等样式标签标记（同 dsh-desk `data-plugin-css` 约定）。 */
+/** 幂等样式标签标记（沿用本仓 `data-plugin-css` 约定）。 */
 const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/pinned-strip"]'
 
 /** 置顶区需要的最小会话列表快照（绕开官方 SessionId 品牌类型）。 */
@@ -84,7 +81,7 @@ export interface PinnedStripDeps {
   sessions: PinnedList
   /** 打开会话（点击置顶条目 = ctx.sessions.open）。 */
   open(id: string): void
-  /** 写回钉顺序/取消钉（settings.set('pinned', …)；tab 行顺序随之同步）。 */
+  /** 写回钉顺序/取消钉（settings.set('pinned', …)）。 */
   setPinned(ids: readonly string[]): void
   /** 会话 pending 交互 kind（无则 undefined）；入参会话 id 为 string。 */
   pendingKindOf(id: string): PendingInteractionKind | undefined
@@ -359,7 +356,7 @@ function syncRows(deps: PinnedStripDeps, doc: Document, stripRef: { el: HTMLElem
     // tooltip：有状态点 → 「状态 · 标题」；空闲 → 纯标题。aria-label 保持纯标题。
     const tip = status.dot === undefined ? row.title : `${status.label} · ${row.title}`
     if (rowEl.title !== tip) rowEl.title = tip
-    // 可见文本带编号前缀（钉序第 N，与会话 tab 行编号一致）；tooltip/aria 保持纯标题。
+    // 可见文本带编号前缀（钉序第 N）；tooltip/aria 保持纯标题。
     const label = `${i + 1}. ${row.title}`
     if (titleEl !== null && titleEl.textContent !== label) titleEl.textContent = label
     // 胶囊标签（幂等渲染：同内容零 DOM 写）。

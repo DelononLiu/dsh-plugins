@@ -53,5 +53,5 @@ Status: implemented
 - 胶囊显示宽度上限 96px（超出省略号），长标签以 `title` 提供完整文本。
 - 编辑面板用 `position:fixed` + 视口收敛定位（行下方，越界时上移）；窄窗口下宽度
   上限 260px。
-- 顶部标签行的胶囊与官方侧栏行的胶囊仍是后续项；`dsh-focus-tabs` 若要显示，需读
-  同一份 `dsh-focus-tags`（跨包只读，无新契约）。
+- 官方侧栏行的胶囊仍是后续项；顶部标签行随 `dsh-focus-tabs` 删除不再存在
+  （见 [drop-desk-and-focus-tabs](../architecture/2026-10-01-drop-desk-and-focus-tabs.md)）。

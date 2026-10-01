@@ -6,7 +6,7 @@
 
 DSH（DeepSeek Harness）是内核，本仓库产出**面向团队的发行包**：自研核心插件（分层：系统/管理组件/UI）+ 社区聚合插件（vendored）+ 版本锁。
 
-核心价值 = **自定义化**：开箱即用是默认值，可自定义是核心能力，贯穿两层——实例（personal，类型可扩展）、UI（dsh-desk 布局/插件组合；**不做换肤，皮肤中心否决**）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
+核心价值 = **自定义化**：开箱即用是默认值，可自定义是核心能力，贯穿两层——实例（personal，类型可扩展）、UI（插件组合，不自建布局层；**不做换肤，皮肤中心否决**）、发行包（profile 模板 + cordis.patch.yml 覆盖层）。
 
 ## 仓库布局
 
@@ -37,7 +37,7 @@ pnpm kernel:check # 内核新版本检测（报告；`--check` = 闸门：有新
 
 ```
 业务 app（vendored 功能应用）  当前无 vendored 成员（task-board/ssh/git-graph/skill-explorer 与 dst-agent-teams 均 2026-09-26 移除；协作编排改用官方 agent-team）
-UI                         dsh-desk（布局配置服务）· dsh-quick-nav（顶部区域）· dsh-focus-session（侧栏关注区：置顶/活跃/标签）· dsh-focus-tabs（tab 行）· 各界面（vendored UI 应用已移除：UI = 官方原生 + 自研关注层；无皮肤）
+UI                         dsh-focus-session（侧栏关注区：置顶/活跃/标签）· dsh-show-me（消息内复杂内容呈现）· dsh-quick-nav（顶部区域，保留但不加载）· 各界面（vendored UI 应用已移除：UI = 官方原生 + 自研消费层；无皮肤）
 管理组件                    dsh-console（档案/生命周期/部署编排/inbox，升级回滚为遗留项）
 系统                        dsh-user（身份）· dsh-channel（通信）· 认证网关（社区 clarknu/dsh-gateway，2026-09-26 起不内置实例——独立部署为 backlog）· LLM 记忆（社区 dsh-memento，选定未接入）
 内核                        官方 deepseek-harness（0.1.7-rc.2，2026-09-26 对齐）
@@ -62,7 +62,7 @@ UI                         dsh-desk（布局配置服务）· dsh-quick-nav（�
 
 - **Host/Client 双面构建**：官方用 `tsc -b`（Project References）+ `tsdown --env.DSH_BUILD_FACE host|client` 分面构建；插件同时产出 Node 加载入口（host）与浏览器 bundle（client），exports 提供 `"."` 与 `"./client"`。
 - **Typert 契约**：Host 面 `@Remote` 方法生成 Host-for-Client 契约，Client 面消费 `ctx.remote`；跨实例远程调用依赖此机制（注意：WS/EventSource 无法带 Authorization 头，鉴权需兼容 cookie 路径）。
-- 本项目当前为**已实现 + 部分接入**：8 插件实现（418 测试全绿；含 vendored typert-protocol 构建期镜像）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
+- 本项目当前为**已实现 + 部分接入**：6 插件实现（408 测试全绿；含 vendored typert-protocol 构建期镜像）；dsh-web 真实接入见 `.agents/notes/implemented/process/2026-08-21-dsh-web-integration.md`。
 - **测试环境 = 目录隔离 + 固定矩阵**（2026-08 定；2026-09-26 起内核基线 0.1.7-rc.2）：测试环境是**固定映射**（不靠猜，见下），sessions/settings/storages 完全隔离，不污染正式 `~/.dsh`。测试环境跑**独立 CLI**（与正式内核解耦）：`~/dsh-017-cli` = 0.1.7-rc.2（web2/web5 现用；`scripts/dsh-profile.sh` 的默认 `DSH_BIN`）；旧基线 `~/dsh-alpha5-cli`（0.1.2-rc.1）已退役——旧内核启动会被 peer 闸门禁用自研插件，启停/状态/重启用 `scripts/dsh-profile.sh`——实例清单读**注册表** `~/.dsh-home/registry.json`（读写用 `scripts/dsh-registry.mjs`；唯一权威，运行时**不扫描目录**，主键 `<host>/<id>`）：参数 = 实例名，按注册表取 home/profileDir + 读该实例自己 cordis.patch.yml 的 webserver.port（无 webserver = headless）；未登记/目录缺失报错（不设别名/不猜），`import` 子命令显式登记现有实例（幂等）；**start/stop/restart/resolve 必须点名实例（无参禁用，防止误碰开发实例）**，`status` 列出注册表内全部；restart 继承旧进程的**实例作用域 env**（provider 凭证、channel id），**会话/宿主变量一律剔除**（DSH_SESSION_ID/DSH_SESSION_JSONL/DSH_SHELL/DSH_WEB_URL，调用方 env 与旧进程继承两条路径都过滤）；进程定位按 home + profile 双匹配，且认**两种启动形态**（`node …/dsh --profile <p>` 与正式实例的 `node …/dsh web`——`dsh web` 默认就是 profile web）；start/restart **等待就绪**（pid 存活 **且** 端口监听 **且** HTTP 有应用应答——实测存在"端口已监听但应用仍返回 404"的启动窗口期，也存在"新进程 bind 失败已退出、别的进程仍在答 200"的误报面；headless 只看进程；web 实例自动带 `--no-open`；就绪后打印该实例的**登录链接**，旧标签页据此重开；超时打印日志尾部并非零退出）；自操作防护：目标进程是当前 shell 的**祖先进程**时拒绝 stop/restart（防止自己杀自己；pid 未知时回落"DSH_HOME 相等即拒绝"）——共享 home 的 web/daemon 靠 DSH_HOME 分不出"自己"，故按祖先链判定。下表现有已知实例，老实例（`~/.dsh-<名>`，自带安装）经一次 `dsh-profile.sh import` 登记；新实例（`~/.dsh-home/instance-<名>`，引用 runtime 池）由创建流程登记（见 [console 实例模型](.agents/notes/implemented/architecture/2026-09-13-console-instance-model.md)）：
 
   | 环境 | DSH_HOME | 启动 | 端口 | 角色 |
@@ -98,7 +98,7 @@ UI                         dsh-desk（布局配置服务）· dsh-quick-nav（�
 - **main 保持稳定基线**：小改动/文档可直接在 main 提交（原子、单功能）；**大功能（跨多文件/多提交）一律走 worktree 分支**，分支命名 `feat/<功能名>`。
 - 功能完成自检（typecheck/测试/文档/Agent Note）后合入，合入 = 一个功能单元（见"提交规则"）。
 - 注意：worktree 是独立目录，各自 `pnpm install`（node_modules 不共享）。
-- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console（含 console-ui client 半区）→ dsh-quick-nav（type-only 依赖 channel）→ dsh-desk（聚合 nav/focus-session/focus-tabs）；**dsh-focus-session / dsh-focus-tabs 独立**（focus-tabs 只读 focus-session 的 settings 数据，无编译期依赖）。无依赖关系的插件可并行。
+- **依赖链串行开发**（2026-08 定）：**有依赖关系的插件不能同时开 worktree**——worktree 隔离使上层看不到下层的未合入改动。依赖链必须串行：先底层（合入 main）再上层（开新 worktree）。依赖链：dsh-user → dsh-channel → dsh-console（含 console-ui client 半区）→ dsh-quick-nav（type-only 依赖 channel；保留但不加载）；**dsh-focus-session / dsh-show-me 独立无依赖**。无依赖关系的插件可并行。
 - **三条链与闸门**（2026-09 定）：元原则 = **机械闸门 > 人的自觉 / 模型自洽叙事**——流程文字本身不产生闸门，能机械判定的必须落成命令。正向链 = 拷问（`grilling`，含本项目高危种子清单）→ 规格 → 实施 → **验证**（`dsh-pre-push-checks`；内核升级另加 `scripts/verify-kernel-upgrade.sh`）→ 发布；反向链 = 故障 → **污染判定**（`diagnosing-bugs` Phase 0）→ 干净现场构造反馈环 / 受污染现场走 `dsh-incident-forensics`（A–F + 七条铁律，非破坏性快照落在 `refs/forensics/<ts>`）；**加固链** = 既有组件"毛病很多"时走 `dsh-component-hardening`（目标可判定化 → 只读取证 → 成因归类 → 分批排序 → **先红后绿** → 收口回灌）——方案即批次表，每批可独立合入与回滚。约束分三类：**机械闸门**（命令有输出即失败）/ 结构化约束（格式·清单，可 lint 需人判）/ 纯判断——不把纯判断伪装成闸门。三条链**共用同一份高危种子清单**：拷问产出的高危面就是排错优先怀疑的对象，事故与加固结论回灌同一清单（同一提交内更新），不各自漂移。方法论与收紧见 [.agents/notes/implemented/process/2026-09-13-aicoding-methodology.md](.agents/notes/implemented/process/2026-09-13-aicoding-methodology.md)。
 
 ## 派发编辑型 subagent（编辑护栏）

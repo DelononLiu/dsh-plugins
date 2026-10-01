@@ -1,6 +1,6 @@
 /**
  * dsh-user client 测试：侧边栏用户徽标挂载（footArea 末尾 = 设置下方）。
- * 需要 DOM 环境——与 dsh-desk 组装器测试同 happy-dom 策略。
+ * 需要 DOM 环境——与其它 client 半区测试同 happy-dom 策略。
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'

@@ -14,7 +14,7 @@ Status: implemented
 
 ```
 业务 app（当前无，预留）  面向用户业务价值的应用（协作/分析/工作流…）
-UI                         dsh-desk（UI 平台）· dsh-quick-nav · dsh-focus-tabs · dst-agent-teams · 各界面
+UI                         dsh-focus-session（侧栏关注区）· dsh-show-me · dsh-quick-nav（保留不加载）· 各界面
 管理组件                    dsh-console（主机/实例档案、生命周期、部署编排、inbox/投递）
 系统                        dsh-user（身份）· dsh-channel（通信）
 内核                        官方 deepseek-harness（rc 锁定）
@@ -23,20 +23,20 @@ UI                         dsh-desk（UI 平台）· dsh-quick-nav · dsh-focus-
 **分层判据**：
 - **系统**：基础设施能力（身份、通信），被上层消费，自身无业务含义。
 - **管理组件**：面向"系统/资源运维"的能力（主机、实例、部署、健康）——IT 管理面。
-- **UI**：界面层（布局、组件组合、导航、标签），消费管理组件与系统数据。
-- **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**首个成员：dst-agent-teams（vendored 协作应用）；全家桶功能应用（task-board/ssh/git-graph 等）随 vendored dsh-web-ui 拆分归入**。
+- **UI**：界面层（组件组合、导航、会话关注区），消费管理组件与系统数据。
+- **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**当前无成员**（dst-agent-teams 与 vendored 全家桶功能应用均于 2026-09-26 移除）。
 
 **自研边界原则**（2026-08 社区调研后定）：
 - 系统层：**dsh-user（身份模型）+ dsh-channel（通信）自研**（护城河）；**认证网关与远程访问采用社区 vendored**（接入件可替换，2026-08 用户确认）——认证从 dsh-user 拆出（dsh-user 变薄：只管用户/归属/授权基础接口），远程访问（对外暴露 UI/API）新纳入系统层。
 - 管理组件：自研主体（console），通用能力采用社区（dsh-update-checker 升级回滚、dsh-prometheus 指标）。
-- UI/业务 app：**以社区为主**（vendored），自研只做差异化（dsh-desk 平台、dsh-quick-nav、dsh-focus-tabs）。
+- UI/业务 app：**以社区为主**（vendored），自研只做差异化（dsh-focus-session 会话关注区、dsh-show-me、dsh-quick-nav）。
 - 完整矩阵见 docs/architecture.md §5 分层×插件矩阵。
 
 配套纪律：
 - **整体性**：一套概念模型（身份/主机/实例）贯穿所有层，禁止逐插件私有模型。
 - **控制面/执行面分离**：console 只编排决策，远程 agent 本地执行，SSH 仅一次性引导。
 - **UI 可替换**：UI 层纯消费层，不进入核心契约。
-- **同层聚合例外**：UI 层内部允许聚合依赖（meta 包，如 dsh-desk 聚合同层 nav/tabs）——跨层仍严格向下。
+- **同层聚合例外**：UI 层内部允许聚合依赖（meta 包）——跨层仍严格向下；当前 UI 层无 meta 聚合包（dsh-desk 聚合 nav/tabs 的 meta 包已随包删除，见 [drop-desk-and-focus-tabs](2026-10-01-drop-desk-and-focus-tabs.md)）。
 - **inbox/投递归属**：v1 由管理组件（console）承载，未来可长成第一个业务 app。
 
 ## Alternatives

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-10-01
+
 ## Problem
 
 用户确认 task-board / ssh / skill-explorer 的入口（侧边栏行按钮）**可见且可点击**，显示在**左侧边栏"工作区"上面**。需求：这三个工具入口应显示在**左侧边栏"控制台"上面**（即 dsh-console 的 ConsoleBadge 上方），而不是当前的工作区上面、也不是底部工具条。

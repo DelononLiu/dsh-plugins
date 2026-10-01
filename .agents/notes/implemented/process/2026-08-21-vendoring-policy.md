@@ -26,4 +26,4 @@ Status: implemented
 - vendored/ 目前为空（dst-agent-teams 标"已装"但仓库未引入——以实际为准，待落地）。
 - 皮肤中心 v2（纯资产目录）机制随 dsh-web-ui **不引入**（皮肤否决 2026-08，功能优先）。
 
-相关：[团队发行包定位](2026-08-21-team-distribution-package.md) · [命名决策](2026-08-21-naming-decisions.md) · [统一 npm（2026-08-23）](../../implemented/process/2026-08-23-vendoring-npm-unified.md)
+相关：[团队发行包定位](../architecture/2026-08-21-team-distribution-package.md) · [命名决策](2026-08-21-naming-decisions.md) · [统一 npm（2026-08-23）](../../implemented/process/2026-08-23-vendoring-npm-unified.md)

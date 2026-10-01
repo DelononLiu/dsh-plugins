@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-10-01
+
 ## Problem
 
 UI 平台（四区布局 + 插件组合自定义）的 host 服务与布局配置实现。

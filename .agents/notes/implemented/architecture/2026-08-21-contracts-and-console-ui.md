@@ -14,9 +14,9 @@ Status: implemented
 
 - **dsh-channel = 实例服务提供者**：定义实例类型（id/name/addr/status/health）+ 暴露发现/心跳/状态服务（@Remote，host 面）——实例是通信层发现的对象，放 channel 名正言顺。
 - **dsh-console = 实例管理服务提供者**：定义管理档案类型（在 channel 实例类型上扩展 owner/type/host/version）+ 暴露生命周期/部署服务。
-- **dsh-quick-nav / dsh-console-ui = 消费者**：`import type` 引用提供者类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用（client 面）：
-  - dsh-quick-nav → channel（导航只需实例身份/状态，依赖降到系统层）
-  - dsh-console-ui → console（管理界面）
+- **dsh-console（client 半区）/ dsh-quick-nav = 消费者**：`import type` 引用提供者类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用（client 面）：
+  - dsh-console（client 半区）→ console（管理界面）
+  - dsh-quick-nav → channel（导航只需实例身份/状态，依赖降到系统层）——保留源码但不随任何 profile 加载，故 **channel 的 @Remote 面当前无客户端消费者**（见 [drop-desk-and-focus-tabs](2026-10-01-drop-desk-and-focus-tabs.md)）。
 - 依赖方向向下；"一套概念模型"由提供者唯一定义类型保证。
 
 ## Alternatives
@@ -26,5 +26,5 @@ Status: implemented
 ## Consequences
 
 - 文档统一用"服务提供者/消费者"语言（架构 §1、§5、§9 同步）。
-- packages/ = 7 自研插件；nav 依赖 channel（系统层）、console-ui 依赖 console（type-only）。
+- packages/ 自研插件（见 AGENTS.md 分层图）；nav 依赖 channel（系统层）、console client 半区依赖 console（type-only），但 nav 不加载时该消费路径无运行时实例。
 - **实现落地（2026-08-21）**：ConsoleService 类插件（static Config + static inject ['channel'] + default export）；主机/实例档案（InstanceRecord 扩展 InstanceIdentity：owner/type/host/version）、生命周期编排（controlInstance/deployInstance 经 channel.sendControl 回环）、inbox（按 owner 隔离，订阅 channel task 平面 system.* 事件）；8 项单测通过。档案/inbox v1 内存存储；Typert 远程化留待消费端。

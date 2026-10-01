@@ -2,6 +2,10 @@
 
 Status: proposed（2026-09-04）
 
+> 部分失效（2026-10-01）：下文两处前提已不成立——「入口按 dsh-desk 组装器摆位」
+> 与「依赖 dsh-better-sidebar（已 vendored）」；dsh-desk 整包与 better-sidebar 均已删除，
+> 见 [drop-desk-and-focus-tabs](../../implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md)。
+
 ## 问题
 
 用户问："社区的 ssh 远程工作区插件，是否可用搞进来。"此前 v2"远程工作区（跨实例

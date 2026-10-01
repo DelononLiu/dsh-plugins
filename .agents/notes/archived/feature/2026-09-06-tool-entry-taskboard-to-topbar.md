@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-10-01
+
 ## Problem
 
 任务看板（task-board）入口此前与 SSH/技能中心一起，由 dsh-desk 组装器摆到侧边栏底部

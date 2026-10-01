@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-10-01
+
 ## Problem
 
 会话标签页（顶栏 tab + Alt+1..9 跨工作区切换）的 client 半区实现依赖官方 client 框架集成（共性工作块）。

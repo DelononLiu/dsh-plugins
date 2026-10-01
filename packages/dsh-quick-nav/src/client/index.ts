@@ -10,9 +10,7 @@
  * （此前曾改用 `ctx.remote.channel.list()`——channel 表不含 current、且管理端上该表
  * 为空，导致快捷导航空白；回退到权威 HTTP 端点。）
  *
- * 布局配置（dsh-desk 的 Config `layout`）：topbar.visible 实时控制注册/注销
- * 会话头部入口（跨插件契约 = 读同一个 profile 条目的 volatile 配置；原 dsh-desk
- * 「布局」设置页已删，仅实例配置/缺省）。
+ * 顶栏入口常驻；本包不读任何布局配置。
  */
 
 import { createElement } from 'react'
@@ -25,21 +23,15 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from 'dsh-channel/remote'
 import { QuickNav, type InstanceLink, type QuickNavHost } from './QuickNav'
 
-/** 需要的 client 服务：插槽注册 + configForms（读 dsh-desk 的布局配置）。 */
-export const inject = ['slots', 'configForms']
-
-/** 布局所在 profile 条目 id（dsh-desk 拥有；本包只读 `layout.topbar.visible`）。 */
-const DESK_ENTRY_ID = 'dsh-desk'
+/** 需要的 client 服务：插槽注册。 */
+export const inject = ['slots']
 
 /**
- * Client 插件体：注册顶栏实例导航入口（topbar.visible 实时控制）。
+ * Client 插件体：注册顶栏实例导航入口。
  * 数据源 = host `/api/quick-nav/instances`（权威实例表，含 current）。
  * @param ctx - client 根上下文。
  */
 export function apply(ctx: ClientContext): void {
-  const layoutScope = ctx.configForms.get<{ layout?: { topbar?: { visible?: boolean } } }>(DESK_ENTRY_ID)
-  const topbarVisible = (): boolean => layoutScope.getSnapshot().value?.layout?.topbar?.visible ?? true
-
   // 拉取快捷导航实例表（本插件 host 端点；不可用 → 空列表，浮层显示"无导航链接"）。
   const fetchNav = async (): Promise<InstanceLink[]> => {
     try {
@@ -55,29 +47,13 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject(
     'conversation.session.header.actions',
     () => {
-      // 注册态：dispose 为 null = 未注册。配置变更时注册/注销实时切换。
-      let dispose: (() => void) | null = null
-      const sync = (): void => {
-        if (topbarVisible()) {
-          if (dispose === null) {
-            const host: QuickNavHost = { list: fetchNav }
-            dispose = ctx.slots.register({
-              name: 'conversation.session.header.actions',
-              id: 'instance-nav',
-              order: 5,
-            }, (props) => createElement(QuickNav, { ...props, host }))
-          }
-        } else if (dispose !== null) {
-          dispose()
-          dispose = null
-        }
-      }
-      const unsubscribe = layoutScope.subscribe(sync)
-      sync()
-      return () => {
-        unsubscribe()
-        if (dispose !== null) dispose()
-      }
+      const host: QuickNavHost = { list: fetchNav }
+      const dispose = ctx.slots.register({
+        name: 'conversation.session.header.actions',
+        id: 'instance-nav',
+        order: 5,
+      }, (props) => createElement(QuickNav, { ...props, host }))
+      return () => { dispose() }
     },
   )
 }

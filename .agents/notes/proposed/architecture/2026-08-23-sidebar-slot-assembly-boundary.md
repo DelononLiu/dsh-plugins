@@ -2,9 +2,14 @@
 
 Status: proposed
 
+> 不再适用（2026-10-01）：本 note 讨论的 dsh-desk 组装器 + slots 显隐控制器与三个全家桶
+> 入口均已不存在（组装器随 2026-09-26 vendored UI 移除而删除，dsh-desk 整包于 2026-10-01
+> 删除）。正文开放问题作为历史保留，不再指导未来工作——见
+> [drop-desk-and-focus-tabs](../../implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md)。
+
 ## Problem
 
-讨论了很久的"侧边栏槽位"问题：task-board / ssh / skill-explorer 在侧边栏的入口**到底注册到哪里**、dsh-desk 作为组装器**如何摆位**。调研结论（2026-08-22，见 [dsh-desk-workbench-tool-entries](../../implemented/feature/2026-08-22-dsh-desk-workbench-tool-entries.md)）：
+讨论了很久的"侧边栏槽位"问题：task-board / ssh / skill-explorer 在侧边栏的入口**到底注册到哪里**、dsh-desk 作为组装器**如何摆位**。调研结论（2026-08-22，见 [dsh-desk-workbench-tool-entries](../../archived/feature/2026-08-22-dsh-desk-workbench-tool-entries.md)）：
 
 - 这三个全家桶插件**不注册官方 sidebar 插槽**（task-board 唯一 slots 是 `web-ui.plugin.item` 设置卡片），而是各自打包同一套 `mountSidebarEntry`——MutationObserver 等官方侧边栏渲染后，把 `<button data-dsh-xxx-entry>` **直接 DOM 注入**到 sidebar root（logoRow 之后、工作区浏览区之前），位置写死、无 Config。
 - dsh-desk 组装器（已实现）用 **re-parent + CSS 覆盖**接管摆位：entry 移到 footArea 顶部（控制台上方），样式对齐官方 `.trigger` 契约。

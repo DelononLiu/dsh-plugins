@@ -10,10 +10,7 @@
     "@deepseek-ai/dsh-web-app": "0.1.7-rc.2",
     "dsh-channel": "0.0.0",
     "dsh-console": "0.0.0",
-    "dsh-desk": "0.0.0",
     "dsh-focus-session": "0.0.0",
-    "dsh-focus-tabs": "0.0.0",
-    "dsh-quick-nav": "0.0.0",
     "dsh-user": "0.0.0"
   },
   "vendored": {}

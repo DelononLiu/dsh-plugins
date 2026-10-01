@@ -33,7 +33,7 @@ export const MENU_ITEM_ATTR = 'data-dsh-row-menu-item'
 export const MENU_BUTTON_ATTR = 'data-dsh-row-menu-button'
 /** 菜单打开期间打在锚点行上的标记（官方 `.menuOpen`：行保持 hover 底）。 */
 export const MENU_OPEN_ROW_ATTR = 'data-dsh-row-menu-open'
-/** 幂等样式标签标记（同 dsh-desk `data-plugin-css` 约定）。 */
+/** 幂等样式标签标记（沿用本仓 `data-plugin-css` 约定）。 */
 const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/row-menu"]'
 
 /** 指针宽限（ms）——官方 `ui-primitives/src/pointer-grace.ts`。 */

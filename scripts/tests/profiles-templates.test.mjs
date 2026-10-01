@@ -13,7 +13,7 @@ const FILES = ['cordis.patch.yml', 'dsh.lock.json', 'package.json']
 const json = (p) => JSON.parse(readFileSync(p, 'utf8'))
 const text = (p) => readFileSync(p, 'utf8')
 
-/** 改名前的启用清单（master/dev/explorer 分别来自旧 web/web2/web3）——改名不改组合。 */
+/** 模板启用清单（master/dev/explorer 分别来自旧 web/web2/web3）——2026-10 删 dsh-desk/dsh-focus-tabs、摘 dsh-quick-nav 后的组合。 */
 const EXPECTED_BUNDLES = {
   master: [
     '@deepseek-ai/dsh-base',
@@ -21,21 +21,16 @@ const EXPECTED_BUNDLES = {
     'dsh-user',
     'dsh-channel',
     'dsh-console',
-    'dsh-quick-nav',
     'dsh-focus-session',
-    'dsh-focus-tabs',
-    'dsh-desk',
   ],
-  dev: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desk'],
+  dev: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
   explorer: [
     '@deepseek-ai/dsh-base',
     '@deepseek-ai/dsh-web-app',
     'dsh-user',
     'dsh-channel',
     'dsh-console',
-    'dsh-quick-nav',
     'dsh-focus-session',
-    'dsh-focus-tabs',
   ],
 }
 

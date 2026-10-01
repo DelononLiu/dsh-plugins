@@ -2,6 +2,10 @@
 
 Status: implemented
 
+> 现状（2026-10-01）：`dsh-focus-tabs` 已整包删除，Alt+P 与会话 tab 行不存在；置顶区
+> （行菜单 + 拖拽排序 + 取消钉）成为钉住的唯一管理面——见
+> [drop-desk-and-focus-tabs](../architecture/2026-10-01-drop-desk-and-focus-tabs.md)。
+
 ## Problem
 
 把几个**正在盯的会话**在侧栏里放一个快捷区。dsh-focus-tabs 已把 Alt+P 固定的会话做成顶部
@@ -11,14 +15,12 @@ Status: implemented
 ## Decision
 
 > 包归属已变：置顶区随 [会话关注层拆分](2026-09-06-focus-session-tabs-split.md)
-> 迁到 `dsh-focus-session`（本文下方路径/命名空间已同步为新位置）。
+> 迁到 `dsh-focus-session`（本文下方路径已同步为新位置）。
 
-- **钉仍是 session 操作，数据同源**：置顶区显示的是 dsh-focus-session settings 命名空间
-  `dsh-focus-pinned` 的 `pinned` 列表——与会话 tab 行**同一份数据**；钉由 Alt+P
-  负责。置顶区定位 = 钉子集**管理面**（区别于 tab 行切换器）：行尾 × 取消钉
-  （与 tab × 同语义的第二个入口）、整行拖拽排序写回 settings → tab 行顺序与
-  Alt+1..9 自动跟随（同数据，天然同步）。
-- **落点在 dsh-tabs client**：`packages/dsh-focus-session/src/client/PinnedStrip.ts`（dsh-focus-session
+- **钉仍是 session 操作，数据同源**：置顶区显示的是 dsh-focus-session 的 `pinned`
+  列表——聚焦层唯一一份钉数据。置顶区定位 = 钉子集**管理面**：行尾 × / 行菜单取消钉、
+  整行拖拽排序写回（顺序即置顶区行序）。
+- **落点在 dsh-focus-session client**：`packages/dsh-focus-session/src/client/PinnedStrip.ts`（dsh-focus-session
   已持有钉数据 + `ctx.sessions.open`，无需动 dsh-desk、不新增 UI slot、不另起包）。
 - **挂载 = DOM 注入**（照 dsh-desk 工具入口组装器先例）：MutationObserver 等官方
   侧边栏渲染后，把置顶区插到 sidebar root 的 `regionArea` **之前**（列表区上方）；
@@ -29,25 +31,20 @@ Status: implemented
   observer → sync」微任务自触发死循环会把渲染主线程饿死（发消息出状态点即整页卡死，
   曾现网发生，见 [session-pin-status-sync-convergence](../../implemented/feature/2026-09-06-session-pin-status-sync-convergence.md)）。
 - **行派生**：`pinned ∩ 现存会话 ids`（钉序、去重）；标题 = `byId.displayTitle`
-  （缺省回退 id）；行可见文本带 `N.` 编号前缀（钉序第 N，与会话 tab 行编号一致；
-  行增删自动重编号，tooltip/aria 为纯标题）；当前会话行带标记（标题用会话 tab
-  划线的品牌色）。点击行 = `ctx.sessions.open(id)`——与点击左侧会话同一路径，
-  dsh-focus-tabs 自己的 current 订阅接着更新 tab 划线等派生状态，两边天然同步。
+  （缺省回退 id）；行可见文本带 `N.` 编号前缀（钉序第 N；行增删自动重编号，
+  tooltip/aria 为纯标题）；当前会话行带标记（标题用品牌色）。点击行 =
+  `ctx.sessions.open(id)`——与点击左侧会话同一路径。
 - **行状态点（对齐官方会话行）**：行首 16px 槽内按官方语义/视觉显示状态点——
   优先级 pending（approval/plan-review/question→warning 橙）> running（ongoing
   追逐矩阵）> 子代理运行计数（ongoing + `N 个子代理运行`）> completed（done 绿）
   > 空闲（无点、槽保位）。数据 = 会话快照 byId 字段（running/completed/blank/
   parentId/origin，纯函数 `indexRunningSubagents` 算子代理链）+ 新依赖
   `uiSession.pendingInteractions` 订阅（pending kind）。tooltip = `状态 · 标题`。
-- **会话 tab 行同源状态点**：顶部会话 tab 编号前同样前置状态小圆点（6px，颜色
-  同语义），复用 `resolveRowStatus`/`indexRunningSubagents` 与同一 pending 订阅；
-  `tab-status.ts` 渲染幂等（同态零结构变更），避免 applyActive 的 body
-  MutationObserver 自触发。
 - **视觉**：抄官方侧边栏行契约（Rows.module.css 同款 tokens：行 32px/圆角 8/
   hover `--dsw-alias-interactive-bg-hover`、标题 14px、label 用 `--dsw-alias-label-tertiary`），
   dot 抄 ui-primitives StateDot（done/warning 圆点 + ongoing 追逐动画），不自造风格。
 - **测试**：dsh-focus-session 新增 `vitest.config.ts`（happy-dom；devDep `happy-dom ^20.11.6`，
-  与 dsh-desk/dsh-user 同版本）；`tests/pinned-strip.spec.ts`（DOM 注入/同步/状态点/
+  与 dsh-user 同版本）；`tests/pinned-strip.spec.ts`（DOM 注入/同步/状态点/
   点击/自愈/折叠/disposer）+ `tests/session-status.spec.ts`（纯状态派生/子代理计数），
   全绿 36 用例。
 - **明确不做（MVP）**：子树/子 agent 视图；跳右侧 better-sidebar；新快捷键；设置页；
@@ -59,13 +56,12 @@ Status: implemented
   最终被用户口径取代——放左侧栏列表上方、由 dsh-focus-session client 自持，不扩 dsh-desk slot。
 - **import/reuse 官方 workspace 行组件渲染置顶行**：数据本在 `ctx.sessions`，自绘轻量
   行即可，避免依赖官方内部组件结构；视觉契约（tokens/几何）仍照抄官方。
-- **置顶区提供取消钉入口（如行尾 ×）**：MVP 只读，不扩入口；取消钉继续走 tab 行。
+- **置顶区提供取消钉入口（如行尾 ×）**：MVP 只读、取消钉走 tab 行；后置顶区补齐
+  该入口，并随 focus-tabs 删除成为唯一管理面（见上）。
 
 ## Consequences
 
 - 纯 client 半区改动，无 host/共享契约变更；UI 层（可替换）内自洽，不进核心契约。
-- web2 验收：profile 的 `dsh-focus-session` / `dsh-focus-tabs` 链接需切到本分支构建并重启实例（会话内自操作
-  保护：由外部终端执行 `scripts/dsh-run-fg.sh web2`）。
+- web2 验收：profile 的 `dsh-focus-session` 链接需切到本分支构建并重启实例。
 - 生命周期：订阅/observer/样式均随 `ctx.effect` dispose 释放；无钉时空 DOM 不残留。
-- 后续可扩展（非 MVP）：行内右键取消钉；置顶区显隐是否联动布局配置
-  `my-ui-layout tabs.visible`（当前不联动）。
+- 后续可扩展（非 MVP）：行内右键取消钉。

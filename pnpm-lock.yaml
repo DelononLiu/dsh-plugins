@@ -107,37 +107,6 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.4)(happy-dom@20.14.5)(yaml@2.9.1)
 
-  packages/dsh-desk:
-    dependencies:
-      '@deepseek-ai/schemastery':
-        specifier: ^3.18.4
-        version: 3.18.4
-      dsh-focus-session:
-        specifier: workspace:*
-        version: link:../dsh-focus-session
-      dsh-focus-tabs:
-        specifier: workspace:*
-        version: link:../dsh-focus-tabs
-      dsh-quick-nav:
-        specifier: workspace:*
-        version: link:../dsh-quick-nav
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: ^4.0.4
-        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
-      '@deepseek-ai/dsh-settings':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(2qh2ghzp7ah7rkb43lzwtzrgv4)
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.20.4
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^3.0.0
-        version: 3.2.7(@types/node@22.20.4)(happy-dom@20.14.5)(yaml@2.9.1)
-
   packages/dsh-focus-session:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -168,57 +137,6 @@ importers:
       happy-dom:
         specifier: ^20.11.6
         version: 20.14.5
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^3.0.0
-        version: 3.2.7(@types/node@22.20.4)(happy-dom@20.14.5)(yaml@2.9.1)
-
-  packages/dsh-focus-tabs:
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: ^4.0.4
-        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
-      '@deepseek-ai/dsh-api-session-controller':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(pcbzwanzh5isfe55too3pofrn4)
-      '@deepseek-ai/dsh-client-store':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.4)
-      '@deepseek-ai/dsh-client-ui-conversation':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.4)
-      '@deepseek-ai/dsh-client-ui-renderer':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.4)
-      '@deepseek-ai/dsh-client-ui-session':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.4)
-      '@deepseek-ai/dsh-client-ui-settings':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.4)
-      '@deepseek-ai/dsh-client-ui-slots':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.4)
-      '@deepseek-ai/dsh-settings':
-        specifier: ^0.1.7-rc.2
-        version: 0.1.7-rc.2(2qh2ghzp7ah7rkb43lzwtzrgv4)
-      '@deepseek-ai/schemastery':
-        specifier: ^3.18.4
-        version: 3.18.4
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.20.4
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.3.0
-      happy-dom:
-        specifier: ^20.11.6
-        version: 20.14.5
-      react:
-        specifier: ^19.0.0
-        version: 19.3.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

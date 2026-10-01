@@ -1892,9 +1892,9 @@ describe('创建流程：模板 → 装依赖 → 链接池（端到端验收发
       const templateHome = join(tmp, 'templates')
       const tpl = join(templateHome, 'profiles', 'dev')
       mkdirSync(tpl, { recursive: true })
-      writeFileSync(join(tpl, 'package.json'), JSON.stringify({ name: 'dsh-profile-dev', dependencies: { 'dsh-desk': 'link:/tmp/nope' } }))
+      writeFileSync(join(tpl, 'package.json'), JSON.stringify({ name: 'dsh-profile-dev', dependencies: { 'dsh-focus-session': 'link:/tmp/nope' } }))
       writeFileSync(join(tpl, 'cordis.patch.yml'), '[]\n')
-      mkdirSync(join(tpl, 'node_modules', 'dsh-desk'), { recursive: true }) // 真装出来的样子
+      mkdirSync(join(tpl, 'node_modules', 'dsh-focus-session'), { recursive: true }) // 真装出来的样子
       const calls: Array<{ dir: string; linked: boolean }> = []
       ConsoleService.installImpl = (dir) => {
         // 安装时必须还没有池软链（顺序断言）
@@ -1931,7 +1931,7 @@ describe('创建流程：模板 → 装依赖 → 链接池（端到端验收发
       importRuntime({ version: '0.1.2-rc.1', source: join(tmp, 'cli') })
       const tpl = join(tmp, 'templates', 'profiles', 'dev')
       mkdirSync(tpl, { recursive: true })
-      writeFileSync(join(tpl, 'package.json'), JSON.stringify({ name: 'dsh-profile-dev', dependencies: { 'dsh-desk': 'link:/tmp/nope' } }))
+      writeFileSync(join(tpl, 'package.json'), JSON.stringify({ name: 'dsh-profile-dev', dependencies: { 'dsh-focus-session': 'link:/tmp/nope' } }))
       writeFileSync(join(tpl, 'cordis.patch.yml'), '[]\n')
       ConsoleService.installImpl = () => { throw new Error('npm ERR! 网络不可达') }
       mockSpawn(fakeChild())

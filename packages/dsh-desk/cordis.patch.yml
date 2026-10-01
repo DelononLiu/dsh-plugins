@@ -1,5 +1,0 @@
-# dsh-desk 补丁层（占位）
-# 本包现只提供布局配置服务（vendored UI 应用已于 2026-09-26 移除）；
-# 保留该补丁挂载点供未来插入/覆盖条目。
-# 格式：cordis loader patch 条目数组（id-targeted config overrides / disables / insert lists）。
-[]

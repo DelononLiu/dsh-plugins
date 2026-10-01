@@ -2,6 +2,9 @@
 
 Status: proposed
 
+> 部分失效（2026-10-01）：dsh-desk / dsh-focus-tabs 已整包删除，本 note 中针对二者的
+> 设置模型迁移条目不再适用——见 [drop-desk-and-focus-tabs](../../implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md)。
+
 ## Problem
 
 官方内核从本仓基线 `0.1.2-rc.1`（2026-09-03）走到 `0.1.7-rc.2`（2026-09-24，npm

@@ -3,10 +3,9 @@
  *
  * 本包是会话关注数据的**所有者**：钉住列表（Config 字段 `pinned`）与胶囊标签
  * （Config 字段 `tags`）都由这里读写（官方 0.1.7 设置模型：设置 = 插件自身
- * Config 的 volatile 字段，按 profile 条目 id 定位）；dsh-focus-tabs 只读同一份
- * 数据渲染顶部会话 tab 行，因此两处天然同步（钉序/标签变化双方自动跟随）。
+ * Config 的 volatile 字段，按 profile 条目 id 定位）。
  *
- * 两个区都是 DOM 注入（抄 dsh-desk 工具入口组装器先例，不占官方 slot）：
+ * 两个区都是 DOM 注入（MutationObserver + 直接插进官方侧栏，不占官方 slot）：
  * - 置顶区（PinnedStrip）：手动钉住的会话，管理面（行尾 × 取消钉 + 拖拽排序）。
  * - 活跃区（ActiveStrip）：最近活跃的会话（`updatedAt` 降序，自动，上限 5 条）。
  */

@@ -6,8 +6,7 @@
  *
  * 落点：官方 footArea（footerActions → settingsArea）末尾——设置下方。
  * 官方 slots 无此 seat（sidebar.settings 单占用），故用 MutationObserver
- * 等 footArea 渲染后 DOM 注入（同 dsh-desk 组装器机制；dsh-user 是系统层
- * 不依赖 UI 层，自实现轻量注入）。
+ * 等 footArea 渲染后 DOM 注入（dsh-user 是系统层，不依赖 UI 层，自实现轻量注入）。
  */
 
 import { createElement } from 'react'

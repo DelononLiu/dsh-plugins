@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "dsh-distro-explorer",
-  "name": "dsh 模板（explorer：核心组合 user/channel/console + nav/tabs）",
+  "name": "dsh 模板（explorer：核心组合 user/channel/console + focus-session）",
   "version": "0.0.0",
   "kernel": "@deepseek-ai/dsh@0.1.7-rc.2",
   "bundles": {
@@ -10,8 +10,6 @@
     "dsh-channel": "0.0.0",
     "dsh-console": "0.0.0",
     "dsh-focus-session": "0.0.0",
-    "dsh-focus-tabs": "0.0.0",
-    "dsh-quick-nav": "0.0.0",
     "dsh-user": "0.0.0"
   },
   "vendored": {

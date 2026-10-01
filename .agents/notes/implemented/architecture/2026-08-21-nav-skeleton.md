@@ -2,6 +2,10 @@
 
 Status: implemented
 
+> 现状（2026-10-01）：本骨架已长成完整的顶栏实例下拉（host + client），但 dsh-quick-nav
+> 保留源码、不随任何 profile 加载；实例跳转收敛到 dsh-console 面板每实例的「跳转」——见
+> [drop-desk-and-focus-tabs](2026-10-01-drop-desk-and-focus-tabs.md)。
+
 ## Problem
 
 顶栏实例导航（跳转/在线状态）的 client 半区实现依赖官方 client 框架集成（共性工作块，同 console-ui）。

@@ -9,8 +9,8 @@
  * - instance：实例自退兜底——收到 stop/restart 退出进程（执行面）。
  *
  * 实例管理服务提供者：`InstanceRecord` 在 channel 的 `InstanceIdentity` 上
- * 扩展 owner/type/host/version；消费者（dsh-quick-nav 等）经
- * type-only import + Typert ctx.remote 消费（运行时零依赖）。
+ * 扩展 owner/type/host/version；消费者（如 dsh-quick-nav；当前未随任何 profile
+ * 加载）经 type-only import + Typert ctx.remote 消费（运行时零依赖）。
  *
  * v1 为**进程内实现**：档案与 inbox 存内存（持久化后续）；生命周期指令经
  * channel.sendControl 下发（console 编排，daemon/instance 执行）。
@@ -1447,7 +1447,7 @@ export class ConsoleService extends TypertRemoteService {
           private: true,
           version: '0.0.0',
           dependencies: {},
-          dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desk', 'dsh-quick-nav', 'dsh-focus-session', 'dsh-focus-tabs'] } },
+          dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-focus-session'] } },
         }, null, 2) + '\n')
       }
       const cordisPath = join(homeProfile, 'cordis.yml')

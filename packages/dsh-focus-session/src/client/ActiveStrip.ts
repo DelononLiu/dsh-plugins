@@ -13,7 +13,7 @@
  * - 点击行 = 打开该会话（`ctx.sessions.open`，与侧栏点击同路径）。
  * - 行带官方同款状态圆点（运行/子代理/完成/pending），与置顶区一致。
  *
- * 挂载机制（与置顶区同款，抄 dsh-desk 工具入口组装器先例）：MutationObserver
+ * 挂载机制（与置顶区同款，官方侧栏没有这个 seat，故用 DOM 注入）：MutationObserver
  * + 直接 DOM 注入——插到「置顶」区之后（无置顶区时插到 regionArea 之前）；
  * React 重挂/重排导致丢失时自愈重插。折叠（rail）态由 frame 的
  * `data-sidebar-collapsed` 属性经 CSS 隐藏。
@@ -42,7 +42,7 @@ const ACTIVE_LABEL = '活跃区'
 const ACTIVE_ROW_ATTR = 'data-dsh-active-row'
 /** 当前会话行标记。 */
 const ACTIVE_CURRENT_ATTR = 'data-dsh-active-current'
-/** 幂等样式标签标记（同 dsh-desk `data-plugin-css` 约定）。 */
+/** 幂等样式标签标记（沿用本仓 `data-plugin-css` 约定）。 */
 const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/active-strip"]'
 
 /** 活跃区默认条数上限。 */

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-10-01
+
 ## Problem
 
 设置页左侧导航里的「布局」页（dsh-desk `settings.section`，含 topbar/tabs/

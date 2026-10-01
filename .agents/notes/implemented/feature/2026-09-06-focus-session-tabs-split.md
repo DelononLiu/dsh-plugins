@@ -2,6 +2,10 @@
 
 Status: implemented
 
+> 部分被取代（2026-10-01）：拆分出来的 `dsh-focus-tabs` 已整包删除（顶部会话标签行取消），
+> `dsh-focus-session` 保留并独占钉住/标签数据与侧栏管理面；下方关于 focus-tabs 的决策、
+> 「两个包成对使用」等后果不再成立——见 [drop-desk-and-focus-tabs](../architecture/2026-10-01-drop-desk-and-focus-tabs.md)。
+
 ## Problem
 
 `dsh-tabs` 一个包承担了两件不同的会话 UI 职责：顶部**会话标签行**（Alt+P 固定、
@@ -56,14 +60,12 @@ Alt+1..9 切换、编号标题、状态圆点）与侧栏**「置顶」区**（�
 
 ## Consequences
 
-- 两个包**成对使用**：`dsh-focus-tabs` 读的命名空间由 `dsh-focus-session` 注册，
-  单独装 focus-tabs 时命名空间缺失（profile 模板已同时列两者）。
-- 会话关注数据的所有权从 tabs 移到 focus-session：改动钉住/标签的入口在
-  focus-session（置顶区取消钉/拖拽、标签编辑），focus-tabs 的 Alt+P 仍在 tab 行侧
-  写同一命名空间（共享配置，非所有权冲突）。
+- **单包**：拆分出的 `dsh-focus-tabs` 已删除，关注层只剩 `dsh-focus-session`——钉住/标签
+  数据与唯一管理面（侧栏置顶区）都在它；见 [drop-desk-and-focus-tabs](../architecture/2026-10-01-drop-desk-and-focus-tabs.md)。
+- 会话关注数据的所有权在 focus-session：改动钉住/标签的入口只有 focus-session
+  （置顶区取消钉/拖拽/行菜单、标签编辑）；focus-tabs 的 Alt+P 写入路径随包删除。
 - 旧 note 的落点事实同步：[session-pin-sidebar-strip](../../implemented/feature/2026-09-06-session-pin-sidebar-strip.md)
   记录的置顶区实现已迁至 `packages/dsh-focus-session/src/client/PinnedStrip.ts`。
-- 部署侧：profile 模板（web/web2/web3）、`tsconfig.host.json`、dsh-desk meta 包、
-  dsh-console 的 launch 默认 bundles 全部同步；已运行实例需重新安装链接并重启
-  （web2 会话内自操作需用户确认）。
+- 部署侧：profile 模板（master/dev/explorer）、`tsconfig.host.json`、dsh-console 的
+  launch 默认 bundles 同步（dsh-desk meta 包已随整包删除）；已运行实例需重新安装链接并重启。
 - 胶囊标签的渲染与编辑入口见 [session-tag-pills](2026-09-06-session-tag-pills.md)（实现时同属本 worktree 分支）。

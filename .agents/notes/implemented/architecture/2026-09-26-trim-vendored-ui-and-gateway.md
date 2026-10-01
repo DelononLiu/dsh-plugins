@@ -2,6 +2,9 @@
 
 Status: implemented
 
+> 后续（2026-10-01）：本次瘦身时保留的 dsh-desk host 面（布局配置服务）与 dsh-focus-tabs
+> 也已整包删除——见 [drop-desk-and-focus-tabs](2026-10-01-drop-desk-and-focus-tabs.md)。
+
 ## Problem
 
 发行包里的 vendored 面越堆越宽，且与两条纪律冲突/重复：
@@ -32,6 +35,7 @@ Status: implemented
   - `package.json` 去掉 `exports["./client"]`、`dsh.client`、client 构建步骤与
     仅 client 用的 devDeps（react / happy-dom / client-ui-* / client-store）。
   - 保留：布局配置（`ctx.myUi`，被 quick-nav / focus-tabs 消费）。**本包自此只有 host 面。**
+    （该保留项后于 2026-10-01 随 dsh-desk 整包删除，见 [drop-desk-and-focus-tabs](2026-10-01-drop-desk-and-focus-tabs.md)。）
 - **移除 agent-teams**：master 锁的 `@nanmicoder/dsh-agent-teams`、explorer 锁的旧名
   `dst-agent-teams`（该名字在 npm 上已不存在）一并删除；协作编排改用官方 agent-team。
 - **移除认证网关**：三个模板 lock 的 `dsh-gateway` 条目删除；活环境 `~/.dsh/profiles/web`
@@ -51,8 +55,8 @@ Status: implemented
 
 ## Consequences
 
-- **UI = 官方原生 + 自研关注层**（quick-nav 顶栏、focus-session 侧栏关注区、
-  focus-tabs 标签行）；dsh-desk 只剩布局配置服务。
+- **UI = 官方原生 + 自研消费层**（focus-session 侧栏关注区、show-me；quick-nav 保留不加载）；
+  UI 平台 dsh-desk 与标签行 dsh-focus-tabs 均已整包删除。
 - 官方侧栏重新成为可用面：此前记为"未接入面"的**官方侧栏会话行「添加到置顶区」**
   现在可接（待办）。
 - 0.1.7 升级的 vendored bump 清单归零（`@linxin666/*` 不再需要 bump）。

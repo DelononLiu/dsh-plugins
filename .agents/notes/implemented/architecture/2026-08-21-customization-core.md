@@ -13,7 +13,7 @@ Status: implemented
 | 层 | 自定义什么 | 机制 |
 | --- | --- | --- |
 | 实例 | 每人创建自己的实例（personal），类型可扩展 | 实例档案 type 枚举（normal/shared/host/...） |
-| UI | 每人的布局（四区可调）、插件组合（不做换肤——皮肤否决 2026-08） | dsh-desk 自定义框架（布局+组合） |
+| UI | 插件组合（不做换肤——皮肤否决 2026-08；布局配置已随 dsh-desk 删除，见 [drop-desk-and-focus-tabs](2026-10-01-drop-desk-and-focus-tabs.md)） | profile 模板装/启停自研与社区 UI 插件 |
 | 发行包 | 每团队的默认配置 + 用户覆盖 | profile 模板 + `cordis.patch.yml` 覆盖层（DSH 原生机制） |
 
 哲学类比 oh-my-zsh：默认给你一套好用的，"my"的精髓是你可以改。
@@ -21,12 +21,12 @@ Status: implemented
 ## Alternatives
 
 - 只做"开箱即用"不做自定义——否决：与社区全家桶无差异，丢失差异化。
-- 自定义做成独立 UI 配置面板插件——暂不采纳：先通过 patch 层 + 布局 Config 实现，配置面板属于后续 UI 增强。
+- 自定义做成独立 UI 配置面板插件——暂不采纳：先通过 patch 层实现，配置面板属于后续 UI 增强。
 
 ## Consequences
 
-- dsh-desk 定位 = 自定义 UI 平台（默认全家桶 + 组合/布局自定义，**不做换肤**），非纯聚合。
-- vendored 社区 dsh-web-ui 时**不引入皮肤中心**（皮肤否决 2026-08，功能优先）；自定义维度=布局+插件组合。
+- dsh-desk（自定义 UI 平台，默认全家桶 + 组合/布局自定义，**不做换肤**）已整包删除，UI 自定义维度收敛为插件组合。
+- vendored 社区 UI 插件**不引入皮肤中心**（皮肤否决 2026-08，功能优先）；自定义维度=插件组合。
 - profiles/master 模板的 cordis.patch.yml 是自定义化的主战场，默认配置要"够用且可改"。
 
 相关：[分层架构](2026-08-21-layered-architecture.md) · [命名决策](2026-08-21-naming-decisions.md)

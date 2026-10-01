@@ -10,7 +10,7 @@ Status: implemented
 - **与官方 UI 的唯一基准冲突**：本仓纪律是「UI 默认与官方一致（抄官方）」——官方
   组件实现即样式契约；better-sidebar 顶掉官方侧边栏后，侧栏形态、会话行的
   「添加到置顶区」入口（`dsh-focus-session` 的行菜单）等一堆面都变成"未接入面"
-  （见 [session-row-menu](2026-09-06-session-row-menu.md) 的未接入项）。
+  （见 [session-row-menu](../feature/2026-09-06-session-row-menu.md) 的未接入项）。
 - **升级负担**：0.1.7 内核升级要求把 vendored 全家桶一起 bump（peer 已要求
   ≥0.1.7-rc.2），better-sidebar 目标版本 0.21.1 与我们的自研侧栏关注层职责重叠。
 
@@ -27,7 +27,8 @@ Status: implemented
   §5 vendored 矩阵 / §9 已实现项 / vendored 清单行）、`docs/community-reference.md`
   里"我们已 vendored"的表述。
 - 代码注释同步：`dsh-desk` 的 `AssembledSlotId` 与 `SlotsController` 不再提
-  better-sidebar（v1 slots 型插件只剩 git-graph）。
+  better-sidebar（v1 slots 型插件只剩 git-graph）；这两个符号随后随 dsh-desk 整包删除
+  （见 [drop-desk-and-focus-tabs](2026-10-01-drop-desk-and-focus-tabs.md)）。
 - **运行环境**：web2（`~/.dsh-web2/profiles/web2`，唯一装了它的活环境）同步删除依赖
   与 patch insert；3080/web（`~/.dsh`）与 daemon 本来就没装，不受影响。
 - 社区调研结论**保留**在 `docs/community-reference.md`（上游项目的设计参考价值不变），

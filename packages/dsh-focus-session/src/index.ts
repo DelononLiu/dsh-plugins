@@ -3,9 +3,8 @@
  *
  * 本包拥有两份会话关注数据（本插件 Config 的 volatile 字段——官方 0.1.7 起设置 =
  * 插件自身 Config，按 profile 条目 id 定位、持久化进当前 profile patch），client
- * 半区据此渲染侧栏「置顶区」与「活跃区」，dsh-focus-tabs 只读消费同一份数据渲染
- * 顶部会话 tab 行：
- * - `pinned`：钉住的会话 id 列表（顺序即置顶区行序与 tab 行序）。
+ * 半区据此渲染侧栏「置顶区」与「活跃区」：
+ * - `pinned`：钉住的会话 id 列表（顺序即置顶区行序）。
  * - `tags`：会话 → 胶囊标签（人工自定义文字 + 可选色调）。
  *
  * （0.1.7 前这两份数据是独立 settings 命名空间 `dsh-focus-pinned` / `dsh-focus-tags`
@@ -22,7 +21,7 @@ export const FOCUS_SESSION_ENTRY_ID = 'dsh-focus-session'
 
 /** 钉住会话 settings 结构。 */
 export interface PinnedSettings {
-  /** 钉住的会话 id 列表（顺序即置顶区行序 / 会话 tab 行序）。 */
+  /** 钉住的会话 id 列表（顺序即置顶区行序）。 */
   pinned: string[]
 }
 

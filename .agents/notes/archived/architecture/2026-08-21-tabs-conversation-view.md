@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-10-01
+
 ## Problem
 
 dsh-tabs 的 tab 形态/位置反复迭代后，用户最终拍板（2026-08-21）：**浏览器式会话 tabs**——每个会话一个 tab，点击该 tab 选中并显示该会话内容，位置在官方「对话/轨迹」视图 tabs 的**同一行**。用户指出官方 conversation.view 机制可把 tab 加进「对话/轨迹」行（其 open-file 插件即如此，rc0.7），只是需要**动态多个**。

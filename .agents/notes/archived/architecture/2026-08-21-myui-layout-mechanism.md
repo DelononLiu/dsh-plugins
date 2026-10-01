@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Archived: 2026-10-01
+
 ## Problem
 
 dsh-desk 是四区布局平台，自定义维度=布局+插件组合——自定义机制未定。

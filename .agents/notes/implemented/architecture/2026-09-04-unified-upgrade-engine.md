@@ -5,7 +5,7 @@ Status: implemented
 ## Problem
 
 控制台「升级」页是 UI 骨架（假按钮/静态目标版本）；「升级回滚策略」文档已定
-（[distro-version-mechanism](2026-08-21-distro-version-mechanism.md)：快照→patch
+（[distro-version-mechanism](../process/2026-08-21-distro-version-mechanism.md)：快照→patch
 校验→滚动重启→心跳确认→失败自动回滚，保留 3 份）但无执行者——实例侧的
 'upgrade' 控制指令停在 v1 占位（daemon 默认分支不处理）。
 

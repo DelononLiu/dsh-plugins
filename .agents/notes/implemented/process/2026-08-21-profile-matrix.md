@@ -32,4 +32,4 @@ Status: implemented
 - profiles/ 目录结构从单一模板扩展为三模板矩阵；README/architecture.md/AGENTS.md 目录说明已同步。
 - 三个 dsh.lock.json 已按定稿 schema 落地（schemaVersion/id/name/version/kernel/bundles/vendored，见 distro-version-mechanism note）。
 
-相关：[团队发行包定位](2026-08-21-team-distribution-package.md) · [分层架构](2026-08-21-layered-architecture.md)
+相关：[团队发行包定位](../architecture/2026-08-21-team-distribution-package.md) · [分层架构](2026-08-21-layered-architecture.md)

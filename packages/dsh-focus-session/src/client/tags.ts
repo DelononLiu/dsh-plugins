@@ -2,7 +2,7 @@
  * dsh-focus-session 会话胶囊标签（client 半区）——人工自定义标签的渲染与编辑。
  *
  * 数据：settings `dsh-focus-tags` 的 `tags` 字段（会话 id → 标签数组），由本包
- * 拥有并写入；dsh-focus-tabs 只读同一份渲染顶部标签行。
+ * 拥有并写入。
  *
  * 形状基准（照官方 css-modules 实现，不自由发挥）：
  * - 胶囊 = 官方小标签形态：`height:18px` / `border-radius:9px`（全圆）/ `font-size:11px`
@@ -34,7 +34,7 @@ export interface SessionTag {
 /** 会话 id → 标签数组的映射。 */
 export type TagMap = Record<string, SessionTag[]>
 
-/** 幂等样式标签标记（同 dsh-desk `data-plugin-css` 约定）。 */
+/** 幂等样式标签标记（沿用本仓 `data-plugin-css` 约定）。 */
 const CSS_TAG_SELECTOR = 'style[data-plugin-css="@dsh-focus-session/tags"]'
 
 /** 胶囊容器标记（行内标题之后）。 */
