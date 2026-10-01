@@ -2,7 +2,7 @@
  * dsh-console client 共享类型：ConsoleHost（控制台数据面，apply 注入）+ 视图。
  */
 import type {
-  BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest,
+  BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, KernelUpdateInfo,
   LogFileList, LogReadOptions, LogReadResult, RuntimePoolView, UpgradeBatchResult, UpgradeStatus,
 } from 'dsh-console/types'
 
@@ -26,6 +26,8 @@ export interface ConsoleHost {
   restoreInstance(instanceId: string): Promise<ControlResult>
   /** runtime 池：可用版本 + 引用它们的实例 + 内容自检（版本 = 内核版本）。 */
   listRuntimePool(): Promise<RuntimePoolView>
+  /** 内核新版本检测（只读报告）：本机池最高版本 vs 官方 npm dist-tags。 */
+  checkKernelUpdate(refresh?: boolean): Promise<KernelUpdateInfo>
   /** 导入 runtime 版本到池（池不可变：同版本重复导入被拒绝）。 */
   importRuntimeVersion(version: string, source?: string): Promise<ControlResult>
   /** 删除池内 runtime 版本（被实例引用时拒绝）。 */

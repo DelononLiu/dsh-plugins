@@ -13,7 +13,7 @@
 
 import { createElement } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, LogFileList, LogReadOptions, LogReadResult, RuntimePoolView, UpgradeBatchResult, UpgradeStatus } from 'dsh-console/types'
+import type { BootstrapResult, ConsoleInstanceView, ControlResult, DeployInstanceRequest, KernelUpdateInfo, LogFileList, LogReadOptions, LogReadResult, RuntimePoolView, UpgradeBatchResult, UpgradeStatus } from 'dsh-console/types'
 import consoleRemote from 'dsh-console/remote'
 import channelRemote from 'dsh-channel/remote'
 import type {} from 'dsh-console/remote'
@@ -152,6 +152,15 @@ export function apply(ctx: ClientContext): void {
               await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
               const result = await ns!.listRuntimePool()
               if (!result.ok) throw new Error(`console.listRuntimePool failed: ${result.error.message}`)
+              return result.value
+            },
+            checkKernelUpdate: async (refresh) => {
+              // 内核新版本检测：只读报告（本机池最高版本 vs 官方 dist-tags）。
+              await consoleReady
+              let ns: { checkKernelUpdate(r?: boolean): Promise<{ ok: boolean; value: KernelUpdateInfo; error: { message: string } }> }
+              await ctx.inject(['remote.console'], (injected) => { ns = (injected as unknown as { remote: { console: typeof ns } }).remote.console })
+              const result = await ns!.checkKernelUpdate(refresh ?? false)
+              if (!result.ok) throw new Error(`console.checkKernelUpdate failed: ${result.error.message}`)
               return result.value
             },
             importRuntimeVersion: async (version, source) => {

@@ -15,7 +15,7 @@ packages/   自研家族（packages/<plugin>/：package.json + tsconfig*.json + 
 vendored/   社区插件清单（npm 安装 + lock 锁版本；见 Vendoring policy）
 profiles/   实例模板（master=开发+正式全家桶 / dev=管理端 console 组合 / explorer=核心组合 / minimal=官方默认），各含 package.json + cordis.patch.yml + dsh.lock.json；创建实例时选模板（模板 = 创建时快照，见 console 实例模型 note）
 presets/    团队自定义 agent preset 源（<id>/{agent.cordis.yml,preset.yml}），安装=铺到目标环境 $DSH_HOME/.agent-presets/<id>/
-scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）+ 运维与闸门脚本（dsh-profile.sh 实例启停 · dsh-registry.mjs 实例注册表 · verify-skills.sh · verify-kernel-upgrade.sh · tests/ 自测）
+scripts/    bootstrap（SSH 引导装最小 agent）+ release（版本矩阵 bump）+ 运维与闸门脚本（dsh-profile.sh 实例启停 · dsh-registry.mjs 实例注册表 · check-kernel-version.mjs 内核新版本检测 · verify-skills.sh · verify-kernel-upgrade.sh · tests/ 自测）
 docs/       architecture.md（spec，含开放问题 §9）· community-reference.md（分层社区调研）· research/
 .agents/    Agent Notes（一决策一文档，见 .agents/notes/README.md）+ Skills（自研流程/检查 skills + vendored 官方 harness / mattpocock，清单与来源见 .agents/skills/README.md；`scripts/verify-skills.sh` 是 skills 自身的机械闸门：frontmatter / 内联命令块语法 / 尖括号占位符位置（重定向风险） / 相对链接可解析；结论层另需真故障功能测试——`scripts/tests/skills-functional.test.sh`（可断言的现场与判据）+ `scripts/tests/fixtures/skills-fn/`（GROUND-TRUTH 对照，需模型照 skill 实跑，不可 CI））
 ```
@@ -27,6 +27,7 @@ pnpm install      # workspace 安装
 pnpm build        # pnpm -r build（各包 tsc）
 pnpm typecheck    # pnpm -r typecheck
 pnpm test         # pnpm -r test
+pnpm kernel:check # 内核新版本检测（报告；`--check` = 闸门：有新版本或仓库内漂移 → 退出 1）
 ```
 
 各包统一脚本：build（tsc -p tsconfig.build.json）/ typecheck（tsc --noEmit）/ test（vitest run）。

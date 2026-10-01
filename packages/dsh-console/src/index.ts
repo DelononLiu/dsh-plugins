@@ -44,12 +44,14 @@ import {
 } from './registry.js'
 import { currentRuntimeVersion, linkRuntimeInto, runtimeReady } from './runtimes.js'
 import { importRuntime, listRuntimes, poolRoot, removeRuntime, runtimeDir, verifyRuntime } from './runtimes.js'
+import { detectKernelUpdate } from './kernel-update.js'
 import { archiveInstance, deleteGuard, restoreInstance } from './lifecycle.js'
 
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则）——唯一来源，
 // index 本地引用经 import type，re-export 供外部消费。
 import type {
   BootstrapResult, ControlResult, ConsoleInstanceView, DeployInstanceRequest, HostRecord, InstanceRecord, InstanceType,
+  KernelUpdateInfo,
   LogFileList, LogFileMeta, LogLevel, LogReadOptions, LogReadResult, LogRecord, LogTarget,
   RuntimePoolView, UpgradeBatchResult, UpgradeItemResult, UpgradeStatus, UpgradeStep,
 } from './types.ts'
@@ -1022,6 +1024,17 @@ export class ConsoleService extends TypertRemoteService {
             // 恢复（CLI 入口）：归档移回 + 档案转回 active。
             const { instanceId } = (frame.payload?.args ?? {}) as { instanceId: string }
             result = this.restoreInstance(instanceId)
+          } else if (method === 'checkKernelUpdate') {
+            // 内核新版本检测：async @Remote（打网络）——Promise 结果异步回执。
+            const { refresh } = (frame.payload?.args ?? {}) as { refresh?: boolean }
+            void this.checkKernelUpdate(refresh ?? false).then((value) => {
+              res.writeHead(200, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: { ok: true, value } }))
+            }).catch((err) => {
+              res.writeHead(400, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ type: 'server-response', rpcId: frame.rpcId, result: { ok: false, error: { code: 'internal', message: err instanceof Error ? err.message : String(err), details: {} } } }))
+            })
+            return
           } else if (method === 'getUpgradeStatus') {
             // 升级状态查询：async @Remote——Promise 结果异步回执。
             const { instanceId } = (frame.payload?.args ?? {}) as { instanceId: string }
@@ -2368,6 +2381,18 @@ export class ConsoleService extends TypertRemoteService {
       }
     })
     return { poolPath: poolRoot(), versions }
+  }
+
+  /**
+   * 内核新版本检测（typert @Remote，**只读**）：本机 runtime 池最高版本 vs 官方
+   * npm dist-tags。只报告——不写实例状态、不预填升级目标，升级仍由人显式发起
+   * （{@link upgradeInstances}）。
+   * @param refresh - 绕过 TTL 缓存强制重查（UI「检测更新」按钮）。
+   * @returns 检测结果；网络/解析失败带 `error`（**不得**当成"已是最新"）。
+   */
+  @Remote
+  async checkKernelUpdate(refresh?: boolean): Promise<KernelUpdateInfo> {
+    return detectKernelUpdate({ refresh: refresh === true })
   }
 
   /**

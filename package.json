@@ -6,7 +6,8 @@
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "kernel:check": "node scripts/check-kernel-version.mjs"
   },
   "packageManager": "pnpm@9.15.0",
   "license": "MIT",

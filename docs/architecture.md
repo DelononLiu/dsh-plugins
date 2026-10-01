@@ -210,6 +210,7 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 - 部署/升级 = 版本矩阵整体推进，console 协调所有主机/实例。
 - 分发形态（已确认）：**完整 profile 模板**（git clone 现成 profile 目录直接用），模板即实例种子。
 - 落地形式：`profiles/master/dsh.lock.json`（版本锁 schema 已定稿：schemaVersion/id/name/version/kernel/bundles/vendored，见 §9）。边界语义：`kernel` = CLI 入口（@deepseek-ai/dsh）版本；`bundles` = profile 组件（含官方内置 base/web-app 与自研插件）；`vendored` = 社区插件锁定。
+- **新版本发现（2026-10-01 落地，只报告不升级）**：开发侧 `scripts/check-kernel-version.mjs`（`pnpm kernel:check`；`--check` = 闸门：有新版本或仓库内漂移 → 退出 1，检测失败退出 2 而不冒充"没有新版本"）；管理端 console「版本」页签展示官方 npm dist-tags 与本机 runtime 池最高版本的差异（`checkKernelUpdate` @Remote，TTL 缓存，失败只报错）。发现的版本要进池仍需人工导入——两者打通见 §9。
 
 ### Profile 矩阵（四个模板）
 
@@ -381,6 +382,8 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 - [ ] **会话体量快捷提示（侧栏会话行悬浮）**（2026-09-13 用户记录，**归属 dsh-focus-session**）：鼠标悬浮会话行时显示该会话体量——自身事件数 + fork 继承前缀、磁盘字节、内存量级——让"这个会话已经很重"在动手之前可见。动机见下一条缺陷（大会话一次分支吃掉默认 2GB 堆的 60%）。待定：取数来源（projcache/查询服务 vs 直接读 session 目录）、是否分列"自身/继承"、阈值分级配色。
 - [ ] **缺陷：分支大会话把宿主撑爆（内核 OOM，2026-09-13 实测）**：点「在新对话中分支」会让宿主进程 V8 堆 OOM abort——用户侧表现就是"web 一直在重启断掉"。实测（隔离实例 web5，未触碰 3080）：对「更新」会话（fork 链第 5 层，自身 74,723 事件、链上合计 28.6 万、内核物化 2,687,488 条）一次 fork = **+1264MB 常驻活堆**（`sessionQuery.observeSession` +604MB，`agents.create({seed})` 再 +660MB）、21 秒；第二次再 +656MB → 1,971MB → `FATAL ERROR: Ineffective mark-compacts near heap limit`（默认堆上限 ≈2GB）。对照：2.6MB 小会话一次 fork 仅 +74MB。占用**不回收**且逐次叠加；崩在半路时子会话不落盘（返回的 childId 在磁盘无文件）。根因在官方内核 `dsh-api-session-controller.fork()`：整份事件前缀被物化两次（observe 源 + seed 子）并在活跃 store 里长期持有，无流式/懒加载/体积护栏——**插件层修不了**，需内核补丁或上游。复现配方：把 `~/.dsh/profiles/web` 复制成独立实例（独立端口）→ `--patch` 注入一个 `inject: ['sessionController']` 的探针插件 → 在 apply 里 `await ctx.get('sessionController').fork({ sessionId })`，前后各 `gc()` 一次对比 `heapUsed`。
 
+- [ ] **检测到的新版本进不了池（内核新版本检测的边界，2026-10-01）**：检测已能报出官方最新（如 `0.2.0-rc.2`），但把它变成可部署版本仍要人工——`importRuntimeVersion` 的来源是**本机已装 CLI 目录**（默认 `~/dsh-alpha5-cli`，现为已退役基线），池也不支持从 npm 直接拉。待落地：池导入支持 npm 来源（`npm pack`/指定 registry 拉官方 runtime），并在版本页签把「检测到的最新」接到导入入口。**在此之前不要**把 npm latest 预填成升级目标版本（`.dsh-release.json` 会记录一个本机不存在的版本）。
+
 - [ ] **console 跨守护实例日志读取**（2026-09 定 v1 边界，见 [console-structured-log](../.agents/notes/implemented/architecture/2026-09-06-console-structured-log.md)）：日志结构化落地后，「日志」查看器实例项仍不可用——console→守护转发 readLog 为同步 v1 fallback（空），且守护 `logs/<id>.log` 是实例 stdout 自由文本。待落地：转发改 async @Remote + 实例 stdout 收集入 JSONL。
 
 - [x] ~~dsh-desk 布局配置消费方~~（**已实现** 2026-08，见 [dsh-desk-layout-consumer](../.agents/notes/implemented/architecture/2026-08-23-dsh-desk-layout-consumer.md)）：方案 B（跨插件契约 = 共享 settings 配置）——sidebar 经 `ctx.layout.toggleSidebar` + `data-sidebar-collapsed` 对齐折叠/展开（**实时生效**）；tabs/topbar 由 dsh-focus-tabs / dsh-quick-nav 订阅 `my-ui-layout` **实时注册/注销**（slots.inject 内订阅配置，visible=false 注销、恢复重新注册）；组装器配置化（tools 显隐，实时响应）+ 通用性（运行时发现 entry）+ CSS 回退静默 + **slots 型插件显隐（git-graph 开关）** 全部落地。
@@ -402,6 +405,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-plan-show Show 层 MVP（`show_artifact` 工具 + 产物存储 + 只读端点 + 侧栏面板五视图 + 验收矩阵"无证据=未验证" + markdown 导入/导出） | 19 测试 + dev 实例（web2/3082）自验 |
 | dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关） | 3 测试（组装器/slots 显隐随 vendored UI 退出，2026-09-26 移除） |
 | 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh 读实例注册表 | scripts/ 已实测（registry.test.mjs 7 项 + profile-registry.test.sh 14 项） |
+| 内核新版本检测（开发侧脚本闸门 + 管理端 console 只读展示；顺带修升级对话框硬编码目标版本） | scripts/tests/kernel-version.test.mjs 14 项 + packages/dsh-console/tests/kernel-update.spec.ts 17 项；见 [kernel-version-detection](../.agents/notes/implemented/feature/2026-10-01-kernel-version-detection.md) |
 | vendoring 统一 npm（submodule 归零） | AGENTS.md policy |
 
 **❌ 未完成（开放项，见上）**

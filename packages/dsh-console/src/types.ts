@@ -70,6 +70,26 @@ export interface RuntimePoolView {
   }>
 }
 
+/** 内核新版本检测结果（@Remote 边界，**只读**：只报告，不触发升级）。 */
+export interface KernelUpdateInfo {
+  /** 本机 runtime 池最高内核版本（池为空/不可读 → null = 未知，不是"最新"）。 */
+  local: string | null
+  /** 池内全部版本（降序）。 */
+  pooled: string[]
+  /** 官方 npm dist-tags（latest/next/alpha…）。 */
+  distTags: Record<string, string>
+  /** 官方最新（`latest`，缺省回落 `next`）；检测失败为 null。 */
+  latest: string | null
+  /** 官方最新是否高于本机池最高版本（两边都有值才可能 true）。 */
+  updateAvailable: boolean
+  /** 本次检测时间（ISO）。 */
+  checkedAt: string
+  /** 结果是否来自 TTL 内缓存。 */
+  cached: boolean
+  /** 检测失败原因（有值 = 没查到，**不得**当成"已是最新"）。 */
+  error?: string
+}
+
 /** 实例列表视图元素（管理面板：独立于档案的展示形态——host/self/离线覆盖）。 */
 export interface ConsoleInstanceViewItem {
   /** 稳定实例 id。 */

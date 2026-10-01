@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConsoleHost } from './types'
-import type { ConsoleInstanceViewItem, HostRecord, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget, LogLevel, LogRecord, RuntimePoolView } from 'dsh-console/types'
+import type { ConsoleInstanceViewItem, HostRecord, KernelUpdateInfo, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget, LogLevel, LogRecord, RuntimePoolView } from 'dsh-console/types'
 import { UpgradeDialog } from './UpgradeDialog'
 import * as logView from './logView'
 
@@ -234,6 +234,9 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [showDeleted, setShowDeleted] = useState(false)
   const [deleted, setDeleted] = useState<Array<{ id: string; host: string; deletedAt: string | null; archivePath?: string; version: string | null }>>([])
   const [poolBusy, setPoolBusy] = useState(false)
+  /** 内核新版本检测结果（只读报告；null = 尚未出结果）。 */
+  const [kernelUpdate, setKernelUpdate] = useState<KernelUpdateInfo | null>(null)
+  const [kernelBusy, setKernelBusy] = useState(false)
   const [newInstResult, setNewInstResult] = useState<string | null>(null)
   const [newInstBusy, setNewInstBusy] = useState(false)
   // 日志页签状态：来源 + 级别过滤 + 模糊搜索（行数/只看错误/跟随已移除）
@@ -283,6 +286,26 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
       const ts = await host.listTemplates()
       if (ts.length > 0) setTemplates(ts)
     } catch { /* 模板面不可用：保留默认值 */ }
+  }, [host])
+
+  /**
+   * 内核新版本检测（只读）：宿主侧带 TTL 缓存，所以页签进入时调用不会每次打网络；
+   * `refresh=true`（按钮）才绕过缓存。检测失败只落到 `error` 字段——**不显示成
+   * "已是最新"**（两者的区别正是这个功能存在的理由）。
+   */
+  const loadKernelUpdate = useCallback(async (refresh: boolean): Promise<void> => {
+    setKernelBusy(true)
+    try {
+      setKernelUpdate(await host.checkKernelUpdate(refresh))
+    } catch (e) {
+      setKernelUpdate({
+        local: null, pooled: [], distTags: {}, latest: null, updateAvailable: false,
+        checkedAt: new Date().toISOString(), cached: false,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setKernelBusy(false)
+    }
   }, [host])
 
   const importVersion = async (): Promise<void> => {
@@ -376,6 +399,13 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   }, [host])
 
   useEffect(() => { void loadPool() }, [loadPool])
+
+  // 内核新版本**自动检测**：面板打开时查一次，进入「版本」页签时再查一次——宿主侧
+  // 有 TTL 缓存，重复调用不打网络。只报告，不触发任何写操作。
+  useEffect(() => { void loadKernelUpdate(false) }, [loadKernelUpdate])
+  useEffect(() => {
+    if (tab === 'versions') void loadKernelUpdate(false)
+  }, [tab, loadKernelUpdate])
 
   useEffect(() => {
     void refreshInstances()
@@ -635,12 +665,53 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             )}
           </>
         )
-      case 'versions':
+      case 'versions': {
+        // 内核新版本检测（只读报告）：官方 npm dist-tags vs 本机 runtime 池最高版本。
+        // 三种状态必须能分辨——有更新 / 已是最新 / **没查到**（后者不得显示成最新）。
+        const k = kernelUpdate
+        const kernelErr = k?.error ?? null
+        const kernelUp = k?.updateAvailable === true
+        const kernelDot = kernelErr !== null ? 'off' : (kernelUp ? 'pend' : k === null ? '' : 'on')
+        const kernelLine = kernelErr !== null
+          ? `检测失败：${kernelErr}`
+          : k === null
+            ? (kernelBusy ? '检测中…' : '尚未检测')
+            : k.latest === null
+              ? '官方未提供 latest/next dist-tag'
+              : kernelUp
+                ? `官方最新 ${k.latest}（本机池最高 ${k.local ?? '—'}）`
+                : k.local === null
+                  ? `官方最新 ${k.latest} · 本机池为空，无法比较`
+                  : `官方最新 ${k.latest} · 本机池 ${k.local} 已是该版本或更新`
+        const kernelSub = kernelErr !== null
+          ? '检测失败不等于"已是最新"——稍后重试，或确认本机可访问 npm registry'
+          : kernelUp
+            ? '升级由人发起（到「实例」页签选实例 → 升级）：检测只报告，不自动升级'
+            : k === null ? '' : `检测于 ${new Date(k.checkedAt).toLocaleTimeString()}${k.cached ? '（TTL 内缓存）' : ''}`
         return (
           <>
             <div className="dsh-console-toolbar">
               <span className="hint">runtime 池：{pool?.poolPath ?? '（不可用）'} · 版本 = 内核版本，池只增不改</span>
               <button type="button" className="dsh-console-btn" onClick={() => { void loadPool() }}>⟳ 刷新</button>
+            </div>
+            <div className="dsh-console-sect"><h3>内核新版本</h3></div>
+            <div className="dsh-console-row">
+              <span className={`dot ${kernelDot}`} />
+              <div className="grow">
+                <div className="name">{kernelLine}</div>
+                {kernelSub !== '' && (
+                  <div style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>{kernelSub}</div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="dsh-console-btn"
+                disabled={kernelBusy}
+                title="强制重查官方 npm（绕过 TTL 缓存）"
+                onClick={() => { void loadKernelUpdate(true) }}
+              >
+                {kernelBusy ? '检测中…' : '检测更新'}
+              </button>
             </div>
             <div className="dsh-console-sect"><h3>导入版本</h3></div>
             <div className="dsh-console-row">
@@ -680,6 +751,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
             ))}
           </>
         )
+      }
       case 'logs':
         // 结构化日志查看器：来源/级别 = 标签在上、值在下；值行含 模糊搜索 + 刷新；
         // （行数/只看错误/跟随/复制/滚到底 已移除）。可见行在组件顶层派生，此处只渲染。
@@ -775,6 +847,13 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
     }
   }
 
+  // 升级目标版本 = 本机 runtime 池最新版本（池是版本的唯一来源；与创建向导的默认值
+  // 同一取法）。池不可用时回落到实例已记录版本——那正是升级引擎 v1 的"重新对齐源"语义，
+  // 比写死一个过期字面量诚实。
+  const upgradeVersion = pool !== null && pool.versions.length > 0
+    ? pool.versions[pool.versions.length - 1].version
+    : (upgradeTarget?.version ?? '')
+
   return (
     <div className="dsh-console-panel-overlay" role="presentation">
       <div className="dsh-console-panel-mask" aria-hidden="true" onClick={close} />
@@ -787,7 +866,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
         <UpgradeDialog
           item={upgradeTarget}
           host={host}
-          version="0.1.2-rc.1"
+          version={upgradeVersion}
           onClose={() => setUpgradeTarget(null)}
         />
       )}
