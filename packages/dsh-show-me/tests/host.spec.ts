@@ -91,8 +91,8 @@ describe('publishArtifact（工具入参 → 产物）', () => {
 
 describe('parseListQuery', () => {
   it('解析 session/limit；非法 limit 忽略', () => {
-    expect(parseListQuery('/api/plan-show/artifacts?session=s1&limit=5')).toEqual({ sessionId: 's1', limit: 5 })
-    expect(parseListQuery('/api/plan-show/artifacts?limit=abc')).toEqual({})
+    expect(parseListQuery('/api/show-me/artifacts?session=s1&limit=5')).toEqual({ sessionId: 's1', limit: 5 })
+    expect(parseListQuery('/api/show-me/artifacts?limit=abc')).toEqual({})
     expect(parseListQuery(undefined)).toEqual({})
   })
 })

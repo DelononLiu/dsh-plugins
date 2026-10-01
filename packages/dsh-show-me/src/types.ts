@@ -1,5 +1,5 @@
 /**
- * dsh-plan-show 的共享产物模型（host 与 client 半区共用，纯函数可测）。
+ * dsh-show-me 的共享产物模型（host 与 client 半区共用，纯函数可测）。
  *
  * 一个 `Artifact` 撑起全部 show（plan / verify / completion），这是本插件"不逐类
  * 造私有模型"的前提：
@@ -279,19 +279,19 @@ export function artifactFromMarkdown(
  * @returns 归一化产物；输入不可用 → 抛错（错误信息面向模型，指出哪个字段不行）。
  */
 export function normalizeArtifact(raw: unknown): Artifact {
-  if (typeof raw !== 'object' || raw === null) throw new Error('show_artifact: 需要一个对象参数')
+  if (typeof raw !== 'object' || raw === null) throw new Error('show_me: 需要一个对象参数')
   const input = raw as Record<string, unknown>
   const kind = input.kind
   if (typeof kind !== 'string' || !(ARTIFACT_KINDS as readonly string[]).includes(kind)) {
-    throw new Error(`show_artifact: kind 必须是 ${ARTIFACT_KINDS.join(' | ')}`)
+    throw new Error(`show_me: kind 必须是 ${ARTIFACT_KINDS.join(' | ')}`)
   }
   const title = typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : null
-  if (title === null) throw new Error('show_artifact: title 必填且不能为空')
+  if (title === null) throw new Error('show_me: title 必填且不能为空')
   const itemsRaw = Array.isArray(input.items) ? input.items : []
   const items: ArtifactItem[] = itemsRaw.map((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) throw new Error(`show_artifact: items[${index}] 必须是对象`)
+    if (typeof entry !== 'object' || entry === null) throw new Error(`show_me: items[${index}] 必须是对象`)
     const item = entry as Record<string, unknown>
-    if (typeof item.text !== 'string' || item.text.trim() === '') throw new Error(`show_artifact: items[${index}].text 必填`)
+    if (typeof item.text !== 'string' || item.text.trim() === '') throw new Error(`show_me: items[${index}].text 必填`)
     const status = typeof item.status === 'string' && (ITEM_STATUSES as readonly string[]).includes(item.status)
       ? item.status as ItemStatus
       : 'todo'
@@ -305,9 +305,9 @@ export function normalizeArtifact(raw: unknown): Artifact {
   })
   const evidenceRaw = Array.isArray(input.evidence) ? input.evidence : []
   const evidence: ArtifactEvidence[] = evidenceRaw.map((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) throw new Error(`show_artifact: evidence[${index}] 必须是对象`)
+    if (typeof entry !== 'object' || entry === null) throw new Error(`show_me: evidence[${index}] 必须是对象`)
     const item = entry as Record<string, unknown>
-    if (typeof item.label !== 'string' || item.label.trim() === '') throw new Error(`show_artifact: evidence[${index}].label 必填`)
+    if (typeof item.label !== 'string' || item.label.trim() === '') throw new Error(`show_me: evidence[${index}].label 必填`)
     const result = typeof item.result === 'string' && (EVIDENCE_RESULTS as readonly string[]).includes(item.result)
       ? item.result as EvidenceResult
       : 'info'

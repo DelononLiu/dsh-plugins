@@ -1,7 +1,7 @@
 {
-  "name": "dsh-plan-show",
+  "name": "dsh-show-me",
   "version": "0.0.0",
-  "description": "UI·计划呈现层：把 AI 的方案/计划从大段文字变成可视化结构（提案卡 / 看板 / 流程图）",
+  "description": "UI·产物呈现层：把复杂内容（方案/计划、验收、完成交代）简化成一张图，就地渲染进消息流",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -21,7 +21,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-plan-show",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs . dsh-show-me",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

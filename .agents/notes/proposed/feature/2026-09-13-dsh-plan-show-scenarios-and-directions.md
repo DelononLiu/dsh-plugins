@@ -5,6 +5,10 @@ Status: draft（待并入外部调研；每个决定都要用户拍板后才进�
 > **定位升级（2026-09-13 用户补充）**：这不是"计划阶段的一个小面板"，而是**标志性功能**——
 > AI 在每个阶段都需要一个"show"：**show 方案 · show 计划 · show 缺陷 · show 验收 · show 完成**。
 > 包名 `dsh-plan-show` 保留（历史），能力范围按"产物呈现层（Show layer）"设计。
+> **已被取代（2026-10-01）**：包名与围栏改为 `dsh-show-me` / ` ```show-me `（旧围栏名保留为 legacy
+> 别名），对外叙事从"请你拍板"改为"复杂内容简化给你看"。本 note 正文里的旧名（工具 `show_artifact`、
+> 端点 `/api/plan-show/artifacts`、`pnpm --filter dsh-plan-show`）按当时现场保留——见
+> [命名与对外叙事 note](../../implemented/process/2026-10-01-dsh-show-me-naming.md)。
 > 开发方式：MVP 先头脑风暴 → 逐步细化明确，**不一次性做全**。
 
 ## 0. 为什么这是标志性功能
@@ -229,9 +233,9 @@ markdown→模型解析器（带单测）+ 三视图切换（提案卡/看板/�
   （Graphviz EPL-2.0 条款），并沿用官方那套 strict / neutral / 禁 HTML label 与空沙箱策略。
 - **钩子存在性自检**：官方 `.md-code-block` / `.infostring` / `data-streaming` 若改名，注入会
   **静默失效**；应在启动时探测一次并在缺失时 `console.warn`（把静默变可见）。
-- **提示词段铺开**：把 `plan-show:format` 铺到 web/3/4/daemon 与其它实例；profile 模板登记
-  dsh-plan-show。
+- **提示词段铺开**：把 `show-me:format` 铺到 web/3/4/daemon 与其它实例；profile 模板登记
+  dsh-show-me。
 - **dev 实例坑记档**：`dsh plugin add` 会把依赖写进 `dsh.profile.bundles`，与 patch 的 insert
   行重复加载 → webserver 路由冲突启动失败；需记文档并考虑修脚本/CLI。
-- **面板删除后的悬空面**：工具 `show_artifact` 与只读端点 `/api/plan-show/artifacts` 暂无 UI
+- **面板删除后的悬空面**：工具 `show_me` 与只读端点 `/api/show-me/artifacts` 暂无 UI
   消费方（保留待用）；若日后要"历史产物"界面再定。

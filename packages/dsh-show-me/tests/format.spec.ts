@@ -12,7 +12,7 @@ describe('extractShowBlocks', () => {
     const text = [
       '先说结论。',
       '',
-      '```PLAN-SHOW 方案',
+      '```SHOW-ME 方案',
       '# 标题',
       '## 步骤',
       '- [x] 一条',
@@ -28,7 +28,7 @@ describe('extractShowBlocks', () => {
   })
 
   it('未闭合围栏不返回（流式输出中不能渲染半截图）', () => {
-    const text = '```plan-show\n# 标题\n- [ ] 还没写完'
+    const text = '```show-me\n# 标题\n- [ ] 还没写完'
     expect(extractShowBlocks(text)).toEqual([])
     expect(hasShowFence(text)).toBe(true)
   })
@@ -38,14 +38,20 @@ describe('extractShowBlocks', () => {
       '```ts',
       'const a = 1',
       '```',
-      '```plan-show',
+      '```show-me',
       '# A',
       '```',
-      '```plan-show',
+      '```show-me',
       '# B',
       '```',
     ].join('\n')
     expect(extractShowBlocks(text).map((block) => block.body)).toEqual(['# A', '# B'])
+  })
+
+  it('历史围栏名 plan-show 仍被识别（旧会话里已落盘的围栏继续出图）', () => {
+    const text = '```Plan-Show\n# 旧方案\n- [x] 一条\n```'
+    expect(extractShowBlocks(text).map((block) => block.body)).toEqual(['# 旧方案\n- [x] 一条'])
+    expect(hasShowFence(text)).toBe(true)
   })
 
   it('未被围栏包裹的普通文本不产生块（legacy 消息不会被误渲染）', () => {
@@ -70,7 +76,7 @@ describe('toShowFence × 解析器（往返一致）', () => {
   it('围栏里的结构能被解析器读成条目与状态', () => {
     const artifact = artifactFromMarkdown('# 方案\n## 步骤\n- [x] 完成项\n- [~] 进行项\n- [!] 阻塞项\n', { id: 'a1' })
     const text = toShowFence(artifact)
-    expect(text.startsWith('```plan-show')).toBe(true)
+    expect(text.startsWith('```show-me')).toBe(true)
     const blocks = extractShowBlocks(text)
     expect(blocks).toHaveLength(1)
     const parsed = artifactFromMarkdown(blocks[0].body, { id: 'a2' })

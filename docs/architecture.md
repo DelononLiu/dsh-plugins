@@ -254,7 +254,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ✅ 已上线三端（2 测试） |
 | dsh-focus-session | UI | **会话关注层**：侧栏「置顶」区（钉住/拖拽排序/行尾取消钉）+「活跃」区（最近活跃会话，`updatedAt` 序，上限 5）+ 会话标题**胶囊标签**（人工标签）；行菜单与标签弹框照官方 Menu/Modal 契约；拥有钉住/标签 settings 数据 | ✅ 已实现（101 测试） |
 | dsh-focus-tabs | UI | 顶部会话标签行（Alt+P 固定、Alt+1..9 切换、编号标题、状态圆点）；只读消费 dsh-focus-session 的钉住数据，两处天然同步 | ✅ 已实现（24 测试，web2 验证） |
-| dsh-plan-show | UI | **AI 产物呈现层（Show）**：约定围栏 ```plan-show + 提示词段（教模型按格式输出）→ 客户端观察会话 DOM（照官方 `CodeBlock` 形状：`md-code-block` + `infostring` 类名子串 + 祖先 `data-streaming`）→ **消息内就地渲染成图片**（自绘 SVG → `data:image/svg+xml` → `<img>` 惰性图片；图/源码/复制切换）；只作用于 **AI 输出**（用户消息走官方 `MessageText`，不做 markdown）；验收硬规则：**无证据 = 未验证**。无独立界面（侧栏入口与面板已删除） | ✅ 已实现（43 测试 + dev 实例（web2/3082）真机自验；场景/分期/调研见 [note](.agents/notes/proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)，DOM 钩子契约见 [note](.agents/notes/implemented/feature/2026-09-13-plan-show-inline-dom-hooks.md)） |
+| dsh-show-me | UI | **复杂内容呈现层（show-me）**：约定围栏 ```show-me + 提示词段（内容复杂到读不下去时改用"一张图"交付）→ 客户端观察会话 DOM（照官方 `CodeBlock` 形状：`md-code-block` + `infostring` 类名子串 + 祖先 `data-streaming`）→ **消息内就地渲染成图片**（自绘 SVG → `data:image/svg+xml` → `<img>` 惰性图片；图/源码/复制切换）；只作用于 **AI 输出**（用户消息走官方 `MessageText`，不做 markdown）；旧围栏名 `plan-show` 作 legacy 别名继续渲染；验收硬规则：**无证据 = 未验证**。无独立界面（侧栏入口与面板已删除） | ✅ 已实现（45 测试 + dev 实例（web2/3082）真机自验；命名与对外叙事见 [note](.agents/notes/implemented/process/2026-10-01-dsh-show-me-naming.md)，场景/分期/调研见 [note](.agents/notes/proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)，DOM 钩子契约见 [note](.agents/notes/implemented/feature/2026-09-13-plan-show-inline-dom-hooks.md)） |
 | dsh-desk | UI（平台） | 布局/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；**工具入口组装器（2026-08：SSH/技能中心摆控制台上方、任务看板摆会话头快捷导航右侧，均对齐官方契约；回退 foot）** | ✅ 组装器已实现（assembler.spec 15 测试）；布局配置开关已实现，见 §9 |
 
 > dsh-quick-nav 已上线三端，说明实例模型已有雏形——后续按插件协作模式（channel 提供实例服务，nav 作消费者转纯读端）。
@@ -339,6 +339,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-quick-nav | 无 | 有 dsh-quick-navbar（不同名） | ✅ 可用 |
 | dsh-session-tabs | 无 | 有 dsh-session-manager / dsh-side-session（不同名） | ✅ 可用 |
 | 发行包定位 | — | dsh-web-ui-all（个人全家桶）、dsh-plugin-pack-web（个人复刻包） | ✅ 团队发行包无同类 |
+| dsh-show-me | 无（裸名 `show-me`/`showme` 是别的包，不涉 `dsh-` 前缀） | 无 | ✅ 可用（2026-10 实查；同名的只有 humanlayer 的 `show-me` skill，非包名） |
 
 **最终命名决定（2026-08 拍板）**：
 - dsh-channel：**保留原名**（dsh- 前缀为自研家族标记，社区撞名不影响）
@@ -347,6 +348,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 - dsh-tabs → **`dsh-focus-tabs`** + 新建 **`dsh-focus-session`**（会话关注层拆分：顶部标签行 vs 侧栏关注区；npm 无占用，社区 `dsh-focus-chat` 为同前缀但语义不同——社区指「聚焦阅读视图」）
 - dsh-web-ui2 → **`dsh-desk`**（个人化工作台语义，呼应"实例皆 personal"哲学；dsh-ui 被 2021 空壳包占用、dsh-toolkits 与 dsh-plugins 集合概念混淆、dsh-web-ui2 为将就续作名、dsh-fleet-ui 社区已有 dsh-fleet 系列、dsh-distributed-ui 过于学术；npm/GitHub 均无占用）
 - 社区全家桶：**dsh-web-ui（@linxin666 npm）**（npm 安装 + lock 锁版本，保留原名，改造走 cordis.patch.yml 补丁层，不 fork）
+- dsh-plan-show → **`dsh-show-me`**（2026-10；名字陈述的层面从"某一类产物（plan）"改为"这件事（show me）"，围栏/工具/端点随之改名，旧围栏名 `plan-show` 保留为 legacy 别名；否决清单与占用实查见 [note](../.agents/notes/implemented/process/2026-10-01-dsh-show-me-naming.md)）
 
 ---
 
@@ -402,7 +404,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-quick-nav 顶栏导航（三端在线） | 2 测试 |
 | dsh-focus-tabs 固定会话标签行（Alt+P/Alt+1..9/编号/状态圆点） | 24 测试 |
 | dsh-focus-session 侧栏置顶区 + 活跃区 + 会话胶囊标签（钉/排序/取消钉 + 最近活跃时间序 + 行尾 ⋯ 菜单：编辑标签/加入/移出置顶 + 标签弹框；菜单/弹框照官方 Menu/Modal 契约） | 101 测试 |
-| dsh-plan-show Show 层 MVP（`show_artifact` 工具 + 产物存储 + 只读端点 + 侧栏面板五视图 + 验收矩阵"无证据=未验证" + markdown 导入/导出） | 19 测试 + dev 实例（web2/3082）自验 |
+| dsh-show-me 复杂内容呈现层（`show_me` 工具 + 产物存储 + 只读端点 + 消息内图片化 + 验收矩阵"无证据=未验证" + legacy 围栏别名） | 45 测试 + dev 实例（web2/3082）自验 |
 | dsh-desk 布局消费方（sidebar 折叠/展开 + tabs/topbar 注册开关） | 3 测试（组装器/slots 显隐随 vendored UI 退出，2026-09-26 移除） |
 | 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh 读实例注册表 | scripts/ 已实测（registry.test.mjs 7 项 + profile-registry.test.sh 14 项） |
 | 内核新版本检测（开发侧脚本闸门 + 管理端 console 只读展示；顺带修升级对话框硬编码目标版本） | scripts/tests/kernel-version.test.mjs 14 项 + packages/dsh-console/tests/kernel-update.spec.ts 17 项；见 [kernel-version-detection](../.agents/notes/implemented/feature/2026-10-01-kernel-version-detection.md) |

@@ -19,6 +19,7 @@ Status: implemented
 | 标签页 | UI | **dsh-tabs** | 原 dsh-session-tabs（短、与 nav 风格统一） |
 | UI 平台 | UI | **dsh-desk** | 个人化语义，呼应"实例皆 personal + 自定义化核心"；dsh-ui（2021 空壳占）、toolkits（集合词混淆）、web-ui2（将就续作名）、fleet（社区 dsh-fleet 系列）、distributed（学术）均否决 |
 | vendored | UI | **dst-agent-teams** | vendor 自 NanmiCoder/dsh-agent-teams（MIT），dst- 前缀标记第三方 |
+| 呈现 | UI | **dsh-show-me** | 原 dsh-plan-show（名字只说了 plan 一个 kind）；npm/GitHub 无占用，理由与逐项否决见 [2026-10-01 note](2026-10-01-dsh-show-me-naming.md) |
 
 **命名规则**：`dsh-*` = 自研家族（发布 npm）；`dst-*` = vendored 第三方；**例外**：`vendored/dsh-web-ui` 保留社区原名（UI 全家桶来源，改名无意义）。新增名字前查 npm + GitHub 占用。
 

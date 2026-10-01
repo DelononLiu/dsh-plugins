@@ -1,16 +1,17 @@
 /**
- * dsh-plan-show：AI 产物呈现层（host 面）。
+ * dsh-show-me：AI 产物呈现层（host 面）。
  *
  * 职责（最小面，全部复用官方既有机制）：
- * 1. **模型可用工具 `show_artifact`**——agent 在任一步把结构化产物（计划 / 验收 /
- *    完成）提交进来；最少只需 `kind + title + markdown`，细节可用结构化字段补充。
+ * 1. **模型可用工具 `show_me`**——agent 把读起来太累的复杂内容（长方案 / 多步计划 /
+ *    验收证据 / 完成交代）简化成一张图提交进来；最少只需 `kind + title + markdown`，
+ *    细节可用结构化字段补充。
  * 2. **产物存储**——按时间倒序保留最近 N 个（内存态；持久化留二期）。
- * 3. **只读 HTTP 面 `/api/plan-show/artifacts`**——浏览器半区拉取产物渲染（与
+ * 3. **只读 HTTP 面 `/api/show-me/artifacts`**——浏览器半区拉取产物渲染（与
  *    dsh-console 的 `/api/console/instances` 同模式：host 出数据、client 出视图）。
  *
  * 不用投影/远程面：MVP 走"工具 + HTTP"这条我们仓库已验证的通道，投影与远程 RPC
  * 的正式对齐留二期（见 note 的架构段）。
- * @module dsh-plan-show
+ * @module dsh-show-me
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -22,14 +23,14 @@ import { PROMPT_SECTION, SHOW_FORMAT_PROMPT } from './format.js'
 import { artifactFromMarkdown, normalizeArtifact, type Artifact, type ArtifactKind } from './types.js'
 
 /** host 侧只读端点路径。 */
-export const ARTIFACTS_PATH = '/api/plan-show/artifacts'
+export const ARTIFACTS_PATH = '/api/show-me/artifacts'
 /** 面向模型的工具名。 */
-export const TOOL_NAME = 'show_artifact'
+export const TOOL_NAME = 'show_me'
 /** 默认保留的产物个数（最新的在前）。 */
 const DEFAULT_LIMIT = 50
 
 /**
- * 需要的 host 服务：`tools`（注册 `show_artifact`）+ `systemPrompt`（登记产物格式段）。
+ * 需要的 host 服务：`tools`（注册 `show_me`）+ `systemPrompt`（登记产物格式段）。
  * `webServer` 不在此列——它是**可选**依赖，用 `ctx.inject(['webServer'], …)` 等它
  * 出现（headless profile 不装 webserver 时插件仍须能加载）。
  */
@@ -150,7 +151,7 @@ export function artifactReceipt(artifact: Artifact): string {
   const counts = artifact.items.length === 0
     ? `${artifact.evidence.length} 条证据`
     : `${artifact.items.length} 条目 / ${artifact.evidence.length} 证据`
-  return `已呈现「${artifact.title}」（${artifact.kind}，${counts}）。用户可在侧栏「Show」面板查看。`
+  return `已呈现「${artifact.title}」（${artifact.kind}，${counts}）。已画成图，用户可直接看到。`
 }
 
 /**
@@ -188,16 +189,16 @@ export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: TOOL_NAME,
     description:
-      '把一份结构化产物呈现给用户（比大段文字更易判断）。kind: plan=方案/计划；'
-      + 'verify=验收（每条判据旁给出证据）；completion=完成（改了什么/证据/遗留）。'
+      '把复杂内容简化成一张图给用户看（比大段文字好读得多）。'
+      + '内容复杂到读不下去时用它：长方案/多步计划（kind=plan）、验收证据'
+      + '（kind=verify，每条判据旁带证据）、完成交代（kind=completion，改了什么/遗留什么）。'
       + '最少传 kind + title + markdown（`## 小节` 与 `- [ ] 条目` 会被结构化）；'
-      + '需要精确控制时再传 items/evidence/decisions/openQuestions（JSON 字符串数组）。'
-      + '方案要用户拍板、验收要用户确认、收尾要用户接受时调用本工具。',
+      + '需要精确控制时再传 items/evidence/decisions/openQuestions（JSON 字符串数组）。',
     parameters: {
       kind: { type: 'string', required: true, description: 'plan | verify | completion' },
       title: { type: 'string', required: true, description: '产物标题（一句话说明这是什么）' },
       markdown: { type: 'string', description: '产物原文（markdown；`## 小节`、`- [ ]/[x]/[~]/[!] 条目`）' },
-      summary: { type: 'string', description: '一句话结论（结论先行，面板头部显示）' },
+      summary: { type: 'string', description: '一句话结论（结论先行，图上方显示）' },
       items: { type: 'string', description: '条目 JSON 数组：[{id?,text,status?:todo|doing|done|blocked,files?,criteria?}]' },
       evidence: { type: 'string', description: '证据 JSON 数组：[{id?,kind?,label,value,result?:pass|fail|info,itemId?}]' },
       decisions: { type: 'string', description: '待决 JSON 数组：[{id?,question,options:[{id?,label,detail,cost?}],chosen?}]' },

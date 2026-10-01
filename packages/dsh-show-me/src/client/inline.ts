@@ -1,5 +1,5 @@
 /**
- * 消息内就地渲染（client 半区）：把 AI 输出里的 ```plan-show 围栏变成**图片**显示在
+ * 消息内就地渲染（client 半区）：把 AI 输出里的 ```show-me 围栏变成**图片**显示在
  * 消息流里——不用侧栏面板、不需要 agent 调工具（提示词已要求按约定围栏输出）。
  *
  * 只依赖官方**代码块自身的形状**（不碰其它 css-modules 哈希类名）：
@@ -17,7 +17,7 @@
 
 import { artifactFromMarkdown, type Artifact } from '../types'
 import { artifactImageUrl } from './diagram'
-import { SHOW_FENCE } from '../format'
+import { isShowFence } from '../format'
 
 /** 已渲染标记（幂等：同一条消息重复扫描不会重复注入）。 */
 export const INLINE_ATTR = 'data-dsh-show-inline'
@@ -26,7 +26,7 @@ export const INLINE_IMG_ATTR = 'data-dsh-show-img'
 /** 视图状态（`diagram` | `source`）。 */
 export const INLINE_VIEW_ATTR = 'data-dsh-show-view'
 /** 幂等样式标记。 */
-const CSS_SELECTOR = 'style[data-plugin-css="@dsh-plan-show/inline"]'
+const CSS_SELECTOR = 'style[data-plugin-css="@dsh-show-me/inline"]'
 
 /** 代码块根类名（官方稳定钩子）。 */
 const CODE_BLOCK = '.md-code-block'
@@ -56,8 +56,8 @@ function inlineCss(): string {
 function injectCss(): void {
   if (typeof document === 'undefined' || document.querySelector(CSS_SELECTOR) !== null) return
   const tag = document.createElement('style')
-  tag.dataset.plugin = 'dsh-plan-show'
-  tag.dataset.pluginCss = '@dsh-plan-show/inline'
+  tag.dataset.plugin = 'dsh-show-me'
+  tag.dataset.pluginCss = '@dsh-show-me/inline'
   tag.textContent = inlineCss()
   document.head.appendChild(tag)
 }
@@ -143,7 +143,7 @@ export function scanInline(doc: Document = document): number {
   injectCss()
   let rendered = 0
   for (const block of Array.from(doc.querySelectorAll<HTMLElement>(CODE_BLOCK))) {
-    if (languageOf(block) !== SHOW_FENCE) continue
+    if (!isShowFence(languageOf(block))) continue
     const host = block.parentElement
     if (host === null) continue
     if (host.querySelector(`[${INLINE_ATTR}]`) !== null) continue

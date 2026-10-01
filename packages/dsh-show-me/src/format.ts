@@ -4,7 +4,7 @@
  * 只靠启发式猜"这段文字是不是方案"既脆又容易误判；正解是**约定一个稳定围栏**，
  * 并用提示词段告诉模型按它输出（官方 `plan-mode` 的 `plan:policy` 段就是同一手法）：
  *
- *     ```plan-show
+ *     ```show-me
  *     # 标题
  *     ## 步骤
  *     - [x] 已完成的一条
@@ -21,24 +21,35 @@
 import type { Artifact } from './types'
 
 /** 约定围栏语言名。 */
-export const SHOW_FENCE = 'plan-show'
-
-/** 提示词段名（与 host 半区注册名一致）。 */
-export const PROMPT_SECTION = 'plan-show:format'
+export const SHOW_FENCE = 'show-me'
 
 /**
- * 提示词段文本：教模型按约定格式提交产物。
+ * 历史围栏语言名（旧名 `plan-show`）。
  *
- * 措辞原则：说明"为什么"（用户要扫一眼判断）+ 给出最小可用格式 + 明确证据口径，
+ * 旧会话里已落盘的围栏仍要出图——改名不该把代价转嫁给历史消息。
+ */
+export const LEGACY_FENCES = ['plan-show'] as const
+
+/** 全部可识别的围栏语言名（当前 + 历史）。 */
+export const SHOW_FENCES: readonly string[] = [SHOW_FENCE, ...LEGACY_FENCES]
+
+/** 提示词段名（与 host 半区注册名一致）。 */
+export const PROMPT_SECTION = 'show-me:format'
+
+/**
+ * 提示词段文本：教模型在内容复杂时改用"一张图"交付。
+ *
+ * 措辞原则：说明"什么时候用"（内容复杂到读不下去）+ 最小可用格式 + 证据口径，
  * 不堆模板。段内容短，常驻系统提示的开销可忽略。
  */
 export const SHOW_FORMAT_PROMPT = [
-  '## 产物呈现（plan-show）',
-  '用户要"扫一眼就判断"，不要读大段文字。需要用户判断的产物（方案/计划、验收、完成报告）请放进 ```'
-  + SHOW_FENCE + ' 围栏，围栏外用正文写结论与理由，不要重复清单。',
+  '## 复杂内容要简化呈现（show-me）',
+  '内容复杂到读不下去时（长方案、多步计划、大范围改动、一堆证据），不要用大段文字堆给用户：'
+  + '把结构放进 ```' + SHOW_FENCE + ' 围栏，它会渲染成一张图，用户扫一眼就懂。'
+  + '围栏外只用一两句写结论，不要重复清单。',
   '围栏内容是 markdown 结构：`# 标题`、`## 小节`（目标/步骤/影响面/风险/验证）、'
   + '`- [ ] 条目`（`[x]` 完成、`[~]` 进行中、`[!]` 阻塞）。',
-  '- 方案/计划：提交步骤 + 影响面 + 风险 + 待定项，便于用户批准或指出要改的点。',
+  '- 方案/计划：目标 + 步骤 + 影响面 + 风险 + 待定项，让用户一眼看清并指出要改的点。',
   '- 验收：每条判据后面紧跟证据，写成 `- [x] 判据 —— 证据：<命令或结果>`；'
   + '**没有证据的条目会被渲染成"未验证"**，不要用"已验证"这类没有证据的说法。',
   '- 完成：改了什么、证据、遗留与未做。',
@@ -55,8 +66,17 @@ export interface ShowBlock {
   end: number
 }
 
-/** 围栏起始行：允许行首空白，语言名大小写不敏感，其后可有标题（如 ```plan-show 方案）。 */
-const FENCE_OPEN = new RegExp(`^\\s*\`\`\`${SHOW_FENCE}\\b[^\\n]*$`, 'i')
+/** 围栏起始行：允许行首空白，语言名大小写不敏感，其后可有标题（如 ```show-me 方案）。 */
+const FENCE_OPEN = new RegExp(`^\\s*\`\`\`(?:${SHOW_FENCES.join('|')})\\b[^\\n]*$`, 'i')
+
+/**
+ * 语言名是否为本插件识别的围栏（含历史名）。
+ * @param language - 代码块语言名（大小写不敏感）。
+ * @returns 是否识别。
+ */
+export function isShowFence(language: string): boolean {
+  return SHOW_FENCES.includes(language.toLowerCase())
+}
 
 /**
  * 抽取文本里**已闭合**的约定围栏（未闭合 = 还在流式输出，调用方据此不渲染）。

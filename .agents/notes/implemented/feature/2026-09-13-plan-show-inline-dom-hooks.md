@@ -1,10 +1,10 @@
-# Agent Note: plan-show 消息内就地渲染——只认 AI 侧代码块形状
+# Agent Note: show-me 消息内就地渲染——只认 AI 侧代码块形状
 
 Status: implemented
 
 ## Problem
 
-dsh-plan-show 的主路径是"AI 按约定围栏输出产物 → 客户端把围栏就地渲染成图片"。首版靠**猜官方 DOM 钩子**：
+dsh-show-me 的主路径是"AI 按约定围栏输出产物 → 客户端把围栏就地渲染成图片"。首版靠**猜官方 DOM 钩子**：
 代码块根取 `.md-code-block`，语言名取 `.md-code-block .infostring`，流式判定取祖先 `data-streaming`。
 
 真机（web2 / 3082）一验就露两处：
@@ -14,7 +14,7 @@ dsh-plan-show 的主路径是"AI 按约定围栏输出产物 → 客户端把围
    `.infostring` 选择器永不命中 → `languageOf()` 恒为空串 → 约定围栏被当成普通代码块原样显示。
    测试却在绿：现场是手写的 `.infostring` 假 DOM，与真产物不同形。
 2. **用户消息里的围栏永远不成型。** 官方对**用户消息**走 `MessageText`（引用 chip + 纯文本，`_plainRun_` 里空白被
-   `replace(/\s+/g,' ')` 折叠），只有 **AI 输出**走 `MarkdownText` → `CodeBlock`。因此"贴一段 ```plan-show 进去看图"
+   `replace(/\s+/g,' ')` 折叠），只有 **AI 输出**走 `MarkdownText` → `CodeBlock`。因此"贴一段 ```show-me 进去看图"
    不可能成立——围栏只在 AI 输出里成为代码块。
 
 ## Decision
@@ -38,4 +38,5 @@ dsh-plan-show 的主路径是"AI 按约定围栏输出产物 → 客户端把围
 - 真机自验（web2 / 3082）需用**AI 输出**的围栏验证：本插件在自己的回复里放围栏即可看到图；贴用户消息验证会误判成"插件没生效"。
 - 语言名靠类名子串匹配 = 依赖官方保留 `infostring` 这个名字；内核升级时这条要跟着核（`dsh-kernel-upgrade` 的核对项）。
 - 现场照抄官方产物的做法推广到其它 DOM 钩子类改动：凡是"快照官方 DOM 结构"的测试，fixture 必须来自实产，不能凭语义猜类名。
-- 相关：[场景与分期 note](../../proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)（D7 删除侧栏入口与面板）
+- **围栏识别 = 当前名 + 历史名**：`isShowFence()` 同时认 `show-me` 与历史名 `plan-show`（旧会话里已落盘的围栏继续出图）。再改名时往 `LEGACY_FENCES` 追加、不要删旧名——删了等于让历史消息里的图消失。
+- 相关：[场景与分期 note](../../proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)（D7 删除侧栏入口与面板）· [命名与对外叙事](../process/2026-10-01-dsh-show-me-naming.md)

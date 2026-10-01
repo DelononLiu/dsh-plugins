@@ -54,8 +54,8 @@ describe('官方 DOM 钩子解析', () => {
   beforeEach(() => { document.body.innerHTML = '' })
 
   it('语言名取标题栏 infostring（哈希类名）；原文取 pre code', () => {
-    const block = codeBlock('Plan-Show', PLAN)
-    expect(languageOf(block)).toBe('plan-show')
+    const block = codeBlock('Show-Me', PLAN)
+    expect(languageOf(block)).toBe('show-me')
     expect(sourceOf(block)).toBe(PLAN)
   })
 
@@ -77,13 +77,13 @@ describe('scanInline', () => {
   beforeEach(() => { document.body.innerHTML = '' })
 
   it('定型后才渲染：流式中的围栏不渲染', () => {
-    codeBlock('plan-show', PLAN, true)
+    codeBlock('show-me', PLAN, true)
     expect(scanInline(document)).toBe(0)
     expect(document.querySelector(`[${INLINE_ATTR}]`)).toBeNull()
   })
 
   it('渲染成惰性图片 + 隐藏源码块；标题带类型前缀', () => {
-    const block = codeBlock('plan-show', PLAN)
+    const block = codeBlock('show-me', PLAN)
     expect(scanInline(document)).toBe(1)
     const figure = document.querySelector<HTMLElement>(`[${INLINE_ATTR}]`)!
     const img = figure.querySelector<HTMLImageElement>(`[${INLINE_IMG_ATTR}]`)!
@@ -97,7 +97,7 @@ describe('scanInline', () => {
   })
 
   it('图/源码切换改状态属性', () => {
-    codeBlock('plan-show', PLAN)
+    codeBlock('show-me', PLAN)
     scanInline(document)
     const figure = document.querySelector<HTMLElement>(`[${INLINE_ATTR}]`)!
     const [diagram, source] = Array.from(figure.querySelectorAll('button'))
@@ -109,7 +109,7 @@ describe('scanInline', () => {
   })
 
   it('幂等：重复扫描不重复注入', () => {
-    codeBlock('plan-show', PLAN)
+    codeBlock('show-me', PLAN)
     expect(scanInline(document)).toBe(1)
     expect(scanInline(document)).toBe(0)
     expect(document.querySelectorAll(`[${INLINE_ATTR}]`)).toHaveLength(1)
@@ -122,8 +122,13 @@ describe('scanInline', () => {
     expect(document.querySelectorAll(`[${INLINE_ATTR}]`)).toHaveLength(0)
   })
 
+  it('历史围栏名 plan-show 同样就地渲染（改名不牺牲历史消息）', () => {
+    codeBlock('plan-show', PLAN)
+    expect(scanInline(document)).toBe(1)
+  })
+
   it('空围栏不渲染', () => {
-    codeBlock('plan-show', '   \n')
+    codeBlock('show-me', '   \n')
     expect(scanInline(document)).toBe(0)
   })
 })
@@ -133,7 +138,7 @@ describe('startInlineShow（观察器）', () => {
 
   it('后插入的定型围栏会被自动渲染；停止时清理注入并还原源码块', async () => {
     const stop = startInlineShow(document)
-    const block = codeBlock('plan-show', PLAN)
+    const block = codeBlock('show-me', PLAN)
     await new Promise((resolve) => { setTimeout(resolve, 0) })
     expect(document.querySelector(`[${INLINE_ATTR}]`)).not.toBeNull()
 
