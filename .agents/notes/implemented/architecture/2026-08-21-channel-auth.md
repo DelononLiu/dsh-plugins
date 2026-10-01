@@ -20,4 +20,4 @@ Status: implemented
 
 ## Consequences
 
-- scripts/bootstrap 需生成并注入实例令牌；dsh-channel 校验令牌；§9 通道鉴权项勾除。
+- scripts/bootstrap 需生成并注入实例令牌；dsh-console 通信面（`ctx.channel`）校验令牌；§9 通道鉴权项勾除。

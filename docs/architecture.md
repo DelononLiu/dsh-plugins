@@ -22,12 +22,12 @@
 │   不定义模型                                          │
 ├─ 管理组件（自研核心）─────────────────────────────────┤
 │   dsh-console：主机/实例档案 · 生命周期 · 部署编排 ·    │
-│   inbox/投递（v1 承载，未来可独立为业务 app）· 总览     │
-│   控制面：决策与编排，执行在远程 agent                  │
+│   inbox/投递（v1 承载，未来可独立为业务 app）· 总览 ·   │
+│   **内置通信面**（发现/心跳 · 事件总线 · 鉴权 · typert   │
+│   远程调用 · 控制指令=远程管理，自研）；控制面：决策与   │
+│   编排，执行在远程 agent                                │
 ├─ 系统 ────────────────────────────────────────────────┤
 │   dsh-user（身份模型：用户/归属/授权基础，自研）          │
-│   dsh-channel（通信：发现/心跳 · 事件总线 · 鉴权 ·       │
-│   typert 远程调用 · 控制指令=远程管理，自研）            │
 │   认证网关（社区 vendored：登录/会话/鉴权执行）          │
 │   LLM 记忆（社区 vendored：dsh-memento——ctx.memory     │
 │   seam + SQLite + 门控注入）                            │
@@ -39,8 +39,8 @@
 
 ### 分层判据
 
-- **系统**：基础设施能力（身份、通信），被上层消费，自身无业务含义。
-- **管理组件**：面向"系统/资源运维"的能力（主机、实例、部署、健康）——IT 管理面。
+- **系统**：基础设施能力（身份），被上层消费，自身无业务含义。
+- **管理组件**：面向"系统/资源运维"的能力（主机、实例、部署、健康）+ **内置实例通信面**（发现/心跳、事件总线、鉴权、控制指令）——IT 管理面。
 - **UI**：界面层（布局、组件组合、导航、标签），消费管理组件与系统数据。
 - **业务 app**：承载独立业务逻辑/服务（编排、状态机、调度、持久化）的应用——**当前无成员：vendored 协作应用（dst-agent-teams）与全家桶功能应用（task-board/ssh/git-graph 等）已于 2026-09-26 移除，协作编排改用官方 agent-team（实验态）**；**跨层依赖严格向下，UI 层内部允许聚合依赖**（meta 包）。
 
@@ -48,10 +48,10 @@
 
 插件间协作采用 DSH 生态标准模式（官方 capability seam），**不引入独立"契约"概念**：
 
-- **dsh-channel = 实例服务提供者**：定义实例类型（id/name/addr/status/health）+ 暴露发现/心跳/状态服务（@Remote，host 面）——实例是通信层发现的对象，放 channel 名正言顺。
+- **dsh-console 通信面（原 dsh-channel，2026-10 并入本包）= 实例服务提供者**：定义实例类型（id/name/addr/status/health）+ 暴露发现/心跳/状态服务（@Remote，host 面）——实例是通信层发现的对象，放通信面名正言顺。（并入决策见 [merge-channel-into-console](../.agents/notes/implemented/architecture/2026-10-01-merge-channel-into-console.md)。）
 - **dsh-console = 实例管理服务提供者**：定义管理档案类型（在 channel 的实例类型上扩展 owner/type/host/version）+ 暴露生命周期/部署服务。
 - **console 日志（2026-09 实现）**：控制台/守护日志落盘改**结构化 JSONL 带级别**（`Logger.record`，与纯文本镜像双轨），`readLog` 返回 `records[]`；「日志」页签重做为结构化查看器（来源/级别过滤/搜索/只看错误/跟随·暂停/逐行错误标红与命中高亮、复制可见行）。设计见 [console-structured-log](../.agents/notes/implemented/architecture/2026-09-06-console-structured-log.md)。
-- **dsh-quick-nav = 消费者（保留但不加载）**：`import type` 引用提供者的类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用服务（client 面）；dsh-quick-nav → channel（导航只需实例身份/状态，依赖降到系统层）；**console-ui 已并入 dsh-console 包**（client 半区），其管理界面消费同一 console 服务面。
+- **dsh-quick-nav = 消费者（保留但不加载）**：`import type` 引用提供者的类型（编译期，运行时零依赖）+ 经 Typert `ctx.remote` 调用服务（client 面）；dsh-quick-nav → dsh-console（导航只需实例身份/状态，type-only 依赖降到该包）；**console-ui 已并入 dsh-console 包**（client 半区），其管理界面消费同一 console 服务面。
 - 依赖方向向下；"一套概念模型"由提供者唯一定义类型保证。
 
 ### UI 布局
@@ -158,16 +158,16 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
     ▼
 typert（服务调用层：类型契约 / InvokeRemoteRequest 帧 / Zod 校验）──依赖──►
     ▼
-dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权/帧路由）
+dsh-console 通信面（传输底座：实例发现/心跳/事件总线/实例令牌鉴权/帧路由）
     │  物理承载（可插拔 transport）
     ├── transport: 直连（同进程 / HTTP-WS 直连远程实例）
     └── transport: broker（出站代理，daemon 安全模型）
 ```
 
-- **依赖方向**：`typert → dsh-channel`（上层调用下层）——**typert 的调用帧由 channel 传输**；channel 是 typert 的传输底座，物理传输 = 同机**直连**（loopback 插件路由）+ 多机 **hub 台账 / worker 出站长轮询**。**broker 已退场**（2026-09，见 [console 实例模型](../.agents/notes/implemented/architecture/2026-09-13-console-instance-model.md)）：不做可选后端、不留扩展点（daemon 不开放入站端口的安全模型由"只出站拉取"承接）。
-- **职责边界**：typert 只做方法级调用契约（不实现传输）；channel 做寻址（实例表 id/addr/status）、鉴权（实例令牌）、事件（三平面承载 typert `$on` 事件面）（物理投递由 hub 台账 + worker 轮询完成；broker/HMAC wire 协议随 broker 一并退场）。
-- **对齐官方**：官方为 `typert（协议）→ Connection 层（ctx.connection.rpc.intercept('/api')，HTTP/WS 传输）`；我们把官方 Connection 的职责放到 dsh-channel（既有通信层），不发明新分层。
-- **待实现**：channel 提供 typert transport 契约（`rpc.send(frame, target)` / `intercept(endpoint, handler)`，对齐官方 `connection.rpc.intercept` 签名）；跨实例调用鉴权复用实例令牌；typert forwardable events ↔ channel 三平面映射。当前跨实例走 hub 台账 + worker 出站拉取（+ 同机直连）；broker 路径已删。
+- **依赖方向**：`typert → dsh-console 通信面`（上层调用下层）——**typert 的调用帧由通信面传输**；通信面是 typert 的传输底座，物理传输 = 同机**直连**（loopback 插件路由）+ 多机 **hub 台账 / worker 出站长轮询**。**broker 已退场**（2026-09，见 [console 实例模型](../.agents/notes/implemented/architecture/2026-09-13-console-instance-model.md)）：不做可选后端、不留扩展点（daemon 不开放入站端口的安全模型由"只出站拉取"承接）。
+- **职责边界**：typert 只做方法级调用契约（不实现传输）；通信面做寻址（实例表 id/addr/status）、鉴权（实例令牌）、事件（三平面承载 typert `$on` 事件面）（物理投递由 hub 台账 + worker 轮询完成；broker/HMAC wire 协议随 broker 一并退场）。
+- **对齐官方**：官方为 `typert（协议）→ Connection 层（ctx.connection.rpc.intercept('/api')，HTTP/WS 传输）`；我们把官方 Connection 的职责放到 dsh-console 的通信面，不发明新分层。
+- **待实现**：通信面提供 typert transport 契约（`rpc.send(frame, target)` / `intercept(endpoint, handler)`，对齐官方 `connection.rpc.intercept` 签名）；跨实例调用鉴权复用实例令牌；typert forwardable events ↔ 通信面三平面映射。当前跨实例走 hub 台账 + worker 出站拉取（+ 同机直连）；broker 路径已删。
 - **多机走向（proposed）**：跨主机以 **broker-free、console 单入站口 + worker 出站拉取**为主路径（唯一入站面是 console 的插件路由；daemon 长轮询取指令、上报结果与事件；不建对等面，broker 降为可选后端）——方案与分阶段拆解见 [multihost-channel-pull](../.agents/notes/proposed/architecture/2026-09-11-multihost-channel-pull.md)。边界事实：官方 `/api` RPC 面被 BrowserAuth fence（实测 401）；该 fence 是 `dsh-client-connection` 注册在官方 webserver 上的一条 `/api` prefix 路由，不是全局中间件，`webServer.register` 的 exact 路由先命中因而免 fence（实测免凭据 200）；内核 `webserver.host` 只接受 `127.0.0.1 | 0.0.0.0`。
 
 ### 部署状态机
@@ -198,9 +198,9 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 | profile | 用途 | bundles 内容 |
 | --- | --- | --- |
-| **master** | 开发 + 正式 | 官方基线 + 自研核心（user/channel/console/focus-session）+ vendored 全家桶 |
-| **dev** | 管理端 console 组合（日常开发） | 官方基线（自研 user/channel/console/focus-session 经 patch insert；其余按需 `dsh plugin --profile dev add <被测>` 临时装入） |
-| **explorer** | 多插件集成探索（变动最快） | 官方基线 + 核心组合（user/channel/console/focus-session）——测试时临时增删 |
+| **master** | 开发 + 正式 | 官方基线 + 自研核心（user/console/focus-session）+ vendored 全家桶 |
+| **dev** | 管理端 console 组合（日常开发） | 官方基线（自研 user/console/focus-session 经 patch insert；其余按需 `dsh plugin --profile dev add <被测>` 临时装入） |
+| **explorer** | 多插件集成探索（变动最快） | 官方基线 + 核心组合（user/console/focus-session）——测试时临时增删 |
 | **minimal** | 官方默认（最小可跑） | 官方基线（base + web-app），无自研/社区插件 |
 
 原则：**web 是正式基线（~/.dsh），测试环境用独立 DSH_HOME 目录隔离**（非共享 home 的 profile 隔离，sessions/settings/storages 完全独立）；自研插件经 cordis.patch.yml insert（不进 bundles）；webserver 端口独立配置（避开正式 3080）。版本矩阵锁（dsh.lock.json）各自维护。
@@ -209,10 +209,10 @@ dsh-channel（传输底座：实例发现/心跳/事件总线/实例令牌鉴权
 
 | 环境 | DSH_HOME | profile | 端口 | 角色 |
 | --- | --- | --- | --- | --- |
-| web | `~/.dsh` | web | 3080 | 正式 GUI + **管理端**（console role: console + channel；3080 常驻，重启会断开 GUI 会话） |
+| web | `~/.dsh` | web | 3080 | 正式 GUI + **管理端**（console role: console，内置通信面；3080 常驻，重启会断开 GUI 会话） |
 | web2 | `~/.dsh-web2` | web2 | 3082 | **开发**（日常开发/UI 基线验证） |
-| web3 | `~/.dsh-web3` | web3 | 3083 | **探索/测试**（变动最快；`DSH_RELAY_AGENT=web3`） |
-| web4 | `~/.dsh-web4` | web4 | 3084 | instance（`DSH_RELAY_AGENT=web4`） |
+| web3 | `~/.dsh-web3` | web3 | 3083 | **探索/测试**（变动最快；`DSH_CHANNEL_ID=web3`） |
+| web4 | `~/.dsh-web4` | web4 | 3084 | instance（`DSH_CHANNEL_ID=web4`） |
 | daemon | `~/.dsh`（与 web **同 home 的另一个 profile**） | daemon | 控制口 3089（无 web） | 总控主机守护 `host-master`（`hostId: 'master'`；管理端启动时自启；多机经 hub/worker 出站拉取，broker 已退场） |
 
 profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名>`，`dsh --profile <名>` 即 boot 之）；web2/3/4 内容同源 web 全家桶，目录各归各实例，可逐实例补丁/升级。实例模板（`profiles/master|dev|explorer|minimal`）是**另一层命名**（模板 = 创建时快照），勿混。
@@ -230,16 +230,16 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | 插件 | 层 | 职责 | 状态 |
 | --- | --- | --- | --- |
 | dsh-user | 系统·身份 | 身份模型（用户/归属/授权基础）；**身份来源可插拔（IdentityResolver 接口）**；client 半区侧边栏用户徽标（/api/user/me） | ✅ 已实现（29 测试；gateway cookie 验签 + 侧边栏徽标/登出，见 §9） |
-| dsh-channel | 系统·通信 | 发现/心跳、事件总线（at-least-once/幂等/TTL/三平面）、鉴权、控制指令；**实例服务提供者**（实例类型 + 发现/状态服务）；**多机回路**（hub 注册/台账派发 + worker 出站拉取） | ✅ 已实现（37 测试：含真 HTTP 注册→长轮询→回执端到端、鉴权/归属冲突/租约重投/台账恢复；P1a 已落地，见 §9） |
-| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**实例管理服务提供者**（扩展类型 + 生命周期/部署服务） | ✅ 已实现（**160 测试**；HTTP 端点 instances/control + registry/池/删除恢复的 @Remote 面；daemon/instance 三角色 + 多机 hub 接入；升级回滚见 §9） |
-| dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示） | ✅ 已并入（非独立包） |
+| ~~dsh-channel~~ | ~~系统·通信~~ | ~~发现/心跳、事件总线（at-least-once/幂等/TTL/三平面）、鉴权、控制指令；实例服务提供者（实例类型 + 发现/状态服务）；多机回路（hub 注册/台账派发 + worker 出站拉取）~~ | 🗑 2026-10 并入 dsh-console，见 [note](../.agents/notes/implemented/architecture/2026-10-01-merge-channel-into-console.md) |
+| dsh-console | 管理组件 | **纯服务端**：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据；**内置通信面**（原 dsh-channel：发现/心跳、事件总线、鉴权、控制指令、多机 hub/worker 回路）；**实例服务提供者**（扩展类型 + 发现/状态/生命周期/部署服务） | ✅ 已实现（**232 测试**（含原 channel 38 项）；HTTP 端点 instances/control + registry/池/删除恢复的 @Remote 面；daemon/instance/agent 四角色 + 多机 hub 接入；升级回滚见 §9） |
+| dsh-console-ui | UI（并入 dsh-console） | 总览/管理界面——**client 半区并入 dsh-console 包**（ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示）；实例行显示**磁盘 runtime 池版本**（读 profile 池软链，离线也有；自带安装/无 dshHome 回退实例自报版本） | ✅ 已并入（非独立包） |
 | dsh-quick-nav | UI | 顶栏实例快捷导航（跳转/在线状态），实例档案读端 | ⏸ **保留但不加载**（不进任何 profile；单测保真） |
 | dsh-focus-session | UI | **会话关注层**：侧栏「置顶」区（钉住/拖拽排序/行尾取消钉）+「活跃」区（最近活跃会话，`updatedAt` 序，上限 5）+ 会话标题**胶囊标签**（人工标签）；行菜单与标签弹框照官方 Menu/Modal 契约；拥有钉住/标签 settings 数据 | ✅ 已实现（101 测试） |
 | ~~dsh-focus-tabs~~ | UI | ~~顶部会话标签行（Alt+P 固定、Alt+1..9 切换、编号标题、状态圆点）；只读消费 dsh-focus-session 的钉住数据~~ | 🗑 2026-10 删除，见 [note](../.agents/notes/implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md) |
-| dsh-show-me | UI | **复杂内容呈现层（show-me）**：约定围栏 ```show-me + 提示词段（内容复杂到读不下去时改用"一张图"交付）→ 客户端观察会话 DOM（照官方 `CodeBlock` 形状：`md-code-block` + `infostring` 类名子串 + 祖先 `data-streaming`）→ **消息内就地渲染成图片**（自绘 SVG → `data:image/svg+xml` → `<img>` 惰性图片；图/源码/复制切换）；只作用于 **AI 输出**（用户消息走官方 `MessageText`，不做 markdown）；旧围栏名 `plan-show` 作 legacy 别名继续渲染；验收硬规则：**无证据 = 未验证**。无独立界面（侧栏入口与面板已删除） | ✅ 已实现（45 测试 + dev 实例（web2/3082）真机自验；命名与对外叙事见 [note](.agents/notes/implemented/process/2026-10-01-dsh-show-me-naming.md)，场景/分期/调研见 [note](.agents/notes/proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)，DOM 钩子契约见 [note](.agents/notes/implemented/feature/2026-09-13-plan-show-inline-dom-hooks.md)） |
+| dsh-show-me | UI | **复杂内容呈现层（show-me）**：约定围栏 ```show-me + 提示词段（内容复杂到读不下去时改用"一张图"交付）→ 客户端观察会话 DOM（照官方 `CodeBlock` 形状：`md-code-block` + `infostring` 类名子串 + 祖先 `data-streaming`）→ **消息内就地渲染成图片**（自绘 SVG → `data:image/svg+xml` → `<img>` 惰性图片；图/源码/复制切换）；只作用于 **AI 输出**（用户消息走官方 `MessageText`，不做 markdown）；旧围栏名 `plan-show` 作 legacy 别名继续渲染；验收硬规则：**无证据 = 未验证**。无独立界面（侧栏入口与面板已删除） | ✅ 已实现（32 测试 + dev 实例（web2/3082）真机自验；命名与对外叙事见 [note](../.agents/notes/implemented/process/2026-10-01-dsh-show-me-naming.md)，场景/分期/调研见 [note](../.agents/notes/proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md)，DOM 钩子契约见 [note](../.agents/notes/implemented/feature/2026-09-13-plan-show-inline-dom-hooks.md)） |
 | ~~dsh-desk~~ | UI（平台） | ~~布局/插件组合自定义平台（不包含皮肤——皮肤中心已否决），meta-package，"我的"=personal 哲学；工具入口组装器~~ | 🗑 2026-10 删除，见 [note](../.agents/notes/implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md) |
 
-> dsh-quick-nav 保留源码但不进任何 profile（实例跳转收敛到 console 面板）；按插件协作模式，channel 提供实例服务，nav 是纯读端消费者。
+> dsh-quick-nav 保留源码但不进任何 profile（实例跳转收敛到 console 面板）；按插件协作模式，dsh-console 的内置通信面提供实例服务，nav 是纯读端消费者。
 
 ### 社区直接采用（vendored，相似度极高不重复造）
 
@@ -316,7 +316,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | 计划名 | npm 占用 | GitHub 占用 | 判定 |
 | --- | --- | --- | --- |
 | dsh-user | 无（官方 dsh-user-questions/-approval 为审批 seam，语义不同） | 无 | ✅ 可用 |
-| dsh-channel | 无 | ⚠️ ZinkLu/dsh-channel（IM 消息渠道：Telegram/微信/飞书） | ⚠️ 名字被占，语义不同（消息渠道 vs 跨实例通信） |
+| dsh-channel | 无 | ⚠️ ZinkLu/dsh-channel（IM 消息渠道：Telegram/微信/飞书） | ⚠️ 名字被占，语义不同（消息渠道 vs 跨实例通信）；**2026-10 包已并入 dsh-console**，此名不再由本仓库占用（见 [note](../.agents/notes/implemented/architecture/2026-10-01-merge-channel-into-console.md)） |
 | dsh-hub | ❌ @marecgents/dsh-hub（Tauri 桌面壳）、dsh-hub-oauth-gateway | ❌ 多个（均为插件市场/目录语义） | ❌ 必须改名 |
 | dsh-quick-nav | 无 | 有 dsh-quick-navbar（不同名） | ✅ 可用 |
 | dsh-session-tabs | 无 | 有 dsh-session-manager / dsh-side-session（不同名） | ✅ 可用 |
@@ -324,7 +324,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-show-me | 无（裸名 `show-me`/`showme` 是别的包，不涉 `dsh-` 前缀） | 无 | ✅ 可用（2026-10 实查；同名的只有 humanlayer 的 `show-me` skill，非包名） |
 
 **最终命名决定（2026-08 拍板）**：
-- dsh-channel：**保留原名**（dsh- 前缀为自研家族标记，社区撞名不影响）
+- dsh-channel：**保留原名**（dsh- 前缀为自研家族标记，社区撞名不影响）；2026-10 整包并入 dsh-console，名字随之停用（见 [note](../.agents/notes/implemented/architecture/2026-10-01-merge-channel-into-console.md)）
 - dsh-hub → **`dsh-console`**（总览/管理/编排控制台；dsh-cockpit 已被 npm 占用，排除）
 - dsh-session-tabs → **`dsh-tabs`**（短、与 dsh-quick-nav 风格统一；npm/GitHub 均无占用）
 - dsh-tabs → **`dsh-focus-tabs`** + 新建 **`dsh-focus-session`**（会话关注层拆分：顶部标签行 vs 侧栏关注区；npm 无占用，社区 `dsh-focus-chat` 为同前缀但语义不同——社区指「聚焦阅读视图」）；dsh-focus-tabs 已于 2026-10 删除，见 [note](../.agents/notes/implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md)
@@ -345,16 +345,16 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 - [x] ~~权限模型细节~~（已定 2026-08）：角色 admin/member/guest；shared 实例 owner 授权（可访问/只读）；操作分级（查看 member+ / 控制 owner·admin / 部署·主机管理 admin）——参考 dsh-passwords
 - [x] ~~版本矩阵落地格式~~（已定 2026-08）：dsh.lock.json 定稿 schema（schemaVersion/id/name/version/kernel/bundles/vendored）——参考 Plugin Pack Schema v1
 - [x] ~~局域网内的发现方式~~（**否决** 2026-08）：不做局域网自动发现（mDNS 广播）——实例发现 = **agent 主动注册 + console 已知地址列表**（主机登记时手配地址）
-- [x] ~~实例档案共享契约载体~~（已定 2026-08，最终表述）：**不提"契约"概念**——插件协作模式：dsh-channel 提供实例服务（类型+发现/状态），dsh-console 提供管理服务（扩展类型+生命周期），nav 消费 channel、console-ui 消费 console（`import type` + `ctx.remote`）
+- [x] ~~实例档案共享契约载体~~（已定 2026-08，最终表述）：**不提"契约"概念**——插件协作模式：dsh-console 通信面提供实例服务（类型+发现/状态），dsh-console 管理面提供管理服务（扩展类型+生命周期），nav 消费 dsh-console、console-ui 消费 console（`import type` + `ctx.remote`）
 - [x] ~~升级回滚策略~~（已定 2026-08）：升级前快照（bundles+lock+patch）→ patch 校验（失败默认回滚/管理员确认可跳过）→ 滚动重启 → 心跳确认 → 失败自动回滚，**保留 3 份**——参考 dsh-update-checker
 - [x] ~~总览 UI 归属~~（已定 2026-08 → **2026-08 并入 console**）：原"console 纯服务端、总览界面独立为 dsh-console-ui"——**已并入 dsh-console 包**（client 半区：ConsoleBadge + 实例控制面板，sidebar.footer.action 入口，仅管理端显示）；无独立 dsh-console-ui 包
-- [x] ~~agent 最小组件集清单~~（已定 2026-08）：**dsh-base + dsh-channel + dsh-user**（无 console/无 UI——agent 只执行，控制面/执行面分离）
+- [x] ~~agent 最小组件集清单~~（已定 2026-08；2026-10 随 channel 并入更新）：**dsh-base + dsh-console + dsh-user**（console 以 `role: 'agent'` 只挂通信面；无管理面/无 UI——agent 只执行，控制面/执行面分离）
 - [x] ~~vendored 机制落地~~（已定 2026-08 → **2026-08 改统一 npm**）：原"dst-agent-teams submodule 本地安装；dsh-web-ui submodule 锁源码 + npm 安装"——**已改为统一 npm 安装 + lock 锁版本**（dsh-memento / dst-agent-teams npm 均有发布版，submodule 已移除；见 Vendoring policy）
 - [x] ~~皮肤中心 v2 接入方式~~（**否决** 2026-08）：用户明确不喜欢换肤、功能优先——不引入皮肤中心，UI 自定义维度=插件组合
 - [x] ~~全家桶工具入口组装边界~~（**已实现** 2026-08，见 [sidebar-slot-assembly-boundary](../.agents/notes/proposed/architecture/2026-08-23-sidebar-slot-assembly-boundary.md)）：task-board/ssh/skill-explorer 不走官方 sidebar 插槽而是 DOM 注入，dsh-desk 组装器（re-parent + CSS 覆盖）已实现摆位；③ 组装配置化（footSpacing/tools 显隐进设置页）、⑤ 通用性（运行时发现 `data-dsh-part` entry）、② CSS 回退静默、④ rail 折叠态视觉验收（web2 实测正常）、**① slots 型插件显隐（git-graph 开关：`assembler.slots.gitGraph`，CSS 覆盖 chip+dialog，实时生效）** 全部落地。（better-sidebar 为整体工作台框架、不纳入组装，已于 2026-09-26 整包移除，侧边栏改用官方原生。）**2026-10 失效**：vendored 全家桶与 dsh-desk 组装器均已删除，见 [note](../.agents/notes/implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md)。
 
-- [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」；**第一二期已落地**，见 [typert-integration](../.agents/notes/implemented/architecture/2026-08-23-typert-integration.md)）：`typert → dsh-channel`（typert 调用帧经 channel 传输，broker 为 channel 可选后端）。内核 0.1.1-rc.2 内置 typert 运行时；构建期 generator 需源码（vendored typert-protocol）。**第一期**：channel @Remote（list/get/brokerStatus）+ 构建管线 + quick-nav `ctx.remote.channel.list()`。**第二期**：console @Remote（listInstances/controlInstance）+ ConsoleBadge 改 ctx.remote；**broker 下沉 channel**（console 无 broker 接口，经 `ctx.remote.channel.brokerStatus()`）。**剩余（第三期）**：① 跨实例 @RemoteScope 控制指令（console→instance/daemon）② transport 选择策略（直连 vs broker）③ typert forwardable events ↔ channel 三平面映射。
-- [ ] **多机（broker-free，2026-09-11 提案）**（见 [multihost-channel-pull](../.agents/notes/proposed/architecture/2026-09-11-multihost-channel-pull.md)）：目标形态 = 总控主机唯一 web 实例（console+channel）为全集群控制面，每台工作主机一个 headless daemon 管本机 web 实例，实例间经 channel 通信。现状阻碍（实测/读码）：① 直连 RPC 打官方 `/api/{ns}/{method}` → BrowserAuth fence 401，插件自注册路由免 fence（3082 `/api/console/instances`、3083 `/api/quick-nav/instances` 实测 200）；② 跨进程载体只有 daemon 手写的 `127.0.0.1:controlPort`（管理组件内、无凭据校验）与 broker，而 broker 无实现（`packages/dsh-agent-relay` 缺失、19121 无监听）→ `sendControl` 在无 relay 时空转、relay 不可达时 catch 吞错，`deployInstance`/`upgradeInstances` 静默；③ channel 无自己的 server、事件总线无远端投递、每事件 TTL 未生效且去重与 inbox 仅在内存；④ 身份只能来自 `relay.agent`/`DSH_RELAY_AGENT`；⑤ console 的 `/api/console/instances`、`/api/console/control` 无凭据校验（免凭据 POST 可达 handler，实测 400 非法指令），当前仅回环可及；⑥ 注册面默认信任（未配 tokens 即放行、注册无条件覆写 launch 的 addr）；⑦ daemon 运行时实例清单不持久化 → 孤儿进程。方案要点：**console 单入站口 + worker 出站拉取**（注册/保活、长轮询取指令、回执、事件上行）、console 落盘指令台账、归属唯一权威、令牌在 v1 内闭环（含默认 deny）、在线判定改用正向存活证据、事件经 hub 中继（seq 游标 + 持久去重）、地址语义分列 `localAddr`/`browserAddr`；**不建对等面**，实例不暴露控制面（生命周期全经本机 daemon）。**v1 = P1a 控制闭环 + P1b 部署/升级/状态/日志 + P2 事件面**；P3 为引导可执行、令牌轮换吊销、用户级会话鉴权。**P1a 已落地（2026-09-11）**：channel 增 `mode/id/console/token`（local/hub/worker）、hub 路由 `register`/`commands`/`result`（实例令牌鉴权、默认 deny、归属冲突拒绝）、落盘指令台账（租约重投 + 重启恢复）、worker 出站注册与长轮询；console 接入注册落档案 + inbox、控制经台账派发（未注册显式失败）、`deployInstance` 先派发后登记、hub 探测跳过跨机与已注册目标；同机 local 模式保留直连（daemon `controlPort`）。遗留见 note「P1a 遗留」。
+- [ ] **typert 接入（传输与调用分层落地）**（2026-08 定分层，见 §3「传输与调用分层」；**第一二期已落地**，见 [typert-integration](../.agents/notes/implemented/architecture/2026-08-23-typert-integration.md)）：`typert → dsh-console 通信面`（typert 调用帧经通信面传输，broker 为通信面可选后端）。内核 0.1.1-rc.2 内置 typert 运行时；构建期 generator 需源码（vendored typert-protocol）。**第一期**：通信面 @Remote（list/get/brokerStatus）+ 构建管线 + quick-nav `ctx.remote.channel.list()`。**第二期**：console @Remote（listInstances/controlInstance）+ ConsoleBadge 改 ctx.remote；**broker 下沉通信面**（console 无 broker 接口，经 `ctx.remote.channel.brokerStatus()`）。**剩余（第三期）**：① 跨实例 @RemoteScope 控制指令（console→instance/daemon）② transport 选择策略（直连 vs broker）③ typert forwardable events ↔ 通信面三平面映射。
+- [ ] **多机（broker-free，2026-09-11 提案）**（见 [multihost-channel-pull](../.agents/notes/proposed/architecture/2026-09-11-multihost-channel-pull.md)）：目标形态 = 总控主机唯一 web 实例（dsh-console，内置通信面）为全集群控制面，每台工作主机一个 headless daemon 管本机 web 实例，实例间经通信面通信。现状阻碍（实测/读码）：① 直连 RPC 打官方 `/api/{ns}/{method}` → BrowserAuth fence 401，插件自注册路由免 fence（3082 `/api/console/instances`、3083 `/api/quick-nav/instances` 实测 200）；② 跨进程载体只有 daemon 手写的 `127.0.0.1:controlPort`（管理组件内、无凭据校验）与 broker，而 broker 无实现（`packages/dsh-agent-relay` 缺失、19121 无监听）→ `sendControl` 在无 relay 时空转、relay 不可达时 catch 吞错，`deployInstance`/`upgradeInstances` 静默；③ 通信面无自己的 server、事件总线无远端投递、每事件 TTL 未生效且去重与 inbox 仅在内存；④ 身份只能来自 `relay.agent`/`DSH_CHANNEL_ID`；⑤ console 的 `/api/console/instances`、`/api/console/control` 无凭据校验（免凭据 POST 可达 handler，实测 400 非法指令），当前仅回环可及；⑥ 注册面默认信任（未配 tokens 即放行、注册无条件覆写 launch 的 addr）；⑦ daemon 运行时实例清单不持久化 → 孤儿进程。方案要点：**console 单入站口 + worker 出站拉取**（注册/保活、长轮询取指令、回执、事件上行）、console 落盘指令台账、归属唯一权威、令牌在 v1 内闭环（含默认 deny）、在线判定改用正向存活证据、事件经 hub 中继（seq 游标 + 持久去重）、地址语义分列 `localAddr`/`browserAddr`；**不建对等面**，实例不暴露控制面（生命周期全经本机 daemon）。**v1 = P1a 控制闭环 + P1b 部署/升级/状态/日志 + P2 事件面**；P3 为引导可执行、令牌轮换吊销、用户级会话鉴权。**P1a 已落地（2026-09-11）**：通信面增 `mode/id/console/token`（local/hub/worker）、hub 路由 `register`/`commands`/`result`（实例令牌鉴权、默认 deny、归属冲突拒绝）、落盘指令台账（租约重投 + 重启恢复）、worker 出站注册与长轮询；console 接入注册落档案 + inbox、控制经台账派发（未注册显式失败）、`deployInstance` 先派发后登记、hub 探测跳过跨机与已注册目标；同机 local 模式保留直连（daemon `controlPort`）。遗留见 note「P1a 遗留」。
 - [ ] **多 dsh 协同（主端集群控制 → 自主协同干活）**（2026-09 用户愿景，见 [multi-dsh-collaboration](../.agents/notes/proposed/architecture/2026-09-03-multi-dsh-collaboration.md)）：登录一个主端，便捷部署/启动其他主机 dsh、主端统一插件升级、（最好）打开他机工作区、最终多 dsh 自主协同。已确认方向：星型（console 协调）+ 干活型/动脑型都要 + 邀请制授权。**v1**：部署新主机 UI（SSH bootstrap 已有脚本 → console 补 UI）+ 统一升级（捡起挂起的升级回滚，**引擎已落地** 2026-09-04，见 unified-upgrade-engine note）+ 便捷跳转（console 面板每实例「跳转」）。**v2**：远程工作区（跨实例会话共享，最难，官方无概念；v1 用跳转替代）。**v3**：自主协同（console 调度员拆任务分派，需能力发现/可用性/任务委托协议）。
 - [ ] **认证网关独立部署**（2026-09 用户定：网关应只有**一个**、不随 dsh 实例启动，见 [gateway-standalone-deployment](../.agents/notes/implemented/architecture/2026-09-05-gateway-standalone-deployment.md)）：已从实例 profile 移除（web2 去 patch insert + 去依赖，重启验证）；待落地：单一共享网关进程（独立 DSH_HOME/进程）+ 各实例 dsh-user `gatewayCookie`/网关注入改指该网关 + 官方 BrowserAuth fence 会话桥（见 [alpha5-auth-official-token-vs-user-login](../.agents/notes/proposed/architecture/2026-09-03-alpha5-auth-official-token-vs-user-login.md)）。
 - [x] ~~**dsh-focus-tabs 对 dsh-focus-session 的部署依赖**~~（2026-09 记录）：**2026-10 失效**——dsh-focus-tabs 已整包删除，钉住/标签数据归 dsh-focus-session 唯一管理面，见 [note](../.agents/notes/implemented/architecture/2026-10-01-drop-desk-and-focus-tabs.md)。
@@ -375,12 +375,11 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | --- | --- |
 | dsh-user 身份模型（current/instanceAccess/isOwner + IdentityResolver 适配层 + 侧边栏用户徽标/登出） | 29 测试 + web2 实测 |
 | dsh-gateway 集成（clarknu，HTTPS 3443：admin/user 登录 + 会话 + 登出） | 曾以插件随 web2 启动验证过；2026-09 起从实例移除（网关不随 dsh 实例启动，独立部署 backlog，见 §9） |
-| dsh-channel 通信（发现/心跳/事件总线 at-least-once/鉴权/控制指令） | 29 测试 |
-| dsh-console（档案/生命周期/inbox/三角色 daemon·instance·console + 3 HTTP 端点） | 37 测试 |
+| dsh-console（档案/生命周期/inbox/四角色 daemon·instance·console·agent + 3 HTTP 端点 + 内置通信面：发现/心跳/事件总线 at-least-once/鉴权/控制指令） | 232 测试（含原 channel 38 项） |
 | console UI（并入 dsh-console client 半区：ConsoleBadge + 控制面板） | sidebar.footer.action，仅管理端 |
 | dsh-quick-nav 顶栏导航（**保留但不加载**，不进任何 profile） | 单测保真 |
 | dsh-focus-session 侧栏置顶区 + 活跃区 + 会话胶囊标签（钉/排序/取消钉 + 最近活跃时间序 + 行尾 ⋯ 菜单：编辑标签/加入/移出置顶 + 标签弹框；菜单/弹框照官方 Menu/Modal 契约） | 101 测试 |
-| dsh-show-me 复杂内容呈现层（`show_me` 工具 + 产物存储 + 只读端点 + 消息内图片化 + 验收矩阵"无证据=未验证" + legacy 围栏别名） | 45 测试 + dev 实例（web2/3082）自验 |
+| dsh-show-me 复杂内容呈现层（约定围栏 + 提示词段 + 消息内图片化 + 验收硬规则"无证据=未验证" + legacy 围栏别名） | 32 测试 + dev 实例（web2/3082）自验 |
 | 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh 读实例注册表 | scripts/ 已实测（registry.test.mjs 7 项 + profile-registry.test.sh 14 项） |
 | 内核新版本检测（开发侧脚本闸门 + 管理端 console 只读展示；顺带修升级对话框硬编码目标版本） | scripts/tests/kernel-version.test.mjs 14 项 + packages/dsh-console/tests/kernel-update.spec.ts 17 项；见 [kernel-version-detection](../.agents/notes/implemented/feature/2026-10-01-kernel-version-detection.md) |
 | vendoring 统一 npm（submodule 归零） | AGENTS.md policy |

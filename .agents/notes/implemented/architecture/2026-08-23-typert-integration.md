@@ -2,6 +2,8 @@
 
 Status: implemented
 
+> 包结构更新（2026-10-01）：`dsh-channel` 整包并入 `dsh-console`，本 note 里的 `dsh-channel` 现指 dsh-console 的内置通信面（构建期 generator 随包合一）；见 [merge-channel-into-console](2026-10-01-merge-channel-into-console.md)。
+
 ## Problem
 
 typert 接入（传输分层已定：`typert → dsh-channel`）。第一期 = 最小闭环：dsh-channel 暴露 `@Remote` 服务、quick-nav client 改 `ctx.remote` 消费（替换手写 `/api/quick-nav/instances`），验证构建管线 + 类型契约 + 运行时链路。**第一期已落地（2026-08-23）**。

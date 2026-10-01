@@ -2,6 +2,8 @@
 
 Status: proposed
 
+> 包结构更新（2026-10-01）：`dsh-channel` 整包并入 `dsh-console`（不再拆 controller 包；按 `role` 分流通信面/管理面），本 note 中"dsh-channel → controller 化"的目标形态已由该合并取代；见 [merge-channel-into-console](../../implemented/architecture/2026-10-01-merge-channel-into-console.md)。
+
 ## Problem
 
 官方内核 0.1.1-rc.2 → 0.1.2-alpha.5 是 client 架构重构（dsh-client-runtime 移除 → everything-is-a-plugin + controller 分层）。用户决策：**全面对齐官方 alpha.5 架构层级，允许完全重构**；官方已覆盖的能力删自研，官方没有的差异化按官方 controller/client-model 模式重构。依据：4 份官方源码调研报告（docs/research/）——controller-pattern / ui-slot-assembly / typert-pipeline / identity-settings。

@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "id": "dsh-distro-explorer",
-  "name": "dsh 模板（explorer：核心组合 user/channel/console + focus-session）",
+  "name": "dsh 模板（explorer：核心组合 user/console + focus-session、show-me）",
   "version": "0.0.0",
   "kernel": "@deepseek-ai/dsh@0.1.7-rc.2",
   "bundles": {
     "@deepseek-ai/dsh-base": "0.1.7-rc.2",
     "@deepseek-ai/dsh-web-app": "0.1.7-rc.2",
-    "dsh-channel": "0.0.0",
     "dsh-console": "0.0.0",
     "dsh-focus-session": "0.0.0",
+    "dsh-show-me": "0.0.0",
     "dsh-user": "0.0.0"
   },
   "vendored": {

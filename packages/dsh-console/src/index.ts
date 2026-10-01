@@ -20,7 +20,18 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
-import { hostAgentId, instanceIdFromEnv, isHostAgent, type ControlCommand, type ControlOutcome, type InstanceIdentity, type WorkerInstanceReport, type WorkerReport } from 'dsh-channel'
+import ChannelService, {
+  Config as ChannelConfigSchema,
+  hostAgentId,
+  instanceIdFromEnv,
+  isHostAgent,
+  type Config as ChannelConfig,
+  type ControlCommand,
+  type ControlOutcome,
+  type InstanceIdentity,
+  type WorkerInstanceReport,
+  type WorkerReport,
+} from './channel/index.js'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { randomUUID, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -41,6 +52,7 @@ import {
   saveRegistry,
   upsertInstance,
   type InstanceEntry,
+  type Registry,
 } from './registry.js'
 import { currentRuntimeVersion, linkRuntimeInto, runtimeReady } from './runtimes.js'
 import { importRuntime, listRuntimes, poolRoot, removeRuntime, runtimeDir, verifyRuntime } from './runtimes.js'
@@ -96,7 +108,7 @@ export interface LaunchSpec {
   profile: string
   /** 端口（记录/校验用，可选）。 */
   port?: number
-  /** 额外环境变量（如 DSH_CHANNEL_ID/CONSOLE_ADDR；旧名 DSH_RELAY_AGENT 仍兼容读）。 */
+  /** 额外环境变量（如 DSH_CHANNEL_ID / DSH_CONSOLE_ADDR）。 */
   env?: Record<string, string>
   /** 引用的 runtime 池版本（内核版本；空 = 实例自带安装，见 runtime 池模型）。 */
   version?: string
@@ -109,8 +121,11 @@ export interface LaunchSpec {
   autoStart?: boolean
 }
 
-/** 插件角色（部署位置）：console=管理端 / daemon=主机守护 / instance=实例自退。 */
-export type ConsoleRole = 'console' | 'daemon' | 'instance'
+/**
+ * 插件角色（部署位置）：console=管理端 / daemon=主机守护 / instance=实例自退 /
+ * agent=被引导的执行面主机（只提供通信面，不启管理面）。
+ */
+export type ConsoleRole = 'console' | 'daemon' | 'instance' | 'agent'
 
 /** 插件配置。 */
 export interface Config {
@@ -130,16 +145,23 @@ export interface Config {
    * （如 ~/.dsh-web3）；生产 = 发行包预置的模板 home。
    */
   templateHome?: string
+  /**
+   * 通信面（原 dsh-channel 的 Config）：`role: 'agent'` 时只挂这一面。
+   * 合并后本包同时提供 `ctx.channel`（通信）与 `ctx.console`（管理）。
+   */
+  channel?: ChannelConfig
 }
 
 /** 运行时 schema。 */
 export const Config = z.object({
-  role: z.union([z.const('console'), z.const('daemon'), z.const('instance')]).default('console'),
+  role: z.union([z.const('console'), z.const('daemon'), z.const('instance'), z.const('agent')]).default('console'),
   launch: z.any().default(undefined),
   hostId: z.string().default(''),
   instances: z.any().default(undefined),
   controlPort: z.number().default(0),
   templateHome: z.string().default(''),
+  // 通信面（原 dsh-channel 的 Config）：嵌套一层，与角色同为该 profile 条目的配置。
+  channel: ChannelConfigSchema.default({}),
 }) as z<Config>
 
 /** 解析控制指令的动作（可测纯函数）：exit=重启/停止；running=已在运行；pending=v1 占位。 */
@@ -246,9 +268,8 @@ export function applyOverrideStatus(
  */
 export class ConsoleService extends TypertRemoteService {
   static Config = Config
-  /** 依赖注入：ctx.channel 必需；webServer 经 ctx.inject 等待（daemon/instance 角色不装也能加载）。 */
+  /** 注入通信面：`ctx.channel` 由本包入口（合并后的通信面）先挂载；webServer 经 ctx.inject 等待（daemon/instance 角色不装也能加载）。 */
   static inject = ['channel']
-
   /** 停止宽限（ms）：SIGTERM 后仍未退出则 SIGKILL。 */
   private static readonly KILL_GRACE_MS = 5000
   /** 重启看门狗（ms）：kill 后进程始终不退则解锁，防 busy 锁永久泄漏。 */
@@ -276,13 +297,11 @@ export class ConsoleService extends TypertRemoteService {
    * （守护要装插件、开控制端口、注册，启动不是瞬时的；不设宽限 = 拉起风暴）。 */
   private static readonly DAEMON_START_GRACE_MS = 30_000
   /** 本机守护自启：拉起前必须从本进程 env 剔除的变量（同 `dsh-profile.sh` 的纪律）。
-   * DSH_CHANNEL_ID/DSH_RELAY_AGENT = 本实例身份（守护继承会顶掉管理端 id，
-   * 而守护必须是 `host-<hostId>`，故剔除后重设）；DSH_SESSION_ID 等会话变量与
-   * DSH_SHELL/DSH_WEB_URL/DSH_WEB_MODE 宿主变量 = 带过守护会让它派生的 shell
-   * 指向管理端的会话与 home。 */
+   * DSH_CHANNEL_ID = 本实例身份（守护继承会顶掉管理端 id，而守护必须是 `host-<hostId>`，
+   * 故剔除后重设）；DSH_SESSION_ID 等会话变量与 DSH_SHELL/DSH_WEB_URL/DSH_WEB_MODE
+   * 宿主变量 = 带过守护会让它派生的 shell 指向管理端的会话与 home。 */
   private static readonly DAEMON_ENV_DENY = [
     'DSH_CHANNEL_ID',
-    'DSH_RELAY_AGENT',
     'DSH_SESSION_ID',
     'DSH_SESSION_JSONL',
     'DSH_SHELL',
@@ -607,14 +626,26 @@ export class ConsoleService extends TypertRemoteService {
     }
     const now = Date.now()
     // 应用离线覆盖（stop/restart 后即时显示 offline，绕开 broker TTL 滞后）；过期项清除。
+    // 注册表兜底：不在 launch / 部署清单里的实例（例如纯 channel 注册的外部实例、
+    // 或注册表并入但配置未列的离线行）也能算出磁盘 runtime 版本。读失败不影响列表。
+    let registryForRuntime: Registry | undefined
+    try { registryForRuntime = loadRegistry() } catch { registryForRuntime = undefined }
     const view = instances.map((inst) => {
       // 实例访问地址（channel 发现为空 → launch 配置 addr 补充，跳转用）与所属主机：
       // 归属以注册声明为准（多机），launch 配置回落（期望态/同机部署）。
       const spec = this.config.launch?.[inst.id]
       const host = this.ctx.channel.hostOf(inst.id) ?? spec?.host
       const withHost = host ? { ...inst, host } : inst
+      // runtime 池版本单独解析（不并入 spec）：launch 缺省时 daemon 的部署清单也能算出，
+      // 再缺则查注册表；addr/host 的既有回落语义不变。三者都没有 → 不填。
+      const registryEntry = registryForRuntime === undefined ? undefined : findRegistryInstance(registryForRuntime, inst.id)
+      const runtimeVersion = this.readInstanceRuntimeVersion(
+        spec ?? this.instanceSpec(inst.id)
+        ?? (registryEntry === undefined ? undefined : { dshHome: registryEntry.home, profile: registryEntry.profileDir }),
+      )
+      const withRuntime = runtimeVersion === undefined ? withHost : { ...withHost, runtimeVersion }
       const launchAddr = spec?.addr
-      const withAddr = launchAddr ? { ...withHost, addr: launchAddr } : withHost
+      const withAddr = launchAddr ? { ...withRuntime, addr: launchAddr } : withRuntime
       // 标记当前实例（管理端自己）：UI 跳转时排除。
       const withSelf = self !== undefined && inst.id === self ? { ...withAddr, self: true as const } : withAddr
       const override = this.offlineOverride.get(inst.id)
@@ -1300,6 +1331,17 @@ export class ConsoleService extends TypertRemoteService {
     }
   }
 
+  /**
+   * 实例磁盘上实际挂的 runtime 池版本（读 `<dshHome>/profiles/<profile>` 的池软链）。
+   * 自带安装（软链非池内）/无 dshHome/无 profile → undefined。
+   */
+  private readInstanceRuntimeVersion(spec: { dshHome?: string; profile?: string } | undefined): string | undefined {
+    if (spec === undefined) return undefined
+    const { dshHome, profile } = spec
+    if (typeof dshHome !== 'string' || dshHome === '' || typeof profile !== 'string' || profile === '') return undefined
+    return currentRuntimeVersion(join(dshHome, 'profiles', profile)) ?? undefined
+  }
+
   /** 守护本地发行包版本（templateHome 的 profile package.json；不可读返回 undefined）。 */
   private readDaemonPackageVersion(): string | undefined {
     const template = this.config.templateHome
@@ -1459,7 +1501,7 @@ export class ConsoleService extends TypertRemoteService {
     // patch 实例化：端口/身份/令牌（覆盖模板 patch 的实例化值）。
     const patchLines = ['# 实例 patch（deploy 生成）：身份/端口/令牌。']
     if (port !== undefined) patchLines.push(`- id: webserver\n  config: { host: '127.0.0.1', port: ${port} }`)
-    if (token !== '') patchLines.push(`- { "id": "dsh-channel", "config": { "tokens": { "${instanceId}": "${token}" } } }`)
+    if (token !== '') patchLines.push(`- { "id": "dsh-console", "config": { "channel": { "tokens": { "${instanceId}": "${token}" } } } }`)
     writeFileSync(join(homeProfile, 'cordis.patch.yml'), patchLines.join('\n') + '\n')
     // 依赖落地：模板只带三件套，实例要能跑就得把 package.json 里的自研/社区依赖装上。
     // **顺序**：先装依赖，再链接池——否则 npm install 会把池的软链覆盖成真目录。
@@ -2632,12 +2674,12 @@ export class ConsoleService extends TypertRemoteService {
         name: `dsh-agent-${instanceId}`,
         private: true,
         version: ver,
-        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'dsh-console', 'dsh-user'] } },
       }, null, 2) + '\n')
       writeFileSync(resolve(dir, 'cordis.yml'), '[]\n')
       writeFileSync(resolve(dir, 'cordis.patch.yml'), [
-        '# agent 最小集补丁层：实例令牌注入（注册/心跳校验）。',
-        `- { "id": "dsh-channel", "config": { "tokens": { "${instanceId}": "${token}" } } }`,
+        '# agent 最小集补丁层：执行面角色 + 实例令牌注入（只挂通信面）。',
+        `- { "id": "dsh-console", "config": { "role": "agent", "channel": { "tokens": { "${instanceId}": "${token}" } } } }`,
       ].join('\n') + '\n')
       if (name !== '') writeFileSync(resolve(dir, '.dsh-alias'), name + '\n')
     } catch (error) {
@@ -3025,7 +3067,7 @@ function deriveLogLevel(msg: string): LogLevel {
  * 进程内日志落盘：console/daemon 角色的关键事件行追加到本地 .log 文件。
  * 路径：daemon 角色 → `~/.dsh-daemon/daemon.log`；console 角色 →
  * `${DSH_HOME}/console.log`（fallback `~/.dsh/console.log`）。instance 角色
- * 不落盘（实例无管理面，stdin/out 已被守护 spawn 收集到 `~/.dsh-daemon/logs/<id>.log`）。
+ * 与 agent 角色不落盘（无管理面，stdin/out 已被守护 spawn 收集到 `~/.dsh-daemon/logs/<id>.log`）。
  */
 /** 单文件日志上限（超出即滚动到 `<file>.1`；可配）。 */
 export function logMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
@@ -3035,8 +3077,8 @@ export function logMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
 }
 
 export const Logger = {
-  resolvePath(role: 'console' | 'daemon' | 'instance'): string | null {
-    if (role === 'instance') return null
+  resolvePath(role: ConsoleRole): string | null {
+    if (role !== 'console' && role !== 'daemon') return null
     // daemon/console 统一按各自 DSH_HOME（roleDataRoot 缺省 fallback 惯例目录）。
     const isDaemon = role === 'daemon'
     return join(roleDataRoot(isDaemon ? 'daemon' : 'console'), isDaemon ? 'daemon.log' : 'console.log')
@@ -3057,7 +3099,7 @@ export const Logger = {
       return false // 滚动失败不能挂主流程
     }
   },
-  append(role: 'console' | 'daemon' | 'instance', line: string): void {
+  append(role: ConsoleRole, line: string): void {
     const path = Logger.resolvePath(role)
     if (path === null) return
     try {
@@ -3070,7 +3112,7 @@ export const Logger = {
     }
   },
   /** 写一条结构化 JSONL 记录（ts/role/level/scope/msg/category?）。与 append 共用路径。 */
-  record(role: 'console' | 'daemon' | 'instance', entry: { level: LogLevel; scope: string; msg: string; instanceId?: string; category?: string }): void {
+  record(role: ConsoleRole, entry: { level: LogLevel; scope: string; msg: string; instanceId?: string; category?: string }): void {
     const path = Logger.resolvePath(role)
     if (path === null) return
     try {
@@ -3093,5 +3135,26 @@ export const Logger = {
   },
 }
 
-/** 类插件入口：cordis 实例化时自动注册 `ctx.console`（构造即注册，勿再 provide）。 */
-export default ConsoleService
+/**
+ * 合并包入口（原 dsh-channel + dsh-console）：先挂通信面（`ctx.channel`），
+ * 再按角色挂管理面。`role: 'agent'` 是被引导出来的执行面主机——只要通信面
+ * （注册/心跳/事件总线/指令接收），不启管理面（档案/生命周期/HTTP）。
+ * @param ctx - 根上下文。
+ * @param config - 合并后的插件配置（管理面 + `channel` 通信面）。
+ */
+export function apply(ctx: Context, config: Config): void {
+  ctx.plugin(ChannelService, (config.channel ?? {}) as ChannelConfig)
+  if (config.role !== 'agent') ctx.plugin(ConsoleService, config)
+}
+
+// 通信面（原 dsh-channel）对外的公共 API：显式名单，不用 `export *`——channel 也导出
+// Config，星导出会被本文件的合并 Config 静默遮蔽（既有消费方只用到下列符号）。
+export {
+  ChannelService,
+  EVENT_TTL_MS,
+  MAX_WORKER_INSTANCES,
+  hostAgentId,
+  instanceIdFromEnv,
+  isHostAgent,
+} from './channel/index.js'
+export type { ChannelEvent, ControlOutcome, InstanceIdentity, WorkerInstanceReport, WorkerReport } from './channel/index.js'

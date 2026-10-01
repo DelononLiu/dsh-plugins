@@ -6,8 +6,8 @@
  * 测试里用手写 `.infostring` 造现场曾让"语言名读不到"的缺陷测试全绿却在真机不渲染。
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import { INLINE_ATTR, INLINE_IMG_ATTR, INLINE_VIEW_ATTR, languageOf, scanInline, sourceOf, startInlineShow } from '../src/client/inline.ts'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { INLINE_ATTR, INLINE_IMG_ATTR, INLINE_VIEW_ATTR, languageOf, resetHookWarning, scanInline, sourceOf, startInlineShow } from '../src/client/inline.ts'
 
 /**
  * 造一个官方 `CodeBlock` 形状的代码块（类名照 <dsh-web-frontend> 实产）。
@@ -51,12 +51,34 @@ function codeBlock(lang: string, code: string, streaming = false): HTMLElement {
 const PLAN = '# 统一升级引擎验收\n## 步骤\n- [x] 事务\n- [~] 真机复验\n'
 
 describe('官方 DOM 钩子解析', () => {
-  beforeEach(() => { document.body.innerHTML = '' })
+  beforeEach(() => { resetHookWarning(); document.body.innerHTML = '' })
 
   it('语言名取标题栏 infostring（哈希类名）；原文取 pre code', () => {
     const block = codeBlock('Show-Me', PLAN)
     expect(languageOf(block)).toBe('show-me')
     expect(sourceOf(block)).toBe(PLAN)
+  })
+
+  it('官方语言名钩子缺失时告警一次（把静默失效变可见）', () => {
+    resetHookWarning()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const bare = document.createElement('div')
+    bare.className = 'md-code-block'
+    bare.appendChild(document.createElement('pre'))
+    document.body.appendChild(bare)
+    scanInline(document)
+    scanInline(document)
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it('钩子齐备时不告警', () => {
+    resetHookWarning()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    codeBlock('show-me', PLAN)
+    scanInline(document)
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 
   it('无标题栏时语言名为空串（不误判成约定围栏）', () => {

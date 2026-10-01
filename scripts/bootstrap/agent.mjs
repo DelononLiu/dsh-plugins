@@ -4,7 +4,8 @@
  *
  * 部署链路（已定）：SSH（仅一次性引导）→ 装最小 agent → 之后全走
  * agent/channel。最小 agent = 发行包 headless host 实例（agent 组件集：
- * dsh-base + dsh-channel + dsh-user，无 console/UI——执行面）。
+ * dsh-base + dsh-console + dsh-user；console 条目以 `role: 'agent'` 只挂
+ * 通信面，管理面不启——执行面）。
  *
  * 本脚本在控制面侧生成 agent 部署物（profile 模板 + 实例令牌 + SSH
  * 引导命令序列），供 console/运维执行：
@@ -19,7 +20,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
-const AGENT_BUNDLES = ['@deepseek-ai/dsh-base', 'dsh-channel', 'dsh-user']
+const AGENT_BUNDLES = ['@deepseek-ai/dsh-base', 'dsh-console', 'dsh-user']
 
 function parseArgs(argv) {
   const args = {}
@@ -59,7 +60,7 @@ export async function buildAgentProfile(instanceId, token, version = '0.0.0') {
   await writeFile(resolve(dir, 'cordis.yml'), '[]\n')
   await writeFile(resolve(dir, 'cordis.patch.yml'), [
     '# agent 最小集补丁层：实例令牌注入（注册/心跳校验）。',
-    `- { "id": "dsh-channel", "config": { "tokens": { "${instanceId}": "${token}" } } }`,
+    `- { "id": "dsh-console", "config": { "role": "agent", "channel": { "tokens": { "${instanceId}": "${token}" } } } }`,
   ].join('\n') + '\n')
   return dir
 }

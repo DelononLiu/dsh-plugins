@@ -29,7 +29,7 @@ console 组装好 daemon 落地所需一切（dshHome 路径/端口/身份/令�
 daemon 收 deploy（新增 case）：
 1. **运行时清单** `runtimeInstances: Map<id, LaunchSpec>`（初始 = config.instances），deploy 动态加（不改静态 config；重启后 console 重新下发，v1 不持久化）。
 2. **建 dshHome**：`mkdir ~/.dsh-<id>/profiles/web`，复制 profile 骨架（web 实例的 package.json/cordis.yml/patch 模板——几 KB 配置）。
-3. **patch 实例化**：写该实例的 patch（port/DSH_RELAY_AGENT/令牌/DSH_CONSOLE_ADDR）——console 在请求里给实例化值，daemon 写入。
+3. **patch 实例化**：写该实例的 patch（port/DSH_CHANNEL_ID/令牌/DSH_CONSOLE_ADDR）——console 在请求里给实例化值，daemon 写入。
 4. **node_modules 复用**：新实例引用 daemon 本地已装发行包的 node_modules（pnpm link / 同 tree 引用）——零下载（测试环境 web2/3/4 正是此模式）。
 5. **拉起**：复用 `daemonStart`（`DSH_HOME=~/.dsh-<id> dsh --profile web`）→ 注册 → 控制台出现。
 

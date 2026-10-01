@@ -52,6 +52,10 @@ function InstanceRow(props: {
   // 行尾「⋯」菜单展开状态（单开：记录展开的实例 id 由 ConsolePanel 管理更简——
   // 这里用本地 state，点击其它行自然收起？多行各自独立——用 id 匹配外部更干净，见 onMore 语义）。
   const [menuOpen, setMenuOpen] = useState(false)
+  // 版本胶囊显示 runtime 池版本优先（磁盘实际挂载，离线也有）；两者皆缺回退占位符。
+  // tooltip 写清两个来源（缺哪个写"未登记/未上报"）。
+  const verLabel = item.runtimeVersion ?? item.version ?? '—'
+  const verTitle = `runtime: ${item.runtimeVersion ?? '未登记'} · 实例自报: ${item.version ?? '未上报'}`
   // 操作列固定宽度、按"列"渲染：版本胶囊 / 跳转 / 启停 / 重启 / ⋯ 五个槽位
   // 在每行里都存在（不可用 disabled 灰显留位占），保证三行同名列横坐标一致。
   const canMore = !!onMore
@@ -62,7 +66,7 @@ function InstanceRow(props: {
         <div className="name">{item.name}</div>
         <div className="meta">{opLabel ?? (online ? '在线' : '离线')} · {machineName ?? item.host ?? item.id}{item.self ? ' · 当前实例' : ''}</div>
       </div>
-      <span className="dsh-console-ver" title={item.version ?? ''}>{item.version ?? '—'}</span>
+      <span className="dsh-console-ver" title={verTitle}>{verLabel}</span>
       <button
         type="button"
         className="dsh-console-btn dsh-console-act"
@@ -349,7 +353,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
       const r = await host.deployInstance({
         host: targetHost, instanceId: id, name: id, version: newInstVersion, profile: newInstTemplate,
         dshHome: `/home/long2015/.dsh-home/instance-${id}`, port: Number(newInstPort), token: Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2),
-        addr: `http://127.0.0.1:${newInstPort}`, env: { DSH_RELAY_AGENT: id, DSH_CONSOLE_ADDR: 'http://127.0.0.1:3082' },
+        addr: `http://127.0.0.1:${newInstPort}`, env: { DSH_CHANNEL_ID: id, DSH_CONSOLE_ADDR: 'http://127.0.0.1:3082' },
       })
       setNewInstResult(r.ok ? `已下发部署 ${id}（daemon 将拉起）` : `部署失败：${r.error ?? 'unknown'}`)
     } catch (e) {

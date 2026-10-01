@@ -25,5 +25,5 @@ dsh-channel 的事件总线投递语义未定（at-least-once？顺序？），�
 
 ## Consequences
 
-- dsh-channel 事件总线按此语义实现；§9 事件总线项已勾除。
-- **实现落地（2026-08-21）**：ChannelService 类插件（static Config + default export，cordis 自动注册 ctx.channel）；进程内实现——实例注册/心跳/发现（InstanceIdentity + 令牌校验）、事件总线（emit/subscribe/ack 幂等 + TTL 三平面）、控制指令回环（sendControl/onControl）；12 项单测通过。跨实例物理传输（agent↔console）与 Typert 远程化留待 agent/传输层与 nav/console-ui 消费时接入。
+- dsh-console 通信面事件总线按此语义实现；§9 事件总线项已勾除。
+- **实现落地（2026-08-21）**：ChannelService 类插件（static Config + default export，cordis 自动注册 ctx.channel；2026-10 起位于 `packages/dsh-console/src/channel/`，由 console 入口 `apply` 挂为 `ctx.channel`）；进程内实现——实例注册/心跳/发现（InstanceIdentity + 令牌校验）、事件总线（emit/subscribe/ack 幂等 + TTL 三平面）、控制指令回环（sendControl/onControl）；12 项单测通过。跨实例物理传输（agent↔console）与 Typert 远程化留待 agent/传输层与 nav/console-ui 消费时接入。

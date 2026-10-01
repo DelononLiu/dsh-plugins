@@ -26,15 +26,16 @@ completion 三类，客户端把围栏渲染成图片就地插进消息流——
   但它是第三人称视角（谁在看没说）；`show-me` 直接对上需求。
 - **能力范围统一为"复杂内容 → 简化呈现"**：判断面（plan / verify / completion 的条目与证据）
   与理解面（把话题讲成图）共用同一 `Artifact` 模型与同一围栏，名字同时容下两者。
-- **四个面一次改名**：包名与目录 `dsh-show-me`、围栏 ` ```show-me `、提示词段 `show-me:format`、
-  工具 `show_me`、端点 `/api/show-me/artifacts`。类型 `Artifact` **不动**——内容模型叫 Artifact、
-  动作叫 show_me，分工干净。
+- **改名面**：包名与目录 `dsh-show-me`、围栏 ` ```show-me `、提示词段 `show-me:format`。
+  类型 `Artifact` **不动**——内容模型叫 Artifact。（当时一并改名的工具 `show_me` 与端点
+  `/api/show-me/artifacts` 已于 2026-10 删除：没有 UI 消费的产物存储是陷阱，插件收敛为
+  「提示词约定 + 围栏渲染」，见 [场景与分期 note](../../proposed/feature/2026-09-13-dsh-plan-show-scenarios-and-directions.md) §14。）
 - **旧围栏名 `plan-show` 保留为 legacy 别名**（`LEGACY_FENCES`）：旧会话里已落盘的围栏继续出图，
   改名的代价不转嫁给历史消息；两条测试钉住这条兼容路径。
 - **对外叙事改成"复杂 → 简化 → 我看"**：提示词段标题改为「复杂内容要简化呈现（show-me）」，
-  触发条件写成"内容复杂到读不下去时（长方案、多步计划、大范围改动、一堆证据）"；工具描述、
-  `summary` 参数说明与工具回执同步改写（回执原写着"侧栏「Show」面板查看"——面板早已删除，
-  属陈旧文案）。审批语义保留为 verify / completion 的增强，不再当主叙事。
+  触发条件写成"内容复杂到读不下去时（长方案、多步计划、大范围改动、一堆证据）"。审批语义
+  保留为 verify / completion 的增强，不再当主叙事。（当时同步改写的工具描述、`summary`
+  参数说明与工具回执已随工具一并删除。）
 
 ## Alternatives
 

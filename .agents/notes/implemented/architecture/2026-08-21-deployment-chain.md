@@ -28,7 +28,7 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 ## Consequences
 
 - 部署状态机：主机登记 → SSH 引导装 agent → agent 上线注册 → 按需创建实例 → 升级（版本矩阵整体推进）→ 下线/移除。
-- agent 最小组件集 = dsh-base + dsh-channel + dsh-user（见 [agent-minimal-set](2026-08-21-agent-minimal-set.md)）。
+- agent 最小组件集 = dsh-base + dsh-console（`role: 'agent'`）+ dsh-user（见 [agent-minimal-set](2026-08-21-agent-minimal-set.md)；channel 已并入 dsh-console，见 [merge-channel-into-console](2026-10-01-merge-channel-into-console.md)）。
 - 升级回滚 = 快照→patch 校验→滚动重启→心跳确认→失败回滚（保留 3 份，见 [distro-version-mechanism](../process/2026-08-21-distro-version-mechanism.md)）。
 
 相关：[团队发行包定位](2026-08-21-team-distribution-package.md) · [实例模型](2026-08-21-instance-model.md)

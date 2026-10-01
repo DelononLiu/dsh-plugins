@@ -59,8 +59,8 @@ layout(legacy|home) · addr · status`。删除留 **tombstone**（档案不物�
 **9. broker 退场（彻底，不留扩展点）。** 移除 `dsh-profile.sh` 的 `RELAY_BROKER_URL`/`RELAY_SECRET` 与
 `DSH_RELAY_*` 注入、channel 的 broker 兜底代码、`brokerStatus` 公共面及其 console 客户端消费
 （`ConsoleBadge.tsx` / `ConsolePanel.tsx` / `client/types.ts`——实测调用结果本就被丢弃）。
-`DSH_RELAY_AGENT`（实为实例 id 载体）更名 **`DSH_CHANNEL_ID`，旧名兼容读**，因此 daemon patch 与
-老实例零改动。传输面 = 直连 + hub/worker，**不预留可插拔后端接口**。
+实例 id 的 env 载体唯一名为 **`DSH_CHANNEL_ID`**（旧名 `DSH_RELAY_AGENT` 已于 2026-10 删除，
+不再兼容读）。传输面 = 直连 + hub/worker，**不预留可插拔后端接口**。
 
 **10. `readLog` 直接改签名（同步 → async），同批同铺。** channel/console/UI/daemon 必须同一批铺开，
 混跑旧包会报方法不存在 → **该批回滚 = 整批回滚**，不是单文件回退。
@@ -74,6 +74,8 @@ gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与
 
 **13. UI**：创建向导 = 名称 / 模板 / 版本（**必选，默认最新**）/ 端口 / **主机下拉（默认本机，列出已注册主机）**；
 已删除实例**默认隐藏**并另给「已删除」筛选；**列表不展示布局徽标**（并存期靠档案 `layout` 字段判读）。
+实例行的版本胶囊显示**磁盘 runtime 池版本** `runtimeVersion`（读 `<dshHome>/profiles/<profile>` 的池软链，
+**离线也算得出来**；自带安装/无 dshHome 为 undefined，UI 回退实例自报 `version`），tooltip 分别标注两者来源。
 
 ## 批次表（方案 = 这张表，实现只是执行）
 
@@ -173,7 +175,7 @@ gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与
   端口释放，上限 5s），超时即放弃归档并显式失败——绝不归档活实例。
 - **异步下发谎报成功**（阻塞）：管理事件新增「已受理」态——下发型操作不再记「成功」，真实结果由执行面
   另记一条；`deleteInstance` 的返回文案同步改为「已下发守护 X（异步；完成态见列表/墓碑）」。
-- 顺手清理：`void spec` 残留、`DSH_RELAY_AGENT` 不再被**新写入**（只保留兼容读）、e2e 脚本两处假绿判据
+- 顺手清理：`void spec` 残留、实例 id 只用 `DSH_CHANNEL_ID`、e2e 脚本两处假绿判据
   （`||` 二选一、全局 `pgrep`）改为确定性断言（池状态 + 本次实例端口监听）。
 - 回归用例：新增 console 角色删除路由（断言派发到 `host-master`、不是 `host-<hostname>`、事件记「已受理」
   而非「成功」）+ 守护不可达时显式失败且目录/档案原样。

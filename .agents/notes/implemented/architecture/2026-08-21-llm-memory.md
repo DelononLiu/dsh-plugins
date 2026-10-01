@@ -23,6 +23,6 @@ Status: implemented
 
 ## Consequences
 
-- 系统层组件 = dsh-user + dsh-channel（自研）+ 认证网关 + 远程访问 + **LLM 记忆（dsh-memento）**（社区）。
+- 系统层组件 = dsh-user（自研身份）+ 认证网关 + 远程访问 + **LLM 记忆（dsh-memento）**（社区）；通信面 2026-10 并入管理组件 dsh-console（见 [merge-channel-into-console](2026-10-01-merge-channel-into-console.md)）。
 - 文档同步：architecture.md §1 分层图 / §5 社区采用表、AGENTS.md 系统层行。
 - vendored/ 落地清单增加 dsh-memento（submodule）。

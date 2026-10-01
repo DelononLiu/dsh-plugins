@@ -16,7 +16,7 @@ const LOCK = {
   bundles: {
     '@deepseek-ai/dsh-base': '0.1.0-rc.8',
     'dsh-user': '0.0.0',
-    'dsh-channel': '0.1.0-rc.1',
+    'dsh-console': '0.1.0-rc.1',
     '@linxin666/dsh-web-ui-all': '0.2.5',
   },
   vendored: {},
@@ -28,7 +28,7 @@ test('bumpLock patch：自研 bump、官方/社区不动', async () => {
   await writeFile(file, JSON.stringify(LOCK))
   try {
     const { changed } = await bumpLock(file, 'patch')
-    assert.deepEqual(changed, ['dsh-user: 0.0.0 → 0.0.1', 'dsh-channel: 0.1.0-rc.1 → 0.1.0-rc.2'])
+    assert.deepEqual(changed, ['dsh-user: 0.0.0 → 0.0.1', 'dsh-console: 0.1.0-rc.1 → 0.1.0-rc.2'])
     const updated = JSON.parse(await readFile(file, 'utf8'))
     assert.equal(updated.bundles['dsh-user'], '0.0.1')
     assert.equal(updated.bundles['@deepseek-ai/dsh-base'], '0.1.0-rc.8')

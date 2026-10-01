@@ -14,11 +14,10 @@
           cookieName: dsh_gw_sid
           secretFile: gateway/state.json
           hmacSecret: ''
-    - id: dsh-channel
-      name: dsh-channel
     - id: dsh-console
       name: dsh-console
       config:
+        role: console
         launch:
           host1:
             host: host1
@@ -34,16 +33,18 @@
             dshHome: /home/long2015/.dsh-web3
             profile: web3
             env:
-              DSH_RELAY_AGENT: web3
+              DSH_CHANNEL_ID: web3
           web2:
             host: host1
             addr: http://127.0.0.1:3082
             dshHome: /home/long2015/.dsh-web2
             profile: web2
             env:
-              DSH_RELAY_AGENT: web2
+              DSH_CHANNEL_ID: web2
     - id: dsh-focus-session
       name: dsh-focus-session
+    - id: dsh-show-me
+      name: dsh-show-me
 - id: webserver
   config:
     host: '127.0.0.1'

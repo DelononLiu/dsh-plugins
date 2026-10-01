@@ -58,7 +58,7 @@ function rowOf(item: ArtifactItem, evidence: { pass: number; fail: number; total
   const status = STATUS_COLOR[item.status]
   const y = 0 // 由调用方 translate
   const badge = evidence.total === 0
-    ? `<text x="${COL - 14}" y="${y + 21}" text-anchor="end" font-size="11" fill="${MUTED}">无证据</text>`
+    ? `<text x="${COL - 14}" y="${y + 21}" text-anchor="end" font-size="11" fill="${MUTED}">未验证</text>`
     : `<text x="${COL - 14}" y="${y + 21}" text-anchor="end" font-size="11" fill="${evidence.fail > 0 ? STATUS_COLOR.blocked : STATUS_COLOR.done}">证据 ${evidence.pass}/${evidence.total}${evidence.fail > 0 ? '（有失败）' : ''}</text>`
   return [
     `<circle cx="14" cy="${y + 17}" r="5" fill="${status}"/>`,

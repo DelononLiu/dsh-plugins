@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import type {} from 'dsh-channel/remote'
+import type {} from 'dsh-console/remote'
 import { QuickNav, type InstanceLink, type QuickNavHost } from './QuickNav'
 
 /** 需要的 client 服务：插槽注册。 */

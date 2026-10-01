@@ -5,12 +5,16 @@
 
 import { describe, expect, it } from 'vitest'
 import { artifactImageUrl, artifactSvg, escapeXml, svgToImageDataUrl } from '../src/client/diagram.ts'
-import { normalizeArtifact, type Artifact } from '../src/types.ts'
+import type { Artifact } from '../src/types.ts'
 
+/** 验收矩阵的测试产物：四个条目覆盖 done/doing/blocked 与"有/无证据"两态。 */
 function artifact(): Artifact {
-  return normalizeArtifact({
+  return {
+    id: 'a1',
     kind: 'verify',
     title: '统一升级引擎 v1 验收',
+    summary: '',
+    sections: [],
     items: [
       { id: 'i1', text: '升级事务（快照/对齐/滚动重启）', status: 'done' },
       { id: 'i2', text: '失败自动回滚', status: 'done' },
@@ -18,11 +22,15 @@ function artifact(): Artifact {
       { id: 'i4', text: '阻塞项 <需要人确认>', status: 'blocked' },
     ],
     evidence: [
-      { label: 'daemon 日志', value: 'ok', result: 'pass', itemId: 'i1' },
-      { label: 'pnpm test', value: '49 passed', result: 'pass', itemId: 'i2' },
-      { label: 'pnpm build', value: 'boom', result: 'fail', itemId: 'i3' },
+      { id: 'e1', kind: 'command', label: 'daemon 日志', value: 'ok', result: 'pass', itemId: 'i1' },
+      { id: 'e2', kind: 'command', label: 'pnpm test', value: '49 passed', result: 'pass', itemId: 'i2' },
+      { id: 'e3', kind: 'command', label: 'pnpm build', value: 'boom', result: 'fail', itemId: 'i3' },
     ],
-  })
+    decisions: [],
+    openQuestions: [],
+    markdown: '',
+    producedAt: 1,
+  }
 }
 
 describe('escapeXml', () => {
@@ -48,11 +56,11 @@ describe('artifactSvg', () => {
     expect(svg).toContain('fill="#dc2626"') // blocked
   })
 
-  it('证据计数：有证据显示 pass/total，无证据显式写"无证据"，有失败标出', () => {
+  it('证据计数：有证据显示 pass/total，无证据显式写"未验证"，有失败标出', () => {
     const svg = artifactSvg(artifact())
     expect(svg).toContain('证据 1/1')
     expect(svg).toContain('证据 0/1（有失败）')
-    expect(svg).toContain('无证据')
+    expect(svg).toContain('未验证')
   })
 
   it('标题与条目文案被转义（`<需要人确认>` 不会破图）', () => {
@@ -62,7 +70,10 @@ describe('artifactSvg', () => {
   })
 
   it('没有条目时给明确占位而不是空图', () => {
-    const svg = artifactSvg(normalizeArtifact({ kind: 'plan', title: '空方案' }))
+    const svg = artifactSvg({
+      id: 'a2', kind: 'plan', title: '空方案', summary: '', sections: [],
+      items: [], evidence: [], decisions: [], openQuestions: [], markdown: '', producedAt: 1,
+    })
     expect(svg).toContain('（这份产物没有条目）')
   })
 })

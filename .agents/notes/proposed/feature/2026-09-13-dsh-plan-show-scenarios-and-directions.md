@@ -237,5 +237,6 @@ markdown→模型解析器（带单测）+ 三视图切换（提案卡/看板/�
   dsh-show-me。
 - **dev 实例坑记档**：`dsh plugin add` 会把依赖写进 `dsh.profile.bundles`，与 patch 的 insert
   行重复加载 → webserver 路由冲突启动失败；需记文档并考虑修脚本/CLI。
-- **面板删除后的悬空面**：工具 `show_me` 与只读端点 `/api/show-me/artifacts` 暂无 UI
-  消费方（保留待用）；若日后要"历史产物"界面再定。
+- **~~面板删除后的悬空面~~ 已解决（2026-10）**：工具 `show_me`、`ArtifactStore` 与只读端点
+  `/api/show-me/artifacts` 一并删除——没有 UI 消费的产物存储是陷阱（模型调工具、回执说
+  "已呈现"、用户却什么也看不到）；插件收敛为「提示词约定 + 围栏渲染」。

@@ -28,12 +28,16 @@ process.env.DSH_HOST_ID = 'master'
 delete process.env.DSH_SESSION_ID
 delete process.env.DSH_CHANNEL_ID
 
-const { default: ConsoleService } = await import(join(REPO, 'packages/dsh-console/lib/index.js'))
-const { default: ChannelService } = await import(join(REPO, 'packages/dsh-channel/lib/index.js'))
+const { apply } = await import(join(REPO, 'packages/dsh-console/lib/index.js'))
 
 const ctx = new Context()
-await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
-await ctx.plugin(ConsoleService, { role: 'daemon', hostId: 'master', templateHome: join(REPO, 'profiles') })
+// 合并后的入口：apply 先挂通信面（原 dsh-channel），再按 role 挂管理面。
+await ctx.plugin(apply, {
+  role: 'daemon',
+  hostId: 'master',
+  templateHome: join(REPO, 'profiles'),
+  channel: { tokens: {}, heartbeatTimeoutMs: 30_000 },
+})
 const c = ctx.console
 let failed = 0
 const step = (n, ok, extra = '') => {

@@ -12,12 +12,12 @@ import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir, homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import ChannelService from 'dsh-channel'
+import ChannelService from '../src/channel/index.js'
 import { currentRuntimeVersion, importRuntime, linkRuntimeInto } from '../src/runtimes.js'
 import { findInstance, loadRegistry, saveRegistry, upsertInstance } from '../src/registry.js'
 import * as logView from '../src/client/logView.js'
 import { listArchives as modelArchives } from '../src/lifecycle.js'
-import ConsoleService, {
+import { ConsoleService,
   applyOverrideStatus,
   resolveControlAction,
   Logger,
@@ -108,7 +108,7 @@ describe('生命周期/部署编排', () => {
     ctx.channel.onControl((cmd) => received.push({ type: cmd.type, payload: cmd.payload }))
     ctx.console.deployInstance({
       host: 'host1', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
-      dshHome: '/tmp/.dsh-web6-test', port: 3086, token: 'tok-web6', env: { DSH_RELAY_AGENT: 'web6' },
+      dshHome: '/tmp/.dsh-web6-test', port: 3086, token: 'tok-web6', env: { DSH_CHANNEL_ID: 'web6' },
     })
     expect(ctx.console.getInstanceRecord('web6')?.version).toBe('0.1.2-rc.1')
     expect(received[0].type).toBe('deploy')
@@ -345,13 +345,13 @@ describe('daemon 角色（主机守护）', () => {
     await ctx.plugin(ConsoleService, {
       role: 'daemon',
       hostId: 'lab1',
-      instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', env: { DSH_RELAY_AGENT: 'web3' } } },
+      instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web', env: { DSH_CHANNEL_ID: 'web3' } } },
     })
     ctx.channel.sendControl('host-lab1', { type: 'start', payload: { instanceId: 'web3' } })
     await new Promise((r) => setTimeout(r, 20))
     // 有档案版本且池内有该版本 → 用**池内 CLI** 启动（R7：实例按引用版本跑，而不是守护/PATH 的 CLI）
     expect(spawnSpy).toHaveBeenCalledWith('dsh', ['--profile', 'web'], expect.objectContaining({
-      env: expect.objectContaining({ DSH_HOME: '~/.dsh-web3', DSH_RELAY_AGENT: 'web3' }),
+      env: expect.objectContaining({ DSH_HOME: '~/.dsh-web3', DSH_CHANNEL_ID: 'web3' }),
       detached: true,
     }))
   })
@@ -492,14 +492,14 @@ describe('daemon 角色（主机守护）', () => {
     // console 端组装完整 deploy 请求 → daemon 收（channel 回环到 onControl）。
     ctx.console.deployInstance({
       host: 'host1', instanceId: 'web6', version: '0.1.2-rc.1', profile: 'web',
-      dshHome: '/tmp/.dsh-web6-deploy', port: 3086, token: 'tok-web6', env: { DSH_RELAY_AGENT: 'web6' },
+      dshHome: '/tmp/.dsh-web6-deploy', port: 3086, token: 'tok-web6', env: { DSH_CHANNEL_ID: 'web6' },
     })
     await new Promise((r) => setTimeout(r, 30))
     expect(spawnSpy).toHaveBeenCalledWith(
       join(process.env.HOME ?? '', '.dsh-runtimes', '0.1.2-rc.1', 'node_modules', '.bin', 'dsh'),
       ['--profile', 'web'],
       expect.objectContaining({
-      env: expect.objectContaining({ DSH_HOME: '/tmp/.dsh-web6-deploy', DSH_RELAY_AGENT: 'web6' }),
+      env: expect.objectContaining({ DSH_HOME: '/tmp/.dsh-web6-deploy', DSH_CHANNEL_ID: 'web6' }),
       detached: true,
     }))
     // 动态实例后续可被 stop/restart（instanceSpec 命中运行时清单）。
@@ -744,10 +744,10 @@ describe('统一升级（console 编排）', () => {
 })
 
 describe('review 修复回归（去 broker 化边界）', () => {
-  it('instance 角色经 env DSH_RELAY_AGENT 识别本机：直连本体 restart 短路自退（无守护/无 broker）', async () => {
+  it('instance 角色经 env DSH_CHANNEL_ID 识别本机：直连本体 restart 短路自退（无守护/无 broker）', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
-    const prev = process.env.DSH_RELAY_AGENT
-    process.env.DSH_RELAY_AGENT = 'web3'
+    const prev = process.env.DSH_CHANNEL_ID
+    process.env.DSH_CHANNEL_ID = 'web3'
     const ctx = new Context()
     await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
     await ctx.plugin(ConsoleService, { role: 'instance' })
@@ -758,20 +758,20 @@ describe('review 修复回归（去 broker 化边界）', () => {
     expect(exitSpy).toHaveBeenCalled()
     expect((result as { ok: boolean }).ok).toBe(true)
     exitSpy.mockRestore()
-    if (prev === undefined) delete process.env.DSH_RELAY_AGENT; else process.env.DSH_RELAY_AGENT = prev
+    if (prev === undefined) delete process.env.DSH_CHANNEL_ID; else process.env.DSH_CHANNEL_ID = prev
   })
 
   it('daemon 角色不短路自己（env id 不触发自杀）', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
-    const prev = process.env.DSH_RELAY_AGENT
-    process.env.DSH_RELAY_AGENT = 'host1'
+    const prev = process.env.DSH_CHANNEL_ID
+    process.env.DSH_CHANNEL_ID = 'host1'
     const ctx = await bootDaemon({ instances: { web3: { dshHome: '~/.dsh-web3', profile: 'web' } } })
     const result = (ctx.console as unknown as { controlInstance(id: string, c: string, p: object): unknown }).controlInstance('host1', 'restart', {})
     await new Promise((r) => setTimeout(r, 400))
     expect(exitSpy).not.toHaveBeenCalled()
     expect((result as { ok: boolean }).ok).toBe(false) // 无守护配置 → 显式失败，不自杀
     exitSpy.mockRestore()
-    if (prev === undefined) delete process.env.DSH_RELAY_AGENT; else process.env.DSH_RELAY_AGENT = prev
+    if (prev === undefined) delete process.env.DSH_CHANNEL_ID; else process.env.DSH_CHANNEL_ID = prev
   })
 
   it('直连探测：可达 → heartbeat 续期保持 online；不可达 → 立即 setStatus(offline)（不假绿）', async () => {
@@ -893,6 +893,62 @@ describe('review 修复回归（去 broker 化边界）', () => {
     ctx[Symbol.dispose]?.()
   })
 
+})
+
+describe('实例列表 runtime 版本（磁盘池软链，离线也算得出来）', () => {
+  it('runtimeVersion 读 profile 池软链；拿不到目录 / 自带安装 / 无 dshHome 不填', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-console-rtver-'))
+    try {
+      process.env.DSH_RUNTIMES = join(tmp, 'runtimes')
+      const nm = join(tmp, 'cli', 'node_modules')
+      for (const name of ['dsh', 'dsh-base']) {
+        mkdirSync(join(nm, '@deepseek-ai', name), { recursive: true })
+        writeFileSync(join(nm, '@deepseek-ai', name, 'package.json'), JSON.stringify({ name: `@deepseek-ai/${name}`, version: '0.1.7-rc.2' }))
+      }
+      expect(importRuntime({ version: '0.1.7-rc.2', source: join(tmp, 'cli') }).ok).toBe(true)
+      // 实例 A：官方包软链引用池 → 离线也应算得出池版本
+      const homeA = join(tmp, 'home-a')
+      const profileA = join(homeA, 'profiles', 'web')
+      mkdirSync(join(profileA, 'node_modules'), { recursive: true })
+      expect(linkRuntimeInto(profileA, '0.1.7-rc.2').ok).toBe(true)
+      // 实例 B：自带安装（@deepseek-ai/dsh 是真目录，非池软链）→ 不填
+      const homeB = join(tmp, 'home-b')
+      const profileB = join(homeB, 'profiles', 'web')
+      mkdirSync(join(profileB, 'node_modules', '@deepseek-ai', 'dsh'), { recursive: true })
+      writeFileSync(join(profileB, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.1.6-rc.1' }))
+      const ctx = new Context()
+      await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+      await ctx.plugin(ConsoleService, {
+        launch: {
+          'inst-a': { dshHome: homeA, profile: 'web' },
+          'inst-b': { dshHome: homeB, profile: 'web' },
+          // 实例 C：spec 在但 profile 目录不存在（拿不到目录）→ 不填
+          'inst-c': { dshHome: join(tmp, 'missing-home'), profile: 'web' },
+        },
+      })
+      // 纯 channel 注册的外部实例：不属于任何部署规格（无 dshHome）→ 不填
+      ctx.channel.declare({ id: 'external-x', name: 'external-x', addr: 'http://127.0.0.1:3199', status: 'online' })
+      const view = ctx.console.listInstances()
+      const byId = (id: string) => view.instances.find((i) => i.id === id)
+      expect(byId('inst-a')?.runtimeVersion).toBe('0.1.7-rc.2')
+      expect(byId('inst-a')?.status).toBe('offline') // 离线也算得出来（与自报 version 的关键区别）
+      expect(byId('inst-b')?.runtimeVersion).toBeUndefined()
+      expect(byId('inst-c')?.runtimeVersion).toBeUndefined()
+      expect(byId('external-x')?.runtimeVersion).toBeUndefined()
+      // 注册表兜底：不在 launch / 部署清单里，但注册表登记了 home+profileDir 的实例也读得出
+      // （例如注册表并入、配置未列的离线行）。
+      ctx.channel.declare({ id: 'registry-only', name: 'registry-only', addr: '', status: 'offline' })
+      const reg = loadRegistry()
+      upsertInstance(reg, { id: 'registry-only', host: 'master', home: homeA, profileDir: 'web' })
+      saveRegistry(reg)
+      const view2 = ctx.console.listInstances()
+      expect(view2.instances.find((i) => i.id === 'registry-only')?.runtimeVersion).toBe('0.1.7-rc.2')
+      ctx[Symbol.dispose]?.()
+    } finally {
+      delete process.env.DSH_RUNTIMES
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('Logger（关键事件落盘）', () => {

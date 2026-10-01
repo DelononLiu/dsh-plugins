@@ -13,7 +13,7 @@ Status: implemented
 | 插件 | 层 | 名 | 命名要点 |
 | --- | --- | --- | --- |
 | 身份 | 系统 | **dsh-user** | npm/GitHub 无占用 |
-| 通信 | 系统 | **dsh-channel** | 保留原名（dsh- 为自研家族标记，社区 ZinkLu/dsh-channel 是 IM 消息渠道，语义不同，不影响） |
+| 通信 | 系统 | **dsh-channel** | 保留原名（dsh- 为自研家族标记，社区 ZinkLu/dsh-channel 是 IM 消息渠道，语义不同，不影响）；2026-10 整包并入 dsh-console，名字停用，见 [merge-channel-into-console](../architecture/2026-10-01-merge-channel-into-console.md) |
 | 管理 | 管理组件 | **dsh-console** | 原 dsh-hub（npm 被 @marecgents/dsh-hub 占、GitHub "hub"=插件市场语义垄断） |
 | 导航 | UI（档案读端） | **dsh-nav** | 无占用（社区 dsh-navbar 不同名） |
 | 标签页 | UI | **dsh-tabs** | 原 dsh-session-tabs（短、与 nav 风格统一） |

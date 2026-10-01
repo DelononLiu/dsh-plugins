@@ -100,8 +100,13 @@ export interface ConsoleInstanceViewItem {
   addr: string
   /** 在线状态（含离线覆盖）。 */
   status: 'online' | 'offline'
-  /** 发行包版本。 */
+  /** 发行包版本（实例自报，仅在线注册后有值；离线为 undefined）。 */
   version?: string
+  /**
+   * 该实例**磁盘上实际挂的 runtime 池版本**（读 profile 目录的池软链；实例自带安装时为
+   * undefined）。与 `version`（实例自报，仅在线有）不同，这个**离线也算得出来**。
+   */
+  runtimeVersion?: string
   /** 归属者用户 id（全部实例皆 personal）。 */
   owner?: string
   /** 实例类型。 */
@@ -174,7 +179,7 @@ export interface DeployInstanceRequest {
   port?: number
   /** 实例令牌（32 hex，注册/心跳校验；daemon 写入实例 patch）。 */
   token: string
-  /** 额外环境变量（如 DSH_RELAY_AGENT/DSH_CONSOLE_ADDR）。 */
+  /** 额外环境变量（如 DSH_CHANNEL_ID/DSH_CONSOLE_ADDR）。 */
   env?: Record<string, string>
 }
 
@@ -274,3 +279,7 @@ export interface UpgradeStatus {
   /** 最近事件消息（过程日志用，如"快照完成"）。 */
   message: string
 }
+
+// 通信面（原 dsh-channel）出现在 @Remote 签名里的边界类型：typert generator 要求
+// 边界类型从公共非根子路径导出（本文件即 `./types`），故在此转发。
+export type { InstanceIdentity } from './channel/types.js'

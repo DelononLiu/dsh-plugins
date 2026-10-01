@@ -1,5 +1,5 @@
 /**
- * dsh-show-me 的共享产物模型（host 与 client 半区共用，纯函数可测）。
+ * dsh-show-me 的产物模型（client 半区使用，纯函数可测）。
  *
  * 一个 `Artifact` 撑起全部 show（plan / verify / completion），这是本插件"不逐类
  * 造私有模型"的前提：
@@ -14,19 +14,13 @@
  */
 
 /** 产物类型（对应生命周期上的一次 show）。 */
-export const ARTIFACT_KINDS = ['plan', 'verify', 'completion'] as const
-/** 产物类型。 */
-export type ArtifactKind = typeof ARTIFACT_KINDS[number]
+export type ArtifactKind = 'plan' | 'verify' | 'completion'
 
 /** 条目状态。 */
-export const ITEM_STATUSES = ['todo', 'doing', 'done', 'blocked'] as const
-/** 条目状态。 */
-export type ItemStatus = typeof ITEM_STATUSES[number]
+export type ItemStatus = 'todo' | 'doing' | 'done' | 'blocked'
 
 /** 证据结果。 */
-export const EVIDENCE_RESULTS = ['pass', 'fail', 'info'] as const
-/** 证据结果。 */
-export type EvidenceResult = typeof EVIDENCE_RESULTS[number]
+export type EvidenceResult = 'pass' | 'fail' | 'info'
 
 /** 小节归类。 */
 export type SectionKind = 'goal' | 'steps' | 'impact' | 'risk' | 'verify' | 'context' | 'other'
@@ -164,47 +158,6 @@ function statusOfMark(mark: string): ItemStatus {
 }
 
 /**
- * 把 plan 类型的产物导出为 markdown（导出口径与官方计划卡一致：标题 + 小节 + 清单）。
- * @param artifact - 产物。
- * @returns markdown 文本。
- */
-export function artifactToMarkdown(artifact: Artifact): string {
-  const lines: string[] = [`# ${artifact.title}`]
-  if (artifact.summary !== '') lines.push('', artifact.summary)
-  for (const section of artifact.sections) {
-    lines.push('', `## ${section.title}`)
-    for (const text of section.text) lines.push('', text)
-    for (const bullet of section.bullets) lines.push(`- ${bullet}`)
-  }
-  if (artifact.items.length > 0) {
-    lines.push('', '## 条目')
-    for (const item of artifact.items) {
-      const mark = item.status === 'done' ? 'x' : item.status === 'doing' ? '~' : item.status === 'blocked' ? '!' : ' '
-      lines.push(`- [${mark}] ${item.text}${item.criteria === undefined ? '' : `（判据：${item.criteria}）`}`)
-    }
-  }
-  if (artifact.decisions.length > 0) {
-    lines.push('', '## 待决')
-    for (const decision of artifact.decisions) {
-      lines.push(`- ${decision.question}${decision.chosen === undefined ? '' : `（已选 ${decision.chosen}）`}`)
-      for (const option of decision.options) {
-        lines.push(`  - ${option.id} ${option.label}：${option.detail}${option.cost === undefined ? '' : `（代价：${option.cost}）`}`)
-      }
-    }
-  }
-  if (artifact.evidence.length > 0) {
-    lines.push('', '## 证据')
-    for (const evidence of artifact.evidence) lines.push(`- ${evidence.label}: ${evidence.value} → ${evidence.result}`)
-  }
-  if (artifact.openQuestions.length > 0) {
-    lines.push('', '## 待定')
-    // 注意：这里不能用 `- [x]` 形态——回导时会被认成复选框条目。
-    for (const question of artifact.openQuestions) lines.push(`- ${question.blocking ? '阻塞：' : ''}${question.text}`)
-  }
-  return `${lines.join('\n')}\n`
-}
-
-/**
  * markdown 方案 → plan 产物（导入/兜底路径；约定驱动，容忍格式不完美）。
  * 约定：`# 标题`、`## 小节`、`- [ ]/[x]/[~]/[!] 条目`、`1. 条目`、`- 要点`、其余正文。
  * @param markdown - 方案原文。
@@ -273,154 +226,4 @@ export function artifactFromMarkdown(
   }
 }
 
-/**
- * 校验并归一化一个来自工具参数的产物（工具入参是不可信 JSON）。
- * @param raw - 未知输入（期望对象）。
- * @returns 归一化产物；输入不可用 → 抛错（错误信息面向模型，指出哪个字段不行）。
- */
-export function normalizeArtifact(raw: unknown): Artifact {
-  if (typeof raw !== 'object' || raw === null) throw new Error('show_me: 需要一个对象参数')
-  const input = raw as Record<string, unknown>
-  const kind = input.kind
-  if (typeof kind !== 'string' || !(ARTIFACT_KINDS as readonly string[]).includes(kind)) {
-    throw new Error(`show_me: kind 必须是 ${ARTIFACT_KINDS.join(' | ')}`)
-  }
-  const title = typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : null
-  if (title === null) throw new Error('show_me: title 必填且不能为空')
-  const itemsRaw = Array.isArray(input.items) ? input.items : []
-  const items: ArtifactItem[] = itemsRaw.map((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) throw new Error(`show_me: items[${index}] 必须是对象`)
-    const item = entry as Record<string, unknown>
-    if (typeof item.text !== 'string' || item.text.trim() === '') throw new Error(`show_me: items[${index}].text 必填`)
-    const status = typeof item.status === 'string' && (ITEM_STATUSES as readonly string[]).includes(item.status)
-      ? item.status as ItemStatus
-      : 'todo'
-    return {
-      id: typeof item.id === 'string' && item.id !== '' ? item.id : `i${index}`,
-      text: item.text.trim(),
-      status,
-      ...Array.isArray(item.files) ? { files: item.files.filter((file): file is string => typeof file === 'string') } : {},
-      ...typeof item.criteria === 'string' && item.criteria.trim() !== '' ? { criteria: item.criteria.trim() } : {},
-    }
-  })
-  const evidenceRaw = Array.isArray(input.evidence) ? input.evidence : []
-  const evidence: ArtifactEvidence[] = evidenceRaw.map((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) throw new Error(`show_me: evidence[${index}] 必须是对象`)
-    const item = entry as Record<string, unknown>
-    if (typeof item.label !== 'string' || item.label.trim() === '') throw new Error(`show_me: evidence[${index}].label 必填`)
-    const result = typeof item.result === 'string' && (EVIDENCE_RESULTS as readonly string[]).includes(item.result)
-      ? item.result as EvidenceResult
-      : 'info'
-    return {
-      id: typeof item.id === 'string' && item.id !== '' ? item.id : `e${index}`,
-      kind: typeof item.kind === 'string' && ['command', 'test', 'file', 'log', 'link'].includes(item.kind)
-        ? item.kind as ArtifactEvidence['kind']
-        : 'command',
-      label: item.label.trim(),
-      value: typeof item.value === 'string' ? item.value : '',
-      result,
-      ...typeof item.itemId === 'string' && item.itemId !== '' ? { itemId: item.itemId } : {},
-    }
-  })
-  return {
-    id: typeof input.id === 'string' && input.id !== '' ? input.id : `a${Date.now().toString(36)}`,
-    kind: kind as ArtifactKind,
-    title,
-    summary: typeof input.summary === 'string' ? input.summary.trim() : '',
-    sections: Array.isArray(input.sections)
-      ? input.sections.flatMap((entry) => {
-          if (typeof entry !== 'object' || entry === null) return []
-          const section = entry as Record<string, unknown>
-          const sectionTitle = typeof section.title === 'string' ? section.title.trim() : ''
-          if (sectionTitle === '') return []
-          return [{
-            title: sectionTitle,
-            kind: classifySection(sectionTitle),
-            text: Array.isArray(section.text) ? section.text.filter((t): t is string => typeof t === 'string') : [],
-            bullets: Array.isArray(section.bullets) ? section.bullets.filter((t): t is string => typeof t === 'string') : [],
-          }]
-        })
-      : [],
-    items,
-    evidence,
-    decisions: Array.isArray(input.decisions)
-      ? input.decisions.flatMap((entry, index) => {
-          if (typeof entry !== 'object' || entry === null) return []
-          const decision = entry as Record<string, unknown>
-          if (typeof decision.question !== 'string' || decision.question.trim() === '') return []
-          const options = Array.isArray(decision.options)
-            ? decision.options.flatMap((option, oi) => {
-                if (typeof option !== 'object' || option === null) return []
-                const value = option as Record<string, unknown>
-                if (typeof value.label !== 'string' || value.label.trim() === '') return []
-                return [{
-                  id: typeof value.id === 'string' && value.id !== '' ? value.id : `o${oi}`,
-                  label: value.label.trim(),
-                  detail: typeof value.detail === 'string' ? value.detail : '',
-                  ...typeof value.cost === 'string' && value.cost !== '' ? { cost: value.cost } : {},
-                }]
-              })
-            : []
-          return [{
-            id: typeof decision.id === 'string' && decision.id !== '' ? decision.id : `d${index}`,
-            question: decision.question.trim(),
-            options,
-            ...typeof decision.chosen === 'string' && decision.chosen !== '' ? { chosen: decision.chosen } : {},
-          }]
-        })
-      : [],
-    openQuestions: Array.isArray(input.openQuestions)
-      ? input.openQuestions.flatMap((entry, index) => {
-          if (typeof entry !== 'object' || entry === null) return []
-          const question = entry as Record<string, unknown>
-          if (typeof question.text !== 'string' || question.text.trim() === '') return []
-          return [{
-            id: typeof question.id === 'string' && question.id !== '' ? question.id : `q${index}`,
-            text: question.text.trim(),
-            blocking: question.blocking === true,
-          }]
-        })
-      : [],
-    markdown: typeof input.markdown === 'string' ? input.markdown : '',
-    producedAt: typeof input.producedAt === 'number' ? input.producedAt : Date.now(),
-    ...typeof input.sessionId === 'string' && input.sessionId !== '' ? { sessionId: input.sessionId } : {},
-  }
-}
 
-/** 条目 × 证据矩阵的一行（verify 视图用）。 */
-export interface VerifyRow {
-  /** 条目。 */
-  item: ArtifactItem
-  /** 挂在该条目上的证据。 */
-  evidence: ArtifactEvidence[]
-  /** 是否已验收（至少一条 pass 证据且状态 done）。 */
-  verified: boolean
-}
-
-/**
- * 生成验收矩阵（verify 视图的核心派生）：每个条目带上它的证据，并判定是否已验收。
- * 没有任何证据的条目标 `verified=false`——"没有证据 = 未验证"，这是本插件的硬规则。
- * @param artifact - 产物。
- * @returns 矩阵行（顺序同 items）。
- */
-export function verifyMatrix(artifact: Artifact): VerifyRow[] {
-  return artifact.items.map((item) => {
-    const evidence = artifact.evidence.filter((entry) => entry.itemId === item.id)
-    const hasPass = evidence.some((entry) => entry.result === 'pass')
-    return { item, evidence, verified: hasPass && item.status === 'done' }
-  })
-}
-
-/** 产物的完成度统计（面板头部与看板用）。 */
-export function artifactStats(artifact: Artifact): { total: number; done: number; doing: number; todo: number; blocked: number; evidence: number; verified: number } {
-  const rows = verifyMatrix(artifact)
-  return {
-    total: artifact.items.length,
-    done: artifact.items.filter((item) => item.status === 'done').length,
-    doing: artifact.items.filter((item) => item.status === 'doing').length,
-    todo: artifact.items.filter((item) => item.status === 'todo').length,
-    blocked: artifact.items.filter((item) => item.status === 'blocked').length,
-    evidence: artifact.evidence.length,
-    verified: rows.filter((row) => row.verified).length,
-  }
-}

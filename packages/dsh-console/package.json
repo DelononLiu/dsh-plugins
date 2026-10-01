@@ -1,7 +1,7 @@
 {
   "name": "dsh-console",
   "version": "0.0.0",
-  "description": "管理组件：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据 + 控制台界面（client 半区，sidebar 底部入口）",
+  "description": "管理组件：主机/实例档案、生命周期、部署编排、inbox/投递、总览数据 + 控制台界面（client 半区，sidebar 底部入口）；**内置通信面**（原 dsh-channel：发现/心跳、事件总线、鉴权、控制指令通道，`role: 'agent'` 只挂这一面）",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -58,7 +58,6 @@
   },
   "dependencies": {
     "dsh-user": "workspace:*",
-    "dsh-channel": "workspace:*",
     "@deepseek-ai/schemastery": "^3.18.4",
     "zod": "^4.4.3"
   },
@@ -66,6 +65,7 @@
     "@deepseek-ai/cordis": "^4.0.4",
     "@deepseek-ai/dsh-host-webserver": "^0.1.7-rc.2",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-api-gateway": "^0.1.7-rc.2",
     "@deepseek-ai/dsh-client-ui-sidebar": "^0.1.7-rc.2"
   },
   "devDependencies": {
@@ -81,6 +81,7 @@
     "@deepseek-ai/dsh-typert-protocol": "^0.1.7-rc.2",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.1.7-rc.2",
     "@deepseek-ai/dsh-api-remotes": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-api-gateway": "^0.1.7-rc.2",
     "@deepseek-ai/dsh-client-store": "^0.1.7-rc.2"
   }
 }

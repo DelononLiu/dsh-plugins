@@ -2,6 +2,8 @@
 
 Status: proposed
 
+> 包结构更新（2026-10-01）：`dsh-channel` 整包并入 `dsh-console`——本 note 里的 `channel` 现指 **dsh-console 的内置通信面**（仍注册 `ctx.channel`），配置字段整体落在 console 条目的 `channel:` 子字段，hub/worker 是同一个包的不同 `role`；见 [merge-channel-into-console](../../implemented/architecture/2026-10-01-merge-channel-into-console.md)。决策本身不变。
+
 ## Problem
 
 目标形态（2026-09-11 提出）：总控主机跑**唯一**一个 web 实例（dsh-console + dsh-channel）作为全集群控制面；每台工作主机跑一个 headless daemon（dsh-channel）管理本机 web 实例；实例之间经 dsh-channel 通信；不用 broker。
@@ -11,10 +13,10 @@ Status: proposed
 1. **跨进程面有两处，都不通用于多机**：
    - 官方 `/api/{ns}/{method}`（client-request 信封）在 web 实例上被 BrowserAuth fence 挡：实测 POST 到 3082/3083 均 `401 unauthorized`。该 fence 由 `dsh-client-connection` 注册在官方 webserver 上的 `/api` prefix 路由承担，**不是全局中间件**；webserver 自身只做 exact → prefix → fallback 分发，插件经 `webServer.register` 注册的 exact 路由先命中，因而连同 Host/Origin 检查一起绕过——实测 `/api/console/instances`(3082) 与 `/api/quick-nav/instances`(3083) 免凭据 200。
    - daemon 的 `ConsoleService.startControlServer`（管理组件里手写的 http server，绑 `127.0.0.1:controlPort`、无凭据校验、分派 5 个方法）是**可用的非 broker 跨进程载体**，`callRemote → directRpc` 直连它即可（daemon.log 有它监听 3089 的记录）。它绑回环、只在 daemon 角色存在，且通信面落在管理组件里（分层不符）。
-2. **投递静默**：`sendControl` 在无 relay 时回环本地 handler，console 角色不注册 handler → 空转；relay 已配置但 broker 不可达时 `relaySendControl` 的 catch 吞错 → 同样静默（当前 web2 属后者：进程 env 有 `DSH_RELAY_AGENT`/`DSH_RELAY_BROKER_URL`/`DSH_RELAY_SECRET`）。`upgradeInstances` 另有"守护未注册"显式前置失败，`deployInstance` 没有。
+2. **投递静默**：`sendControl` 在无 relay 时回环本地 handler，console 角色不注册 handler → 空转；relay 已配置但 broker 不可达时 `relaySendControl` 的 catch 吞错 → 同样静默（当前 web2 属后者：进程 env 有 `DSH_CHANNEL_ID`/`DSH_RELAY_BROKER_URL`/`DSH_RELAY_SECRET`）。`upgradeInstances` 另有"守护未注册"显式前置失败，`deployInstance` 没有。
 3. **broker 组件在本仓库无实现**：`packages/dsh-agent-relay` 缺失；已部署 home 内 `node_modules/dsh-agent-relay` 是指向该路径的死链；19121 无监听。
 4. **channel 无自己的 server**：`register`/`heartbeat`/`declare`/`emit`/`subscribe`/`ack` 均为进程内 API，事件总线无任何远端投递。只有 `list`/`get`/`brokerStatus` 带 `@Remote`，经官方 typert gateway 可 HTTP 到达（即 `directRpc` 的目标面）。
-5. **身份与地址语义**：自身身份取自 `ctx.channel.relay?.agent` 或 `DSH_RELAY_AGENT`（不要求 broker 存活——19121 无监听时 3082 仍返回 `self: true`）；实例 id 由 launch/instances 配置的 `declare` 提供。daemon 为本机实例构造的 addr 是 `http://127.0.0.1:<port>`，管理端 `probeLaunch` 直接 fetch 该 addr 判活。
+5. **身份与地址语义**：自身身份取自 `ctx.channel.relay?.agent` 或 `DSH_CHANNEL_ID`（不要求 broker 存活——19121 无监听时 3082 仍返回 `self: true`）；实例 id 由 launch/instances 配置的 `declare` 提供。daemon 为本机实例构造的 addr 是 `http://127.0.0.1:<port>`，管理端 `probeLaunch` 直接 fetch 该 addr 判活。
 6. **探活已覆盖带 addr 的 host 条目**（总控主机守护 `host-master` 的 addr 即 daemon 控制口），判据是"有响应即活"（fetch 不抛就续心跳）——端口被无关进程占用同样算在线；`isPortFree` 硬编码 `127.0.0.1`，仅适用于本机。
 7. **console 两个路由无凭据校验**：`/api/console/instances`（GET）与 `/api/console/control`（POST，直通 `controlInstance`）经 `webServer.register` 注册，不读任何凭据——实测无凭据 POST 非法指令得到 `400 unsupported command: bogus`（handler 已执行）。当前只在回环可及；绑 `0.0.0.0` 即等同裸暴露。
 8. **注册面默认信任**：`register()` 仅在 `config.tokens[id]` 已配置时才校验，未配置即无条件接受；且 `instances.set()` 无条件覆写 `declare` 写入的 addr。
@@ -58,7 +60,7 @@ Status: proposed
 
 ### P1a 控制闭环（先把模型立住，不碰真实跨机）——**已落地**
 
-1. channel 配置与身份：`Config` 增 `mode`/`id`/`console`/`token`/`pollWaitMs`/`registerIntervalMs`/`commandLeaseMs`/`ledgerFile`；`selfId` 解析 `id → relay.agent → DSH_RELAY_AGENT`。缺省 local；给出 `console` 地址即 worker；hub 需显式 `mode: 'hub'`（避免任一 web 实例误开控制面）。
+1. channel 配置与身份：`Config` 增 `mode`/`id`/`console`/`token`/`pollWaitMs`/`registerIntervalMs`/`commandLeaseMs`/`ledgerFile`；`selfId` 解析 `id → relay.agent → DSH_CHANNEL_ID`。缺省 local；给出 `console` 地址即 worker；hub 需显式 `mode: 'hub'`（避免任一 web 实例误开控制面）。
 2. hub 路由（插件 exact 路由，免 fence）：`POST /api/channel/register`、`GET /api/channel/commands`、`POST /api/channel/result`；鉴权 `x-instance-id` + `x-instance-token`（缺头 401 / 未登记 403 / 令牌错 401），长轮询本身即保活证据。
 3. worker 出站客户端：周期注册（含本机实例状态）+ 长轮询取指令 + 回执；失败指数退避（上限 60s）。
 4. 指令台账：条目含 seq/租约/回执；`enqueueCommand` 目标未注册即失败、`claimCommands` 租约到期重投、`completeCommand` 重复回执不覆盖首个结果；`ledgerFile` 落盘未完成条目，重启恢复为 pending 重新排队。

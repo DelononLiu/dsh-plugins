@@ -14,7 +14,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { isHostAgent, type InstanceIdentity } from 'dsh-channel'
+import { isHostAgent, type InstanceIdentity } from 'dsh-console'
 
 /** 需要的服务：channel（实例数据）+ webServer（HTTP 路由）。 */
 export const inject = ['channel', 'webServer']
@@ -46,8 +46,8 @@ function localInstances(ctx: Context, addrTable: Record<string, string>): NavIns
       // 地址补齐（优先级）：channel 发现 → env 地址表 → console launch 配置。
       addr: inst.addr || addrTable[inst.id] || ctx.get('console')?.getLaunchAddr(inst.id) || '',
     }))
-  // 补本机实例（channel 本地注册表不含自己；DSH_RELAY_AGENT 标识）。
-  const self = process.env.DSH_RELAY_AGENT
+  // 补本机实例（channel 本地注册表不含自己；DSH_CHANNEL_ID 标识）。
+  const self = process.env.DSH_CHANNEL_ID
   if (self !== undefined && !instances.some((i) => i.id === self)) {
     instances.unshift({
       id: self,
@@ -83,7 +83,7 @@ export function apply(ctx: Context): void {
       kind: 'exact',
       path: '/api/quick-nav/instances',
       handler: (_req: IncomingMessage, res: ServerResponse) => {
-        const self = process.env.DSH_RELAY_AGENT
+        const self = process.env.DSH_CHANNEL_ID
         const finish = (instances: NavInstance[]): void => {
           // 本机实例标记 current（client 渲染「当前」标识，不可点击弱化）。
           if (self !== undefined) {

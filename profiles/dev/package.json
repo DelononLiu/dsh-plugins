@@ -3,9 +3,9 @@
   "private": true,
   "dependencies": {
     "@deepseek-ai/dsh-llm-pi-ai": "0.1.7-rc.2",
-    "dsh-channel": "link:/home/long2015/Code/dsh-plugins/packages/dsh-channel",
     "dsh-console": "link:/home/long2015/Code/dsh-plugins/packages/dsh-console",
     "dsh-focus-session": "link:/home/long2015/Code/dsh-plugins/packages/dsh-focus-session",
+    "dsh-show-me": "link:/home/long2015/Code/dsh-plugins/packages/dsh-show-me",
     "dsh-user": "link:/home/long2015/Code/dsh-plugins/packages/dsh-user"
   },
   "dsh": {

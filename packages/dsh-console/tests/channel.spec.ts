@@ -460,11 +460,9 @@ describe('多机：worker 回执真实结果（handler 结果 → 台账）', ()
   })
 })
 
-describe('实例 id 的 env 载体：新名 DSH_CHANNEL_ID 优先、旧名 DSH_RELAY_AGENT 兼容读', () => {
-  it('新名优先；只有旧名时回落；都为空 → undefined', () => {
-    expect(instanceIdFromEnv({ DSH_CHANNEL_ID: 'new-id', DSH_RELAY_AGENT: 'old-id' })).toBe('new-id')
-    expect(instanceIdFromEnv({ DSH_RELAY_AGENT: 'old-id' })).toBe('old-id')
-    expect(instanceIdFromEnv({ DSH_CHANNEL_ID: '' , DSH_RELAY_AGENT: 'old-id' })).toBe('old-id')
+describe('实例 id 的 env 载体：只认 DSH_CHANNEL_ID', () => {
+  it('取值；空串与缺省都当未设置', () => {
+    expect(instanceIdFromEnv({ DSH_CHANNEL_ID: 'web3' })).toBe('web3')
     expect(instanceIdFromEnv({})).toBe(undefined)
     expect(instanceIdFromEnv({ DSH_CHANNEL_ID: '' })).toBe(undefined)
   })

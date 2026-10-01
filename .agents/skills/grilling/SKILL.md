@@ -61,7 +61,7 @@ find . -path ./.git -prune -o -path '*/node_modules' -prune -o -path '*/lib' -pr
 
 **同类风险不限内核包**：任何"两份逐字节相同的模块副本"都会造成同样的身份不匹配（同一份 `Symbol()`
 定义两次 → 不相等）。看到新目录里出现与既有模块内容相同的副本，就当种子命中。
-另外**源码目录里混进旧编译产物**也是一种隐蔽副本（实见 `packages/dsh-channel/src/index.js` + `.d.ts`
+另外**源码目录里混进旧编译产物**也是一种隐蔽副本（实见 `packages/*/src/index.js` + `index.d.ts` 这种编译产物混进源码目录的例子，2026-10 已清理）
 是旧版编译结果，注册了同名的 `'channel'` 服务，当前无引用者 = 潜伏双定义）——
 顺手查：`git ls-files 'packages/*/src/*.js' 'packages/*/src/*.d.ts'`，有输出就核对是不是产物误入源码树。
 
@@ -119,7 +119,7 @@ grep -n 'ConsoleInstanceViewItem\|health' packages/dsh-console/src/types.ts | he
 优先级，多个写入方必然互相覆盖。
 
 ```sh
-grep -n 'setStatus(\|heartbeat(\|declare(\|offlineOverride' packages/dsh-console/src/index.ts packages/dsh-channel/src/index.ts
+grep -n 'setStatus(\|heartbeat(\|declare(\|offlineOverride' packages/dsh-console/src/index.ts packages/dsh-console/src/channel/index.ts
 ```
 
 优先复用既有字段还是新开字段？——注意 `InstanceRecord.health` 已被"升级结果"占用（`'upgraded'|'rollback'`），
@@ -194,7 +194,7 @@ grep -rho -- '--dsw-alias-state-[a-z-]*' packages/*/src/client/*.css.ts packages
 是否引入插件私有模型（身份 / 主机 / 实例）？新依赖方向是否严格向下（业务 app→UI→管理组件→系统→内核）？
 
 ```sh
-grep -n 'HostRecord\|InstanceRecord\|health\|status' packages/dsh-console/src/types.ts packages/dsh-channel/src/types.ts
+grep -n 'HostRecord\|InstanceRecord\|health\|status' packages/dsh-console/src/types.ts packages/dsh-console/src/channel/types.ts
 ```
 
 同一概念在别的层已有字段吗？有就复用/改名，不要另起一套。

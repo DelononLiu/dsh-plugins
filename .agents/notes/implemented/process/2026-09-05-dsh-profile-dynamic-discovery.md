@@ -17,7 +17,7 @@ dsh-profile.sh 原以 ENVS 硬编码四实例（web2/3/4/daemon + 各自 port/re
 - **port 从该实例自己的 `cordis.patch.yml` 读**（webserver.config.port 段）——
   每实例端口各自配置（web2=3082、web3=3083、web77=30123…不能猜）；
   daemon 无 webserver = headless（port 空）；
-- relay agent：daemon 特判 host1，其它 = 实例名（web3 → DSH_RELAY_AGENT=web3）；
+- relay agent：daemon 特判 host1，其它 = 实例名（web3 → DSH_CHANNEL_ID=web3）；
 - 未知名/布局非法 → 报错退出（延续：不设别名、不静默操作）。
 - status 动态扫描 `~/.dsh-<名>/profiles/<名>` 全量。
 - 自操作防护保留：目标 home == 当前 shell DSH_HOME 时 stop/restart 拒绝。

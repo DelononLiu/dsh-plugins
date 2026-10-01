@@ -12,13 +12,14 @@ test('generateToken 返回 32 hex', () => {
   assert.match(token, /^[0-9a-f]{32}$/)
 })
 
-test('buildAgentProfile 生成最小集 profile（base+channel+user + 令牌 patch）', async () => {
+test('buildAgentProfile 生成最小集 profile（base+console+user + 令牌 patch）', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-agent-'))
   try {
     const out = await buildAgentProfile('inst1', 'tok', '0.1.0')
     const pkg = JSON.parse(await readFile(join(out, 'package.json'), 'utf8'))
-    assert.deepEqual(pkg.dsh.profile.bundles, ['@deepseek-ai/dsh-base', 'dsh-channel', 'dsh-user'])
+    assert.deepEqual(pkg.dsh.profile.bundles, ['@deepseek-ai/dsh-base', 'dsh-console', 'dsh-user'])
     const patch = await readFile(join(out, 'cordis.patch.yml'), 'utf8')
+    assert.match(patch, /"role": "agent"/)
     assert.match(patch, /inst1/)
     assert.match(patch, /tok/)
   } finally {

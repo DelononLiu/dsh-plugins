@@ -34,4 +34,4 @@ UI 层有三个自研插件在 2026-09-26 移除 vendored 全家桶 UI 后失去
 - **quick-nav 不再有运行时验证**：只靠单测（4 项）保真；代码腐化风险由"保留但不加载"这个决定带来，装机前需自验。
 - 同步更新：`profiles/{master,dev,explorer}`（bundles + patch insert + lock）、`scripts/tests/profiles-templates.test.mjs` 的启用清单、`tsconfig.host.json`、`docs/architecture.md` §1/§2/§5/§9、`AGENTS.md` 分层图与依赖链、`packages/dsh-console` 的实例骨架默认 bundles 与两处测试夹具（原用已删包名当占位）。
 - 引用已删插件的 implemented note 按归档规则处理：完全被取代的移入 `archived/`，部分取代的更新事实并交叉链接本 note。
-- **下一步（已定方向，未实施）**：`dsh-channel` 合并进 `dsh-console` —— 那是一次分层改动（系统层 → 管理组件），不是删包，需另开 note 与 worktree。
+- **已落地（2026-10-01）**：`dsh-channel` 合并进 `dsh-console`（分层改动：系统层 → 管理组件，不是删包），见 [merge-channel-into-console](2026-10-01-merge-channel-into-console.md)。

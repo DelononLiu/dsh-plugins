@@ -60,9 +60,8 @@ export function apply(ctx: ClientContext): void {
           // fiber 里进行（否则 "cannot get property without inject"）——用
           // ctx.inject 进入注入 fiber 抓取 namespace 引用（服务注册在 ownerCtx，
           // 引用在 fiber 结束后仍有效，可缓存）。
-          // 注意：只 $mount consoleRemote。channel 的 remote 面当前没有客户端消费者
-          // （原先由 dsh-quick-nav 挂载，它已不再随任何 profile 加载）；将来谁要用谁
-          // 自己 $mount——重复 $mount 会报 "already mounted"。
+          // 只 $mount consoleRemote：channel 的 remote 面当前无客户端消费者，
+          // 谁要谁自己 $mount（重复 $mount 会报 "already mounted"）。
           const consoleReady = ctx.remote.$mount(consoleRemote)
           const host: ConsoleHost = {
             listInstances: async () => {

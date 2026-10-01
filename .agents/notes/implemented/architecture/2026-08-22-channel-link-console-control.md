@@ -2,6 +2,8 @@
 
 Status: proposed
 
+> 包结构更新（2026-10-01）：`dsh-channel` 整包并入 `dsh-console`，本 note 里的 relay/`dsh-channel` 现指 dsh-console 的内置通信面（`ctx.channel`）；见 [merge-channel-into-console](2026-10-01-merge-channel-into-console.md)。
+
 ## 目标
 
 验证 dsh-channel 跨实例联通 + dsh-console 远程控制完整链路：**web2（console 端）对 web3（agent 端）执行 restart → web3 收到指令后重启自己**。

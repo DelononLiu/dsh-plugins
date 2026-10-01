@@ -1,15 +1,13 @@
 /**
- * dsh-channel：系统层·通信（跨实例通道）。
+ * dsh-console 的通信面（2026-10 由 dsh-channel 整包并入）：跨实例通道。
  *
- * 实例服务提供者 + 事件总线 + 控制指令通道。v1 为**进程内实现**（单实例
- * 内的注册表/心跳/事件总线/指令回环）；跨实例物理传输（agent↔console
- * 的实例令牌通道）在 agent/传输层实现时接入——本插件的接口（register/
- * heartbeat/emit/sendControl）即其承载面。Typert 远程化（@Remote +
- * ctx.remote 消费）在 nav/console-ui 消费时接入。
+ * 实例服务提供者（`ctx.channel`）+ 事件总线 + 控制指令通道 + hub/worker
+ * 多机回路；`@Remote` 面经 typert 暴露给客户端（`listen`/`get`/`brokerStatus`）。
+ * 由本包入口 `apply(ctx, config)` 挂载——`role: 'agent'` 的执行面主机只挂这一面。
  *
  * 事件总线语义（已定）：at-least-once + 消息 id 幂等去重 + TTL 过期 +
  * 三平面（control 控制指令 / task 幂等投递 / session 仅显式共享）。
- * @module dsh-channel
+ * @module dsh-console/channel
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -282,7 +280,7 @@ export class ChannelService extends TypertRemoteService {
     this.mode = resolveMode(config)
     this.selfId = resolveSelfId(config)
     if (this.mode === 'worker' && (config.console === undefined || this.selfId === undefined)) {
-      throw new Error('dsh-channel: worker 模式需要 console 地址与实例 id（config.id 或 DSH_CHANNEL_ID）')
+      throw new Error('dsh-console/channel: worker 模式需要 console 地址与实例 id（config.id 或 DSH_CHANNEL_ID）')
     }
     if (this.mode === 'hub') {
       this.loadLedger()
@@ -938,15 +936,15 @@ export class ChannelService extends TypertRemoteService {
       })
       const ack = await res.json().catch(() => null) as RegisterAck | null
       if (!res.ok || ack?.ok !== true) {
-        console.error(`[dsh-channel/worker] 注册被拒（http ${res.status}）：${ack?.error ?? 'no body'}`)
+        console.error(`[dsh-console/channel] 注册被拒（http ${res.status}）：${ack?.error ?? 'no body'}`)
         return false
       }
       for (const rejected of ack.rejected ?? []) {
-        console.error(`[dsh-channel/worker] 实例声明被拒：${rejected.id}（${rejected.reason}）`)
+        console.error(`[dsh-console/channel] 实例声明被拒：${rejected.id}（${rejected.reason}）`)
       }
       return true
     } catch (error) {
-      console.error(`[dsh-channel/worker] 注册失败：${error instanceof Error ? error.message : String(error)}`)
+      console.error(`[dsh-console/channel] 注册失败：${error instanceof Error ? error.message : String(error)}`)
       return false
     }
   }
@@ -1079,20 +1077,16 @@ export function resolveMode(config: Config): ChannelMode {
 }
 
 /**
- * 本实例 id 的 env 载体：新名 `DSH_CHANNEL_ID` 优先，旧名 `DSH_RELAY_AGENT` **兼容读**。
- * broker 退场后 "relay" 这个术语不再有含义；但老实例的启动 env 与 patch 可能仍写旧名，
- * 所以读两个名字（不强制改老实例），新写入一律用新名。
+ * 本实例 id 的 env 载体：`DSH_CHANNEL_ID`（唯一名）。
  */
 export function instanceIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  // 空串一律当"未设置"（与 config.id !== '' 的判读口径一致）：新名为空则回落旧名。
-  for (const v of [env.DSH_CHANNEL_ID, env.DSH_RELAY_AGENT]) {
-    if (v !== undefined && v !== '') return v
-  }
-  return undefined
+  // 空串一律当"未设置"（与 config.id !== '' 的判读口径一致）。
+  const v = env.DSH_CHANNEL_ID
+  return v !== undefined && v !== '' ? v : undefined
 }
 
 /**
- * 解析本实例 id：config.id → env（DSH_CHANNEL_ID / 兼容旧名 DSH_RELAY_AGENT）。
+ * 解析本实例 id：config.id → env（DSH_CHANNEL_ID）。
  */
 export function resolveSelfId(config: Config): string | undefined {
   if (config.id !== undefined && config.id !== '') return config.id

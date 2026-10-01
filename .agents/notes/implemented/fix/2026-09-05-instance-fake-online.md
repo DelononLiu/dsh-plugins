@@ -20,7 +20,7 @@ web2（管理端 console）重启后，launch 配置里的 web3/web4 全部显�
 
 探测结果驱动状态，消除假绿窗口：
 
-- **dsh-channel**：新增 `setStatus(instanceId, 'online'|'offline')`（进程内管理面，
+- **dsh-console 通信面**（原 dsh-channel，2026-10 并入）：新增 `setStatus(instanceId, 'online'|'offline')`（进程内管理面，
   不 @Remote——防远端越权改状态；未声明实例静默）。online 时刷新 lastSeen。
 - **dsh-console**：
   - declare 后**立即首轮 probeLaunch()**（不等 setInterval 首拍 15s）；

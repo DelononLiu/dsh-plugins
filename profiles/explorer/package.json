@@ -2,7 +2,7 @@
   "name": "dsh-profile-explorer",
   "private": true,
   "version": "0.0.0",
-  "description": "多插件测试环境：官方基线 + 核心组合（系统层 user/channel + 管理组件 console + UI 读端 nav/tabs）。验证插件间协同，测试时临时增删。",
+  "description": "多插件测试环境：官方基线 + 核心组合（系统层 user + 管理组件 console（内置通信面）+ UI 关注层 focus-session / 呈现层 show-me）。验证插件间协同，测试时临时增删。",
   "dependencies": {},
   "dsh": {
     "profile": {
@@ -10,9 +10,9 @@
         "@deepseek-ai/dsh-base",
         "@deepseek-ai/dsh-web-app",
         "dsh-user",
-        "dsh-channel",
         "dsh-console",
-        "dsh-focus-session"
+        "dsh-focus-session",
+        "dsh-show-me"
       ]
     }
   }

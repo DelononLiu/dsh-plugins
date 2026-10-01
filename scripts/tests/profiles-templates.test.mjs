@@ -19,18 +19,18 @@ const EXPECTED_BUNDLES = {
     '@deepseek-ai/dsh-base',
     '@deepseek-ai/dsh-web-app',
     'dsh-user',
-    'dsh-channel',
     'dsh-console',
     'dsh-focus-session',
+    'dsh-show-me',
   ],
   dev: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
   explorer: [
     '@deepseek-ai/dsh-base',
     '@deepseek-ai/dsh-web-app',
     'dsh-user',
-    'dsh-channel',
     'dsh-console',
     'dsh-focus-session',
+    'dsh-show-me',
   ],
 }
 

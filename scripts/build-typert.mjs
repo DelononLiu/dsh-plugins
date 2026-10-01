@@ -5,7 +5,7 @@
  * lib/typert.remote-client.js）。照抄官方 tsdown-plugin 的 emitArtifacts 逻辑。
  *
  * 用法：node scripts/build-typert.mjs <包路径> <包名>
- * 例：node scripts/build-typert.mjs packages/dsh-channel dsh-channel
+ * 例：node scripts/build-typert.mjs packages/dsh-console dsh-console
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'

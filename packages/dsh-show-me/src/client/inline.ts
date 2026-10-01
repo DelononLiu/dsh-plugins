@@ -132,6 +132,30 @@ function buildFigure(doc: Document, artifact: Artifact, source: string): HTMLEle
   return figure
 }
 
+/** 钩子自检只告警一次（DOM 每次变动都刷屏没意义）。 */
+let hookWarningDone = false
+
+/** 测试用：重置钩子自检的"已告警"状态。 */
+export function resetHookWarning(): void {
+  hookWarningDone = false
+}
+
+/**
+ * 钩子自检：官方若给代码块的语言名元素改名，`languageOf()` 会恒为空 → 约定围栏**静默**
+ * 不再渲染（2026-09 真机踩过一次）。判据取最不容易误报的一种：页面里已经有官方代码块，
+ * 但**一个**都没有语言名元素 ⇒ 钩子形状变了。只告警一次，不抛错（插件降级为不渲染）。
+ * @param blocks - 本轮扫描到的官方代码块。
+ */
+export function warnIfHooksMissing(blocks: HTMLElement[]): void {
+  if (hookWarningDone || blocks.length === 0) return
+  if (blocks.some((block) => block.querySelector(INFOSTRING) !== null)) return
+  hookWarningDone = true
+  console.warn(
+    '[dsh-show-me] 未找到官方代码块的语言名钩子（' + INFOSTRING + '）——约定围栏不会被渲染。'
+    + '官方可能改了 CodeBlock 的 DOM 形状，需同步 src/client/inline.ts 的选择器。',
+  )
+}
+
 /**
  * 扫描并就地渲染（幂等、可重复调用）。返回本次渲染的块数。
  *
@@ -142,7 +166,9 @@ function buildFigure(doc: Document, artifact: Artifact, source: string): HTMLEle
 export function scanInline(doc: Document = document): number {
   injectCss()
   let rendered = 0
-  for (const block of Array.from(doc.querySelectorAll<HTMLElement>(CODE_BLOCK))) {
+  const blocks = Array.from(doc.querySelectorAll<HTMLElement>(CODE_BLOCK))
+  warnIfHooksMissing(blocks)
+  for (const block of blocks) {
     if (!isShowFence(languageOf(block))) continue
     const host = block.parentElement
     if (host === null) continue

@@ -50,18 +50,18 @@
         dshHome: /home/long2015/.dsh-web2
         profile: web2
         env:
-          DSH_RELAY_AGENT: web2
+          DSH_CHANNEL_ID: web2
       web3:
         host: host-master
         addr: http://127.0.0.1:3083
         dshHome: /home/long2015/.dsh-web3
         profile: web3
         env:
-          DSH_RELAY_AGENT: web3
+          DSH_CHANNEL_ID: web3
       web4:
         host: host-master
         addr: http://127.0.0.1:3084
         dshHome: /home/long2015/.dsh-web4
         profile: web4
         env:
-          DSH_RELAY_AGENT: web4
+          DSH_CHANNEL_ID: web4

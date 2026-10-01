@@ -7,12 +7,12 @@ Status: implemented
 - `start` 离线实例收不到 broker 消息（进程已死），必须由外部拉起；console 本地 `spawn` 仅限本机。
 - 多机管理需要每主机一个执行者；SSH 远程执行被否（入站端口 + 凭据面），选每主机**出站**守护，经统一 broker 通信。
 - daemon 若独立成包，与 dsh-console 同属实例生命周期管理，功能重叠、包膨胀。
-- `role: 'agent'` 与 broker 的 agent 概念（`x-relay-agent` 头、peers 的 agent 名）语义冲突：所有注册方都是 agent。
+- ~~`role: 'agent'` 与 broker 的 agent 概念语义冲突~~（2026-10 处理：broker 退场后该冲突消失，`agent` 被采用为**执行面主机角色**——只挂通信面、不挂管理面）。
 
 ## Decision
 
-1. **守护 = dsh 可执行程序 + 极简 profile**（只插 `dsh-channel` + `dsh-console`），不新写二进制。启动方式与实例统一：`dsh --profile daemon`（带 `DSH_HOME` 与 `DSH_RELAY_*`）。
-2. **dsh-console 一个包三角色，角色 = 部署位置**：
+1. **守护 = dsh 可执行程序 + 极简 profile**（只插 `dsh-console`（`role: daemon`，内置通信面）），不新写二进制。启动方式与实例统一：`dsh --profile daemon`（带 `DSH_HOME` 与 `DSH_RELAY_*`）。
+2. **dsh-console 一个包四角色，角色 = 部署位置**（`agent` 角色 2026-10 随 `dsh-channel` 并入本包新增；见 [merge-channel-into-console](2026-10-01-merge-channel-into-console.md)）：
    - `console`：管理端（档案/inbox/HTTP API/编排，决策面）；
    - `daemon`：主机守护（spawn/kill/追踪子进程，执行面）；
    - `instance`：实例自退兜底（原 `agent` 改名，收到 stop/restart 自退）。
@@ -54,7 +54,7 @@ Status: implemented
 
 ## 验证（测试环境：~/.dsh-daemon + ~/.dsh-web2/web3 独立 home）
 
-- 守护 profile 只插 `dsh-channel` + `dsh-console`（role: daemon），无 webserver、不监听端口。
+- 守护 profile 只插 `dsh-console`（role: daemon，内置通信面），无 webserver、不监听端口。
 - broker peers：`host-lab1` / `web2` / `web3` 在线；实例 API 返回 `{instances, hosts}`（hosts 含 `host-lab1`）。
 - `start` 离线 web3 → console 路由到守护 → 守护 spawn → web3 上线（3083 恢复）——核心缺陷（离线收不到 broker 消息）解决。
 - `stop` → 守护 SIGTERM kill；`restart` → 守护拉起的 kill+exit+spawn；**守护重启后的孤儿实例 restart → 发 stop 自退 → 端口释放探测 → 拉起**（原始 bug 场景）。

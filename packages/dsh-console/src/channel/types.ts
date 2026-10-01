@@ -1,6 +1,8 @@
 /**
- * dsh-channel 公共类型子路径（./types）——Remote 边界类型必须从非根
- * 子路径导出（typert generator 规则），供跨包消费与类型契约。
+ * 通信面（原 dsh-channel）的实例边界类型。
+ *
+ * 这些类型出现在通信面的 `@Remote` 方法签名里，而 typert generator 要求边界类型
+ * 从公共非根子路径导出——故由 `src/types.ts`（包的 `./types`）转发 `InstanceIdentity`。
  */
 
 /** 实例基础身份（实例服务提供者——实例首先是通信层发现的实体）。 */
@@ -18,9 +20,6 @@ export interface InstanceIdentity {
   /** 发行包版本。 */
   version?: string
 }
-
-/** Broker 运行状态（channel 传输层状态——broker 是 channel 的可选后端）。 */
-
 
 /**
  * 跨实例 RPC 传输层错误码（channel 是 typert 的跨主机 carrier——carrier

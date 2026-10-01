@@ -2,6 +2,8 @@
 
 Status: implemented
 
+> 包结构更新（2026-10-01）：`dsh-channel` 整包并入 `dsh-console`，本 note 里的 `dsh-channel`/目标实例的部署要求现指 dsh-console 的内置通信面（同一包按 `role` 分流）；见 [merge-channel-into-console](2026-10-01-merge-channel-into-console.md)。
+
 ## Problem
 
 typert 第一二期已打通**同 host** 链路（channel/console @Remote → gateway `/api` RPC）。第三期目标：**跨实例方法调用**——console（web2）调 web3/web4/daemon 实例的 typert 方法（如 `console.controlInstance` 直达目标、daemon 的实例管理方法）。
