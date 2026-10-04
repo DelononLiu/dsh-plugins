@@ -72,7 +72,7 @@ function InstanceRow(props: {
       <span className={`dot ${opLabel ? 'pend' : (online ? 'on' : 'off')}`} />
       <div className="grow">
         <div className="name">{item.name}</div>
-        <div className="meta">{opLabel ?? (online ? '在线' : '离线')} · {machineName ?? item.host ?? item.id}{item.self ? ' · 当前实例' : ''}</div>
+        <div className="meta"><span className="dsh-console-meta-ver" title={verTitle}>{verLabel}</span> · {opLabel ?? (online ? '在线' : '离线')} · {machineName ?? item.host ?? item.id}{item.self ? ' · 当前实例' : ''}</div>
       </div>
       <span className="dsh-console-ver" title={verTitle}>{verLabel}</span>
       <button

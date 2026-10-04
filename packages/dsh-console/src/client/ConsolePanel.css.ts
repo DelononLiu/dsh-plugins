@@ -53,6 +53,7 @@ const css = `
 .dsh-console-row .dsh-console-act-btn{width:36px;padding:6px 0;box-sizing:border-box;justify-content:center}
 .dsh-console-row .dsh-console-btn:disabled{opacity:.45;cursor:not-allowed}
 .dsh-console-btn{border:none;border-radius:8px;font-size:12px;padding:6px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-family:inherit;background:transparent;color:var(--dsw-alias-label-secondary)}
+.dsh-console-meta-ver{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}
 .dsh-console-row-more{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:8px 12px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1)}
 .dsh-console-row-more-lead{font-size:12px;color:var(--dsw-alias-label-tertiary);margin-right:2px;white-space:nowrap}
 .dsh-console-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
