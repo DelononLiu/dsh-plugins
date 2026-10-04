@@ -108,7 +108,7 @@ function InstanceRow(props: {
             <div style={{ position: 'fixed', inset: 0, zIndex: 1999 }} onClick={() => setMenuOpen(false)} />
             <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 2000, minWidth: 160, background: 'var(--dsw-alias-bg-layer-2)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, boxShadow: 'var(--dsw-shadow-lv2)', padding: 4 }}>
               <button type="button" className="dsh-console-menu-item" onClick={() => { setMenuOpen(false); onMore!('upgrade', item.id) }}>
-                升级到 0.1.2-rc.1
+                升级…（在对话框里选目标版本）
               </button>
               <button
                 type="button"
