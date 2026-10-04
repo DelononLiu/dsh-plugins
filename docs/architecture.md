@@ -192,7 +192,7 @@ dsh-console 通信面（传输底座：实例发现/心跳/事件总线/实例�
 - 部署/升级 = 版本矩阵整体推进，console 协调所有主机/实例。
 - 分发形态（已确认）：**完整 profile 模板**（git clone 现成 profile 目录直接用），模板即实例种子。
 - 落地形式：`profiles/master/dsh.lock.json`（版本锁 schema 已定稿：schemaVersion/id/name/version/kernel/bundles/vendored，见 §9）。边界语义：`kernel` = CLI 入口（@deepseek-ai/dsh）版本；`bundles` = profile 组件（含官方内置 base/web-app 与自研插件）；`vendored` = 社区插件锁定。
-- **新版本发现（2026-10-01 落地，只报告不升级）**：开发侧 `scripts/check-kernel-version.mjs`（`pnpm kernel:check`；`--check` = 闸门：有新版本或仓库内漂移 → 退出 1，检测失败退出 2 而不冒充"没有新版本"）；管理端 console「版本」页签展示官方 npm dist-tags 与本机 runtime 池最高版本的差异（`checkKernelUpdate` @Remote，TTL 缓存，失败只报错）。发现的版本要进池仍需人工导入——两者打通见 §9。
+- **新版本发现（2026-10-01 落地，只报告不升级）**：开发侧 `scripts/check-kernel-version.mjs`（`pnpm kernel:check`；`--check` = 闸门：有新版本或仓库内漂移 → 退出 1，检测失败退出 2 而不冒充"没有新版本"）；管理端 console「版本」页签展示官方 npm dist-tags 与本机 runtime 池最高版本的差异（`checkKernelUpdate` @Remote，TTL 缓存，失败只报错）。发现的版本要进池仍需**人工导入**（导入 = 认领本机已有的官方安装、版本号须完全对上，不代为下载——自动装+导入见 §9）；实例页「升级」对话框从池内选目标版本（默认最新）。两者打通见 §9。
 
 ### Profile 矩阵（四个模板）
 
