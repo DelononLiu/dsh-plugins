@@ -64,7 +64,7 @@ function InstanceRow(props: {
   // 自报缺失（离线/老实例）才回退磁盘 runtime 池软链（离线也算得出来）。
   const verLabel = versionLabel(item)
   const verTitle = versionTitle(item)
-  // 操作列固定宽度、按"列"渲染：版本胶囊 / 跳转 / 启停 / 重启 / ⋯ 五个槽位
+  // 操作列固定宽度、按"列"渲染：跳转 / 启停 / 重启 / ⋯ 四个槽位
   // 在每行里都存在（不可用 disabled 灰显留位占），保证三行同名列横坐标一致。
   const canMore = !!onMore
   return (
@@ -75,7 +75,6 @@ function InstanceRow(props: {
         <div className="name">{item.name}</div>
         <div className="meta"><span className="dsh-console-meta-ver" title={verTitle}>{verLabel}</span> · {opLabel ?? (online ? '在线' : '离线')} · {machineName ?? item.host ?? item.id}{item.self ? ' · 当前实例' : ''}</div>
       </div>
-      <span className="dsh-console-ver" title={verTitle}>{verLabel}</span>
       <button
         type="button"
         className="dsh-console-btn dsh-console-act"
