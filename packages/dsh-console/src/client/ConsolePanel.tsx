@@ -60,6 +60,7 @@ function InstanceRow(props: {
   // 在每行里都存在（不可用 disabled 灰显留位占），保证三行同名列横坐标一致。
   const canMore = !!onMore
   return (
+    <>
     <div className="dsh-console-row">
       <span className={`dot ${opLabel ? 'pend' : (online ? 'on' : 'off')}`} />
       <div className="grow">
@@ -94,35 +95,38 @@ function InstanceRow(props: {
       >
         {opLabel === '重启中…' ? '重启中…' : '重启'}
       </button>
-      <div className="dsh-console-act dsh-console-act-more" style={{ position: 'relative' }}>
+      <div className="dsh-console-act dsh-console-act-more">
         <button
           type="button"
           className="dsh-console-btn dsh-console-act-btn"
           disabled={!canMore}
+          aria-expanded={canMore ? menuOpen : undefined}
           title={canMore ? '更多操作' : '当前实例不可操作'}
           onClick={() => { if (canMore) setMenuOpen((v) => !v) }}
         >⋯</button>
-        {canMore && menuOpen && (
-          <>
-            {/* 点击外部关闭 */}
-            <div style={{ position: 'fixed', inset: 0, zIndex: 1999 }} onClick={() => setMenuOpen(false)} />
-            <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 2000, minWidth: 160, background: 'var(--dsw-alias-bg-layer-2)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, boxShadow: 'var(--dsw-shadow-lv2)', padding: 4 }}>
-              <button type="button" className="dsh-console-menu-item" onClick={() => { setMenuOpen(false); onMore!('upgrade', item.id) }}>
-                升级…（在对话框里选目标版本）
-              </button>
-              <button
-                type="button"
-                className="dsh-console-menu-item"
-                onClick={() => { setMenuOpen(false); onMore!('delete', item.id) }}
-                title="停止进程并把目录归档（可从命令行恢复）；正式 web 与本机 daemon 会被拒绝"
-              >
-                删除实例…
-              </button>
-            </div>
-          </>
-        )}
       </div>
     </div>
+    {/* 更多功能 = 本行下方展开的一行（不是浮层弹框）：与行同宽、缩进对齐，用完「收起」。 */}
+    {canMore && menuOpen && (
+      <div className="dsh-console-row-more" role="menu" aria-label={`${item.name} 的更多操作`}>
+        <span className="dsh-console-row-more-lead">更多操作</span>
+        <button type="button" role="menuitem" className="dsh-console-btn dsh-console-act" onClick={() => { setMenuOpen(false); onMore!('upgrade', item.id) }}>
+          升级…（在对话框里选目标版本）
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="dsh-console-btn dsh-console-act danger"
+          onClick={() => { setMenuOpen(false); onMore!('delete', item.id) }}
+          title="停止进程并把目录归档（可从命令行恢复）；正式 web 与本机 daemon 会被拒绝"
+        >
+          删除实例…
+        </button>
+        <div className="grow" />
+        <button type="button" className="dsh-console-btn dsh-console-act" onClick={() => setMenuOpen(false)}>收起</button>
+      </div>
+    )}
+    </>
   )
 }
 
