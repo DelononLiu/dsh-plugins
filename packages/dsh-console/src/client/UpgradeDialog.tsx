@@ -23,7 +23,12 @@ const STEP_INDEX: Record<UpgradeStep, number> = { snapshot: 0, align: 1, restart
 export interface UpgradeDialogProps {
   item: ConsoleInstanceViewItem
   host: ConsoleHost
+  /** 当前选中的目标版本（由父组件持有；用户在下拉里改）。 */
   version: string
+  /** 池内可选版本（升到哪个版本由人挑，而不是写死最新）。 */
+  versions?: readonly string[]
+  /** 改选目标版本。 */
+  onPickVersion?: (version: string) => void
   onClose: () => void
 }
 
@@ -101,6 +106,20 @@ export function UpgradeDialog(props: UpgradeDialogProps): React.JSX.Element {
           </div>
 
           {!startedRef.current && (
+            <>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
+              目标版本
+              <select
+                className="dsh-console-select"
+                value={version}
+                disabled={busy}
+                onChange={(e) => { props.onPickVersion?.(e.target.value) }}
+              >
+                {(props.versions ?? []).length === 0 && <option value={version}>{version === '' ? '（池内无版本）' : version}</option>}
+                {(props.versions ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+              <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>（当前实例：{item.version ?? '未记录'}）</span>
+            </label>
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" className="dsh-console-btn primary" disabled={busy} onClick={() => { void startUpgrade() }}>
                 {busy ? '下发中…' : '开始升级'}
@@ -109,6 +128,7 @@ export function UpgradeDialog(props: UpgradeDialogProps): React.JSX.Element {
                 由守护主机执行：快照 → 对齐发行包 → 滚动重启 → 健康探测，失败自动回滚
               </span>
             </div>
+            </>
           )}
 
           {startedRef.current && (

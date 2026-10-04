@@ -223,6 +223,8 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   const [toast, setToast] = useState<{ kind: 'ok' | 'error'; msg: string } | null>(null)
   /** 升级对话框目标实例（null = 关闭）。 */
   const [upgradeTarget, setUpgradeTarget] = useState<ConsoleInstanceViewItem | null>(null)
+  /** 升级目标版本（用户在升级对话框里从池内选；空 = 取池内最新/实例已记录版本）。 */
+  const [upgradePick, setUpgradePick] = useState('')
   const [newInstId, setNewInstId] = useState('')
   const [newInstPort, setNewInstPort] = useState('')
   const [newInstHost, setNewInstHost] = useState('host1')
@@ -588,7 +590,11 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 onMore={i.self ? undefined : (action, id) => {
                   if (action === 'delete') { void runDelete(id); return }
                   const inst = sortedInstances.find((x) => x.id === id)
-                  if (inst) setUpgradeTarget(inst)
+                  if (inst) {
+                    // 打开时默认选池内最新（可改）；池空则回落实例已记录版本。
+                    setUpgradePick(pool !== null && pool.versions.length > 0 ? pool.versions[pool.versions.length - 1].version : (inst.version ?? ''))
+                    setUpgradeTarget(inst)
+                  }
                 }}
               />
             ))}
@@ -854,9 +860,11 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
   // 升级目标版本 = 本机 runtime 池最新版本（池是版本的唯一来源；与创建向导的默认值
   // 同一取法）。池不可用时回落到实例已记录版本——那正是升级引擎 v1 的"重新对齐源"语义，
   // 比写死一个过期字面量诚实。
-  const upgradeVersion = pool !== null && pool.versions.length > 0
-    ? pool.versions[pool.versions.length - 1].version
-    : (upgradeTarget?.version ?? '')
+  const upgradeVersion = upgradePick !== ''
+    ? upgradePick
+    : (pool !== null && pool.versions.length > 0
+        ? pool.versions[pool.versions.length - 1].version
+        : (upgradeTarget?.version ?? ''))
 
   return (
     <div className="dsh-console-panel-overlay" role="presentation">
@@ -871,6 +879,8 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
           item={upgradeTarget}
           host={host}
           version={upgradeVersion}
+          versions={pool !== null ? pool.versions.map((v) => v.version) : []}
+          onPickVersion={setUpgradePick}
           onClose={() => setUpgradeTarget(null)}
         />
       )}
