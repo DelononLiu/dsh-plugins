@@ -21,6 +21,12 @@ Status: implemented
 `ok=true` 仅代表已下发（完成态经实例状态 / 事件呈现）。守卫：守护本体
 （`host\d+`）与管理端自身不可升级；无宿主 / 守护未注册 / 空版本逐条失败说明。
 
+派发（`dispatchToHost`）两模式同指令：多机 hub 经台账；**同机 local 经守护控制端口直连**
+（`remoteLifecycle` → `console/controlInstance`，version 走嵌套 `payload.version`）。
+local 模式此前对 upgrade 直接拒绝（"需要 hub 模式"），已按 deploy 先例补齐；两条路径
+都由守护侧 `handleDaemonControl 'upgrade'` 收口，错误原因（版本不在池 / 有操作进行中 /
+守护不可达）原样回 UI。
+
 ### 2. daemon 事务执行（执行面，handleDaemonControl 'upgrade' → daemonUpgrade）
 
 1. **快照**：`<dshHome>/.dsh-upgrade-snapshots/<instanceId>/<ts>/` 整体复制实例

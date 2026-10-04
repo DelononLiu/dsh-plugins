@@ -171,7 +171,8 @@ runtime 池软链 `runtimeVersion`（**离线也算得出来**），tooltip 分�
 - **守护名推导错**（阻塞，会导致 UI 删除在真实单机派发到不存在的守护）：注册表的 `host` 是**机器标识**
   （hostname，实测 `DELONON-THINK`），与守护 agent 名（`host-master`）不是一回事。改为按 launch 配置的
   `host` → channel 归属 → 档案 host 的优先级解析；并把 `delete`/`restore` 提为一等控制指令（联合类型 +
-  HTTP 白名单 + 直连 RPC 的 `remoteLifecycle`），local 模式的限制同步放宽。
+  HTTP 白名单 + 直连 RPC 的 `remoteLifecycle`），local 模式的限制同步放宽（后同法补 `upgrade`：
+  local 直连守护 `console/controlInstance`，载荷带目标版本）。
 - **归档早于进程退出**（阻塞，违反决策 6 顺序）：删除改异步，先停进程并**确认退出**（子进程 exitCode +
   端口释放，上限 5s），超时即放弃归档并显式失败——绝不归档活实例。
 - **异步下发谎报成功**（阻塞）：管理事件新增「已受理」态——下发型操作不再记「成功」，真实结果由执行面

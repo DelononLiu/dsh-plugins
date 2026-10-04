@@ -726,6 +726,59 @@ describe('统一升级（console 编排）', () => {
     expect((received[0]?.payload as { instanceId: string; version: string }).version).toBe('0.1.2-rc.1')
   })
 
+  it('upgradeInstances：local 模式有 addr → 直连守护 controlInstance 且带目标版本（不再报"需要 hub 模式"）', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30_000 })
+    await ctx.plugin(ConsoleService, {
+      launch: {
+        'host-master': { host: 'host-master', addr: 'http://127.0.0.1:3089' },
+        webA: { host: 'host-master', addr: 'http://127.0.0.1:3082' },
+      },
+    })
+    const calls: Array<{ url: string; body: string }> = []
+    ConsoleService.fetchImpl = (async (url: string, init?: { body?: string }) => {
+      calls.push({ url: String(url), body: String(init?.body ?? '') })
+      return new Response(JSON.stringify({ result: { ok: true, value: { ok: true } } }), { status: 200 })
+    }) as unknown as typeof fetch
+    try {
+      const r = ctx.console.upgradeInstances(['webA'], '0.2.0-rc.2')
+      expect(r.results).toHaveLength(1)
+      expect(r.results[0].ok).toBe(true)
+      expect(r.results[0].error ?? '').not.toContain('需要 hub 模式')
+      const control = calls.filter((c) => c.url.includes('/api/console/controlInstance'))
+      expect(control).toHaveLength(1)
+      expect(control[0].url).toBe('http://127.0.0.1:3089/api/console/controlInstance')
+      const frame = JSON.parse(control[0].body) as {
+        method: string
+        payload: { args: { instanceId: string; command: string; payload: { version?: string } } }
+      }
+      expect(frame.method).toBe('console/controlInstance')
+      expect(frame.payload.args).toMatchObject({ instanceId: 'webA', command: 'upgrade', payload: { version: '0.2.0-rc.2' } })
+    } finally {
+      ConsoleService.fetchImpl = fetch
+    }
+  })
+
+  it('upgradeInstances：hub 模式仍走台账派发（不走 local 直连）', async () => {
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: { host2: 'tok-2' }, heartbeatTimeoutMs: 30_000, mode: 'hub', pollWaitMs: 200 })
+    await ctx.plugin(ConsoleService, { launch: { 'host2': { host: 'host2', addr: 'http://127.0.0.1:3099' }, webA: { host: 'host2' } } })
+    await ctx.channel.registerWorker({ id: 'host2', instances: [{ id: 'webA', status: 'online' }] }, 'tok-2')
+    let fetched = 0
+    ConsoleService.fetchImpl = (async () => { fetched += 1; return new Response('{}', { status: 200 }) }) as unknown as typeof fetch
+    try {
+      const r = ctx.console.upgradeInstances(['webA'], '0.1.2-rc.1')
+      expect(r.results[0].ok).toBe(true)
+      expect(fetched).toBe(0)
+      const ledger = ctx.channel.ledgerSnapshot()
+      expect(ledger).toHaveLength(1)
+      expect(ledger[0].command.type).toBe('upgrade')
+      expect(ledger[0].targetId).toBe('host2')
+    } finally {
+      ConsoleService.fetchImpl = fetch
+    }
+  })
+
   it('upgradeInstances：守护未注册 / 无宿主 / 守护本体 → 逐条失败并说明', async () => {
     const ctx = new Context()
     await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })

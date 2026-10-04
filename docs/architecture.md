@@ -145,6 +145,9 @@ SSH（仅一次性引导）──► 装最小 agent ──► 之后全走 agen
 ### 日常管理（control，全走 channel）
 
 - console → agent：`deploy` / `create-instance` / `stop` / `start` / `upgrade` 等结构化指令（typert RPC）。
+- 派发模式二选一，指令集相同：多机 hub 经落盘台账（worker 出站长轮询取走，未注册目标显式失败）；
+  同机 local 直连守护控制端口（无 addr 时进程内回环）。**local 模式同样支持 `upgrade`**——守护侧
+  `handleDaemonControl 'upgrade'` 起独立升级事务，version 走 `payload.version`。
 - agent 本地执行（克隆模板 → 新 profile → 起进程 → 注册档案），回传结构化回执。
 - 心跳经 channel 上报；主机在线状态 = 其下实例心跳聚合。
 - 升级 = 推新版本发行包 → 逐实例滚动重启 → 心跳恢复确认。

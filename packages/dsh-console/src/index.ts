@@ -2583,8 +2583,15 @@ export class ConsoleService extends TypertRemoteService {
       // ——否则同机部署根本走不通（实测：UI 新建实例报"需要 hub 模式"）。
       return this.remoteLifecycle(hostId, 'deploy', instanceId, command.payload)
     }
+    if (command.type === 'upgrade') {
+      // upgrade 与 deploy 同类：守护侧是独立升级事务（handleDaemonControl 'upgrade'），
+      // local 模式有 addr 时同样直连下发；载荷必须带目标版本（守护按 payload.version
+      // 选池内 runtime，丢了版本就退化成"按当前发行包源重新对齐"）。
+      const version = (command.payload as { version?: string } | undefined)?.version
+      return this.remoteLifecycle(hostId, 'upgrade', instanceId, { version })
+    }
     if (command.type !== 'stop' && command.type !== 'start' && command.type !== 'restart') {
-      return { ok: false, error: `${command.type} 需要 hub 模式（多机台账派发）；同机 local 模式只直连 stop/start/restart/delete/restore/deploy` }
+      return { ok: false, error: `${command.type} 需要 hub 模式（多机台账派发）；同机 local 模式只直连 stop/start/restart/delete/restore/deploy/upgrade` }
     }
     return this.remoteControl(hostId, { instanceId, command: command.type })
   }
@@ -2594,10 +2601,10 @@ export class ConsoleService extends TypertRemoteService {
    * 目标侧本地执行，返回回执）。直连优先、broker 兜底；不可达 → 降级 sendControl。
    */
   /**
-   * 经直连 RPC 下发 delete/restore（这两个动作不属于 stop/start/restart 的生命周期语义，
-   * 因此不共用 remoteControl 的窄联合）。语义同 dispatchToHost：ok = 已下发，异步完成。
+   * 经直连 RPC 下发 delete/restore/deploy/upgrade（这些动作不属于 stop/start/restart
+   * 的生命周期语义，因此不共用 remoteControl 的窄联合）。语义同 dispatchToHost：ok = 已下发，异步完成。
    */
-  private remoteLifecycle(targetId: string, command: 'delete' | 'restore' | 'deploy', instanceId: string, payload: unknown = {}): ControlResult {
+  private remoteLifecycle(targetId: string, command: 'delete' | 'restore' | 'deploy' | 'upgrade', instanceId: string, payload: unknown = {}): ControlResult {
     // **直接按 addr POST**，不用 channel.callRemote：后者要求目标在 channel 的实例表里且 online，
     // 而守护 agent（host-*）不在那张表 → 会 reject，我此前还把它 catch 掉了 = 静默不生效（实测踩到）。
     // 帧格式与守护控制面一致（`console/<method>`），已有手工验证。
@@ -2607,7 +2614,12 @@ export class ConsoleService extends TypertRemoteService {
       return { ok: false, error: `守护 ${targetId} 无可直连 addr，无法下发 ${command}` }
     }
     const method = command === 'deploy' ? 'deployInstance' : 'controlInstance'
-    const args = command === 'deploy' ? { request: payload } : { instanceId, command, payload: {} }
+    const args = command === 'deploy'
+      ? { request: payload }
+      // upgrade 经 controlInstance 承载，版本在嵌套 payload.version（守护侧边界只解这一层）。
+      : command === 'upgrade'
+        ? { instanceId, command, payload: (payload ?? {}) as { version?: string } }
+        : { instanceId, command, payload: {} }
     const url = `${addr.replace(/\/$/, '')}/api/console/${method}`
     void ConsoleService.fetchImpl(url, {
       method: 'POST',
