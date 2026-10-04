@@ -1362,15 +1362,21 @@ export class ConsoleService extends TypertRemoteService {
     return currentRuntimeVersion(join(dshHome, 'profiles', profile)) ?? undefined
   }
 
-  /** 守护本地发行包版本（templateHome 的 profile package.json；不可读返回 undefined）。 */
+  /**
+   * 守护本地发行包版本（模板基目录下的 profile package.json；不可读返回 undefined）。
+   * 基目录按 {@link templatesBase} 的布局感知解析（两种 templateHome 布局都对）。
+   */
   private readDaemonPackageVersion(): string | undefined {
-    const template = this.config.templateHome
-    if (template === undefined || template === '') return undefined
-    const profilesDir = resolve(template, 'profiles')
+    const base = this.templatesBase()
+    if (base === null) return undefined
     try {
-      for (const name of readdirSync(profilesDir)) {
-        const version = this.readInstanceVersion({ dshHome: template, profile: name })
-        if (version !== undefined) return version
+      for (const name of readdirSync(base)) {
+        try {
+          const parsed = JSON.parse(readFileSync(join(base, name, 'package.json'), 'utf8')) as { version?: unknown }
+          if (typeof parsed.version === 'string') return parsed.version
+        } catch {
+          // 非 profile 目录/不可读/无 version → 跳过
+        }
       }
     } catch {
       return undefined
@@ -1466,6 +1472,14 @@ export class ConsoleService extends TypertRemoteService {
     if (t === undefined || t === '') return null
     const asHome = join(t, 'profiles')
     return existsSync(asHome) ? asHome : t
+  }
+
+  /**
+   * 是否为**完整发行包 profile**：`package.json` 与补丁 `cordis.patch.yml`
+   * 同时在（发行包三件套的载体）。缺任一 → 不算整包，不作为发行包源。
+   */
+  private isReleaseProfile(dir: string): boolean {
+    return existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'cordis.patch.yml'))
   }
 
   /** 模板目录里可用的模板名（每个含 package.json 的子目录）。 */
@@ -1745,19 +1759,17 @@ export class ConsoleService extends TypertRemoteService {
    * 属于实例化值，不随发行包更新；无发行包源 → 抛错（触发回滚路径）。
    */
   private applyReleaseFromTemplate(homeProfile: string, instanceId: string, spec: LaunchSpec, version: string): void {
-    const template = this.config.templateHome
-    // 源 = templateHome 下实际存在的发行包 profile（daemon 模板 home 的完整发行包）。
-    // 不按目标实例名猜（实例 profile 名 = 实例名，守护模板 home 只有自己的 profile）。
+    // 源基目录按模板布局解析（**两种 templateHome 布局**：模板目录本身 / 含 profiles/ 的 home）。
+    const base = this.templatesBase()
+    // 源 = 基目录下实际存在的完整发行包 profile。不按目标实例名猜
+    // （实例 profile 名 = 实例名，守护模板目录只有模板）。
     let source = ''
-    if (template !== undefined && template !== '') {
-      const dir = join(template, 'profiles')
-      if (existsSync(dir)) {
-        const candidates = readdirSync(dir).filter((n) => existsSync(join(dir, n, 'package.json')))
-        // 优先同 spec.profile 名（若守护模板恰好同名），否则取第一个完整发行包。
-        source = candidates.includes(spec.profile)
-          ? join(dir, spec.profile)
-          : (candidates.length > 0 ? join(dir, candidates[0]) : '')
-      }
+    if (base !== null && existsSync(base)) {
+      const candidates = readdirSync(base).filter((n) => this.isReleaseProfile(join(base, n)))
+      // 优先同 spec.profile 名（若守护模板恰好同名），否则取第一个完整发行包。
+      source = candidates.includes(spec.profile)
+        ? join(base, spec.profile)
+        : (candidates.length > 0 ? join(base, candidates[0]) : '')
     }
     if (source === '') {
       throw new Error('守护未配置发行包源（config.templateHome 下无完整发行包 profile）')

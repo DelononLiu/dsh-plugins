@@ -31,11 +31,13 @@ local 模式此前对 upgrade 直接拒绝（"需要 hub 模式"），已按 dep
 
 1. **快照**：`<dshHome>/.dsh-upgrade-snapshots/<instanceId>/<ts>/` 整体复制实例
    profile 发行包，滚动保留 **3 份**（最新一份即回滚点）；
-2. **reconcile 对齐发行包源**：从守护发行包源（`config.templateHome` 对应
-   profile——Docker 镜像类比，测试矩阵 = `~/.dsh-web3`）重拷发行包条目
+2. **reconcile 对齐发行包源**：从守护发行包源（`config.templateHome` 对应的
+   **完整发行包 profile**——Docker 镜像类比）重拷发行包条目
    （package.json/cordis.yml/node_modules…），**保留实例 patch**
    （cordis.patch.yml：端口/令牌/身份不随发行包更新），写版本标记
-   `.dsh-release.json`；
+   `.dsh-release.json`。源基目录按**模板布局解析**（`templatesBase()`，两种布局：
+   `templateHome` 是模板目录本身，或是其下含 `profiles/` 的上层 home），**整包判据 =
+   package.json + cordis.patch.yml 都在**；无整包 → 报「守护未配置发行包源」触发回滚；
 3. **滚动重启**：守护子进程 → kill 等退出再拉起；非守护拉起的在线实例 →
    本机端口定位 kill（无 broker 也能停，SSH 一次性引导纪律）等端口释放再拉起；
    离线 → 直接拉起；
@@ -89,6 +91,15 @@ version，只留 instanceId——直接 sendControl 路径不受影响）。
   快照轮转 ≤3。
 - **B1 跨进程实测（阴性）**：daemon emit `system.upgrade.result` 后，管理端 web2
   **未收到**（channel 事件不跨 relay）→ 结果呈现改走落盘文件 + 实例在线状态（见上）。
+- **发行包源按模板布局解析（2026-10-04 实测修复）**：`applyReleaseFromTemplate`
+  原先写死 `<templateHome>/profiles`；当 `templateHome` 已是模板目录（工程 `profiles/`，
+  真机守护 `~/.dsh/profiles/daemon` 即此配置）时指向不存在的 `profiles/profiles`
+  → align 恒失败「守护未配置发行包源」，hub 与 local 同等受影响。改用布局感知的
+  `templatesBase()`（两种布局），整包判据收紧为 `package.json` + `cordis.patch.yml`
+  同在；`readDaemonPackageVersion` 同步布局感知。单测 +3（两种布局各一 + 缺补丁仍
+  报未配置并回滚）；真机 E2E：临时守护（`templateHome = 仓库 profiles/`）升级临时实例，
+  align 对齐自 `.../profiles/dev` → 滚动重启 → 3092 健康监听，`.dsh-upgrade-status.json`
+  `ok=true`（全流程通过）。
 
 相关：[deploy-instance-closed-loop](../../proposed/architecture/2026-09-04-deploy-instance-closed-loop.md)
 · [daemon-host-supervisor](2026-08-22-daemon-host-supervisor.md) ·

@@ -529,6 +529,7 @@ describe('daemon 角色（主机守护）', () => {
       const src = join(tmp, 'src', 'profiles', 'web')
       mkdirSync(src, { recursive: true })
       writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      writeFileSync(join(src, 'cordis.patch.yml'), '# 源发行包 patch\n')
       writeFileSync(join(src, 'cordis.yml'), '[]\n')
       // 实例 home（升级前 = OLD）。
       const inst = join(tmp, 'inst', 'profiles', 'web')
@@ -567,6 +568,7 @@ describe('daemon 角色（主机守护）', () => {
       const src = join(tmp, 'src', 'profiles', 'web')
       mkdirSync(src, { recursive: true })
       writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      writeFileSync(join(src, 'cordis.patch.yml'), '# 源发行包 patch\n')
       const inst = join(tmp, 'inst', 'profiles', 'web')
       mkdirSync(inst, { recursive: true })
       writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
@@ -601,6 +603,7 @@ describe('daemon 角色（主机守护）', () => {
       const src = join(tmp, 'src', 'profiles', 'web')
       mkdirSync(src, { recursive: true })
       writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      writeFileSync(join(src, 'cordis.patch.yml'), '# 源发行包 patch\n')
       const inst = join(tmp, 'inst', 'profiles', 'web')
       mkdirSync(inst, { recursive: true })
       writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
@@ -633,6 +636,7 @@ describe('daemon 角色（主机守护）', () => {
       const src = join(tmp, 'src', 'profiles', 'web')
       mkdirSync(src, { recursive: true })
       writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      writeFileSync(join(src, 'cordis.patch.yml'), '# 源发行包 patch\n')
       const inst = join(tmp, 'inst', 'profiles', 'web')
       mkdirSync(inst, { recursive: true })
       writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
@@ -664,6 +668,7 @@ describe('daemon 角色（主机守护）', () => {
       const src = join(tmp, 'src', 'profiles', 'web')
       mkdirSync(src, { recursive: true })
       writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n')
+      writeFileSync(join(src, 'cordis.patch.yml'), '# 源发行包 patch\n')
       const inst = join(tmp, 'inst', 'profiles', 'web')
       mkdirSync(inst, { recursive: true })
       writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
@@ -2422,3 +2427,89 @@ describe('本机守护自启 + 幽灵行（daemon 是 ~/.dsh 下与 web 平级�
     expect(ids).toContain('web7')
   })
 })
+
+describe('upgrade 发行包源按模板布局解析（两种 templateHome 布局都必须能定位）', () => {
+  afterEach(() => {
+    ConsoleService.spawnImpl = childProcess.spawn
+    vi.useRealTimers()
+  })
+
+  /**
+   * 在 `tplHome` 布局下真跑一次 daemon upgrade（对齐发行包源），返回实例 profile 目录。
+   * 源 profile 放 `release:SRC`、实例放 `release:OLD`——对齐通过后实例 package.json 应变 SRC。
+   */
+  async function runAlignUpgrade(tplHome: string, tmp: string): Promise<string> {
+    vi.useFakeTimers()
+    const inst = join(tmp, 'inst', 'profiles', 'web')
+    mkdirSync(inst, { recursive: true })
+    writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
+    writeFileSync(join(inst, 'cordis.patch.yml'), '# 实例 patch（保留）\n')
+    mockSpawn(fakeChild())
+    const ctx = await bootDaemon({ templateHome: tplHome, instances: { web9: { dshHome: join(tmp, 'inst'), profile: 'web' } } })
+    ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'web9', version: '0.1.7-rc.2' } })
+    await vi.advanceTimersByTimeAsync(16_000) // 无端口 → 健康宽限
+    return inst
+  }
+
+  /** 源发行包 profile（完整整包 = package.json + cordis.patch.yml）。 */
+  function writeSourceProfile(dir: string): void {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), '{"release":"SRC"}\n')
+    writeFileSync(join(dir, 'cordis.patch.yml'), '# 源发行包 patch\n')
+  }
+
+  it('布局一：templateHome = 模板目录（其下直接是 dev/ 等模板）', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-src-tpldir-'))
+    try {
+      const tplHome = join(tmp, 'platform', 'profiles') // 工程 profiles/ 直接当 templateHome
+      writeSourceProfile(join(tplHome, 'dev'))
+      const inst = await runAlignUpgrade(tplHome, tmp)
+      expect(readFileSync(join(inst, 'package.json'), 'utf8')).toContain('SRC')
+      expect(readFileSync(join(inst, 'cordis.patch.yml'), 'utf8')).toContain('# 实例 patch')
+      expect(JSON.parse(readFileSync(join(inst, '.dsh-release.json'), 'utf8')).version).toBe('0.1.7-rc.2')
+      expect(JSON.parse(readFileSync(join(tmp, 'inst', '.dsh-upgrade-status.json'), 'utf8')).ok).toBe(true)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('布局二：templateHome = 上层目录（其下含 profiles/，再下是模板）', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-src-tplhome-'))
+    try {
+      const tplHome = join(tmp, 'home') // 含 profiles/ 的 home
+      writeSourceProfile(join(tplHome, 'profiles', 'dev'))
+      const inst = await runAlignUpgrade(tplHome, tmp)
+      expect(readFileSync(join(inst, 'package.json'), 'utf8')).toContain('SRC')
+      expect(JSON.parse(readFileSync(join(tmp, 'inst', '.dsh-upgrade-status.json'), 'utf8')).ok).toBe(true)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('真的没有整包（只有 package.json、缺补丁）→ 仍报「未配置发行包源」并回滚', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dsh-src-none-'))
+    try {
+      const tplHome = join(tmp, 'profiles')
+      const src = join(tplHome, 'dev')
+      mkdirSync(src, { recursive: true })
+      writeFileSync(join(src, 'package.json'), '{"release":"SRC"}\n') // 缺 cordis.patch.yml = 不完整
+      const inst = join(tmp, 'inst', 'profiles', 'web')
+      mkdirSync(inst, { recursive: true })
+      writeFileSync(join(inst, 'package.json'), '{"release":"OLD"}\n')
+      writeFileSync(join(inst, 'cordis.patch.yml'), '# patch\n')
+      mockSpawn(fakeChild())
+      const ctx = await bootDaemon({ templateHome: tplHome, instances: { web9: { dshHome: join(tmp, 'inst'), profile: 'web' } } })
+      ctx.channel.sendControl('host-lab1', { type: 'upgrade', payload: { instanceId: 'web9', version: '0.1.7-rc.2' } })
+      await new Promise((r) => setTimeout(r, 30))
+      // 对齐失败 → 回滚：实例保持 OLD，状态落盘错误 = 未配置发行包源。
+      expect(readFileSync(join(inst, 'package.json'), 'utf8')).toContain('OLD')
+      const status = JSON.parse(readFileSync(join(tmp, 'inst', '.dsh-upgrade-status.json'), 'utf8')) as { ok: boolean; error?: string; rolledBack?: boolean }
+      expect(status.ok).toBe(false)
+      expect(status.rolledBack).toBe(true)
+      expect(status.error).toContain('守护未配置发行包源')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
