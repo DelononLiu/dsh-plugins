@@ -220,6 +220,8 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 
 实例矩阵权威源 = 管理端 web（3080 的 `dsh-console.launch` 配置）；quick-nav/console 从 `DSH_CONSOLE_ADDR` 拉实例表（实例清单权威源 = 注册表 `~/.dsh-home/registry.json`）。
 
+**实例进程定位 / 就绪判定**（`scripts/dsh-profile.sh`，杜绝"假重启"）：定位 = argv 形态扫（pgrep）+ **端口占用者反查**（`ss -ltnp`）双路，候选 pid 扫到一半退出（ENOENT）跳过继续扫、不报错；身份 = home + profile 双匹配，官方 `dsh web` 不显式设 DSH_HOME、按默认 `~/.dsh` 认；就绪 = **本次 spawn 的 pid 存活** 且 **该端口占用者就是这个 pid**（headless 只看 spawn 的 pid）——「某进程活着 + 端口在听 + HTTP 有应答」会被占着端口的**旧进程**骗成假就绪；spawn 退出/超时打印 `/tmp/dsh-<名>.log` 尾部并非零退出。见 AGENTS.md「测试环境」段与 [假重启修复 note](../.agents/notes/implemented/fix/2026-10-04-dsh-profile-ready-bind-spawned-pid.md)。
+
 ---
 
 ## 5. 分层 × 插件矩阵
@@ -381,7 +383,7 @@ profile 目录名 = 实例名（各实例在自家 home 的 `profiles/<实例名
 | dsh-quick-nav 顶栏导航（**保留但不加载**，不进任何 profile） | 单测保真 |
 | dsh-focus-session 侧栏置顶区 + 活跃区 + 会话胶囊标签 + 官方会话行「⋯」菜单里的添加到置顶区/从置顶区移除入口（钉/排序/取消钉 + 最近活跃时间序 + 行菜单前置官方 rename/fork 再接编辑标签与添加到置顶区/从置顶区移除 + 标签弹框 + 会话行菜单里的跨工作区钉入 + 当前会话选中态读官方侧栏 DOM 反推；菜单/弹框照官方 Menu/Modal 契约） | 130 测试 |
 | dsh-show-me 复杂内容呈现层（约定围栏 + 提示词段 + 消息内图片化 + 验收硬规则"无证据=未验证" + legacy 围栏别名） | 32 测试 + dev 实例（web2/3082）自验 |
-| 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh 读实例注册表 | scripts/ 已实测（registry.test.mjs 7 项 + profile-registry.test.sh 14 项） |
+| 测试环境固定矩阵（web2/3/4/daemon 端口角色）+ dsh-profile.sh 读实例注册表、进程定位/就绪判定（端口占用者反查 + 就绪绑本次 spawn 的 pid） | scripts/ 已实测（registry.test.mjs 7 项 + profile-registry.test.sh 20 项 + dsh-profile.test.mjs 3 项） |
 | 内核新版本检测（开发侧脚本闸门 + 管理端 console 只读展示；顺带修升级对话框硬编码目标版本） | scripts/tests/kernel-version.test.mjs 14 项 + packages/dsh-console/tests/kernel-update.spec.ts 17 项；见 [kernel-version-detection](../.agents/notes/implemented/feature/2026-10-01-kernel-version-detection.md) |
 | vendoring 统一 npm（submodule 归零） | AGENTS.md policy |
 

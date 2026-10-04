@@ -14,7 +14,11 @@
 #   DSH_WEB_URL/DSH_WEB_MODE（调用方 env 与旧进程继承两条路径都过滤）——这类变量
 #   由 DSH 在 agent 会话内注入，带进别的实例会让它指向别的实例的会话与 home，
 #   破坏「测试环境目录隔离」。
-# ✅ restart 等待就绪：进程在 + 端口监听（headless 只看进程），超时打印日志尾部并非零退出。
+# ✅ 进程定位 = argv 形态扫（pgrep）+ 端口占用者反查（`ss -ltnp`）双路，占用者仍要过
+#   home+profile 双匹配；官方 `dsh web` 进程不设 DSH_HOME，按默认 ~/.dsh 认。
+# ✅ restart 等待就绪：**本次 spawn 的 pid 存活** 且 **该端口占用者就是这个 pid**
+#   （headless 只看 spawn 的 pid）；spawn 退出立即判失败（或超时）后打印日志尾部
+#   并非零退出——别人占着端口答 200/401 不算自己的就绪（杜绝"假重启"）。
 # 🔴 永不触碰正式 ~/.dsh（3080 禁令，见 AGENTS.md）——**例外**：`web` 与 `daemon`
 #   是同一 home（~/.dsh）下的两个 profile（GUI 与 headless 守护），按 profile 启停
 #   是正常运维；其余任何实例仍一律拒绝。
@@ -142,8 +146,9 @@ ENV_DENY_PREFIX_RE='^(DSH_SESSION_|CLAUDE|VSCODE|COPILOT|OPENWIKI|WSL|XDG_|DBUS_
 
 # 收集可继承的 env（stdout：`VAR=value` 行）。
 collect_inherit_env() {
-  local pid="$1"
-  tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
+  local pid="$1" env_file="/proc/$pid/environ"
+  [[ -r "$env_file" ]] || return 0
+  { tr '\0' '\n' < "$env_file"; } 2>/dev/null \
     | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' \
     | grep -vE "$ENV_DENY_EXACT_RE" \
     | grep -vE "$ENV_DENY_PREFIX_RE" \
@@ -155,9 +160,44 @@ port_listening() {
   ss -tln 2>/dev/null | grep -q ":$1 "
 }
 
-# 启动实例并等待就绪（port 监听；headless 只看进程存活），超时打印日志尾部。
+# 该端口的**占用者** pid（LISTEN 进程，可能多个）。`ss -ltnp` 的
+# `users:(("MainThread",pid=123,fd=21))` 里取 pid=NNN。无权限看到 uid 时可能为空。
+port_owner_pids() {
+  ss -ltnp 2>/dev/null | grep ":$1 " | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u
+}
+
+# 进程存活（排除僵尸）：launch_instance 的 spawn 是当前脚本的**子进程**，退出后在
+# 被 wait 前保持僵尸态，而 `kill -0 <僵尸>` 仍返回 0——不排除会把"已死"当"还活着"。
+pid_alive() {
+  local pid="$1" st
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  st="$(grep -m1 '^State:' "/proc/$pid/status" 2>/dev/null || true)"
+  [[ "$st" == *Z* ]] && return 1
+  return 0
+}
+
+# pid 的 home：读 environ 的 DSH_HOME；**没有**该变量 = 官方 `dsh web` 启动形态
+# （官方 CLI 不显式设 DSH_HOME，默认 home = 该进程自己的 $HOME/.dsh）。少了这条回落，
+# 3080 的 `node …/dsh web` 进程会因 home 匹配不上而被判"未在运行"；回落必须用**进程
+# 自己**的 HOME（读它的 environ），不能用当前 shell 的 $HOME——否则沙箱/多用户下会把
+# 别人的 `dsh web` 认成自己的。
+proc_home() {
+  local pid="$1" env_file="/proc/$pid/environ" dump="" dsh_home="" ph=""
+  if [[ -r "$env_file" ]]; then
+    dump="$( { tr '\0' '\n' < "$env_file"; } 2>/dev/null | grep -E '^(DSH_HOME|HOME)=' || true )"
+  fi
+  dsh_home="$(printf '%s\n' "$dump" | grep -m1 '^DSH_HOME=' || true)"; dsh_home="${dsh_home#DSH_HOME=}"
+  if [[ -n "$dsh_home" ]]; then printf '%s' "$dsh_home"; return 0; fi
+  ph="$(printf '%s\n' "$dump" | grep -m1 '^HOME=' || true)"; ph="${ph#HOME=}"
+  if [[ -n "$ph" ]]; then printf '%s' "$ph/.dsh"; return 0; fi
+  printf '%s' "$OFFICIAL_HOME"
+}
+
+# 启动实例并等待就绪：spawn 的 pid 存活 +（web）该端口占用者就是它 + HTTP 有应答；
+# headless 只看 spawn 的 pid。spawn 退出或超时都打印日志尾部并非零退出。
 # 参数：<name> <home> <profile> <port|空=headless> <chanId> [额外 env VAR=value ...]
-# 返回 0=就绪，1=超时未就绪。
+# 返回 0=就绪，1=未就绪（失败）。
 launch_instance() {
   local name="$1" home="$2" profile="$3" port="$4" chanId="$5"; shift 5
   local log="/tmp/dsh-$name.log"
@@ -175,29 +215,40 @@ launch_instance() {
     "DSH_CHANNEL_ID=$chanId" \
     "$@" \
     nohup "$DSH_BIN" "${launch_args[@]}" > "$log" 2>&1 &
-  local deadline=$((SECONDS + READY_TIMEOUT)) pid http_code=""
+  # 就绪必须绑到**本次 spawn 的 pid**（nohup/env 都是 exec 接力，$! 就是最终进程）：
+  # 「某进程活着 + 端口在听 + HTTP 有应答」会被占着该端口的**旧进程**骗过——旧进程答
+  # 的 200/401 就是假就绪（2026-09-26 与 2026-10-04 两次事故的同一误报面）。
+  local spawned=$!
+  local deadline=$((SECONDS + READY_TIMEOUT)) http_code="" owner=""
   while (( SECONDS < deadline )); do
-    pid="$(is_running "$home" "$profile" || true)"
-    # pid 可能在 is_running 与端口判定之间退出：只认活着的 pid。否则「新进程 bind
-    # 失败已退出、别的进程仍占着端口」会让端口 + HTTP 判据误报就绪。
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      if [[ -z "$port" ]]; then
-        echo "[$name] 就绪 pid=$pid（headless）"
-        return 0
-      fi
-      # 端口监听 ≠ 应用就绪：实测启动窗口期内端口已监听，但应用仍返回 404。
-      # 因此再探一次 HTTP：200/303/401 都说明应用在服务（401 = 未登录的正常应答），
-      # 404/000 视为未就绪，继续等。
-      if port_listening "$port"; then
+    # spawn 已退出（bind 失败/EADDRINUSE）→ 立即判失败，不留到超时；日志尾部就是真因。
+    if ! pid_alive "$spawned"; then
+      echo "[$name] ✗ 启动进程已退出（pid=$spawned，${port:+端口 $port }未就绪）——日志尾部 $log：" >&2
+      tail -n 20 "$log" 2>/dev/null | sed 's/^/    /' >&2 || true
+      return 1
+    fi
+    if [[ -z "$port" ]]; then
+      echo "[$name] 就绪 pid=$spawned（headless）"
+      return 0
+    fi
+    # 端口监听 ≠ 应用就绪：实测启动窗口期内端口已监听，但应用仍返回 404。
+    # 因此再探一次 HTTP：200/303/401 都说明应用在服务（401 = 未登录的正常应答），
+    # 404/000 视为未就绪，继续等。
+    if port_listening "$port"; then
+      # 该端口的占用者**必须**是本次 spawn 的 pid；别人在听就不是我们起来了
+      # （旧实例/残余进程），继续等：spawn 要么被 EADDRINUSE 顶掉退出（下一轮判失败），
+      # 要么超时——绝不把别人答的 200/401 当自己的就绪。
+      owner="$(port_owner_pids "$port" | head -1 || true)"
+      if [[ "$owner" == "$spawned" ]]; then
         if command -v curl >/dev/null 2>&1; then
           http_code="$(curl -s -o /dev/null -m 2 -w '%{http_code}' "http://127.0.0.1:$port/" || true)"
           if [[ "$http_code" == "200" || "$http_code" == "303" || "$http_code" == "401" ]]; then
-            echo "[$name] 就绪 pid=$pid port=$port（HTTP $http_code）"
+            echo "[$name] 就绪 pid=$spawned port=$port（HTTP $http_code）"
             print_login_url "$name"
             return 0
           fi
         else
-          echo "[$name] 就绪 pid=$pid port=$port（监听；无 curl，未做 HTTP 探测）"
+          echo "[$name] 就绪 pid=$spawned port=$port（监听；无 curl，未做 HTTP 探测）"
           print_login_url "$name"
           return 0
         fi
@@ -205,8 +256,8 @@ launch_instance() {
     fi
     sleep 0.5
   done
-  echo "[$name] ✗ 未就绪（${READY_TIMEOUT}s 内${port:+ 端口 $port 已监听但应用未应答，最后 HTTP ${http_code:-000}}）——日志尾部 $log：" >&2
-  tail -n 10 "$log" 2>/dev/null | sed 's/^/    /' >&2 || true
+  echo "[$name] ✗ 未就绪（${READY_TIMEOUT}s 内${port:+ 端口 $port 占用者 ${owner:-无} ≠ spawn pid $spawned}${http_code:+，最后 HTTP $http_code}）——日志尾部 $log：" >&2
+  tail -n 20 "$log" 2>/dev/null | sed 's/^/    /' >&2 || true
   return 1
 }
 
@@ -219,49 +270,73 @@ print_login_url() {
   return 0
 }
 
-# 本实例的进程有两种启动形态，都要认：
+# 该 pid 是否就是「本实例」的进程：argv 形态（两种启动形态之一）+ home 双匹配。
 #   形态一 `node …/dsh --profile <p> …`——脚本与 console 拉起（web2/web3/web5/daemon）。
 #   形态二 `node …/dsh web …`——正式实例 3080 的官方启动形态（`dsh web` 的默认
 #     profile 就是 web，命令行不带 --profile）。漏掉形态二，3080 的进程就对
 #     status/stop/restart 隐形：`restart web` 杀不掉它，新进程 bind 3080 失败退出，
-#     而就绪判据只看「端口在听 + HTTP 200」——旧进程答的 200 把失败误报成「就绪」
-#     （2026-09-26 事故现场：换包后旧进程继续服务，插件加载 wire 格式不同代）。
+#     而就绪判据只看「端口在听 + HTTP 200」——旧进程答的 200 把失败误报成「就绪」。
 # 形态判据用 argv 精确解析（首参 == --profile <p> 或 web），不用宽松的 `*dsh*`
 # glob：`dsh web2` 也会命中 `*dsh*web*`，那样 `status web` 会张冠李戴。
+pid_is_instance() {
+  local pid="$1" home="$2" profile="$3"
+  local cmdline="/proc/$pid/cmdline"
+  # 候选 pid 可能在 pgrep 与本次读取之间退出（ENOENT）：**跳过继续扫**，不当成
+  # "没匹配"，也不打印报错。`< "$cmdline"` 的重定向失败是 shell 报的，`2>/dev/null`
+  # 吞不掉，故先判可读，并把整块 stderr 重定向兜住 TOCTOU 窗口。
+  [[ -r "$cmdline" ]] || return 1
+  local cmd
+  cmd="$( { tr '\0' ' ' < "$cmdline"; } 2>/dev/null || true )"
+  # 剥掉 argv[0]（node）与入口脚本，只看头两个参数定形态；入口必须是 dsh 本体
+  #（.bin/dsh 符号链接或 lib/bin.js），借此排除 bash 包装/gateway 子进程等
+  # 同样继承 DSH_HOME、命令行里也含 dsh 的旁支。
+  [[ "$cmd" == node\ * ]] || return 1
+  # 逐条 local 赋值（`local a=… b=${a}` 的实参在 local 执行前就展开，set -u 下报 unbound）。
+  local rest="${cmd#node }"
+  local bin="${rest%% *}"
+  rest="${rest#* }"
+  local first="${rest%% *}"
+  local cmd_profile=""
+  case "$bin" in
+    */dsh | */dsh.js | */bin.js) ;;
+    *) return 1 ;;
+  esac
+  case "$first" in
+    --profile)
+      cmd_profile="${rest#--profile }"; cmd_profile="${cmd_profile%% *}"
+      ;;
+    web) cmd_profile="web" ;;
+    *) return 1 ;;
+  esac
+  # profile 必须精确同名（`--profile web` 不得命中 `--profile web2`）：一个 home 下
+  # 可有多个 profile（~/.dsh 的 web 与 daemon），只按 home 匹配会把 GUI 与守护混为
+  # 一谈——`stop daemon` 可能命中 3080 GUI。
+  [[ "$cmd_profile" == "$profile" ]] || return 1
+  [[ "$(proc_home "$pid")" == "$home" ]] || return 1
+  return 0
+}
+
+# 按 argv 形态扫候选 pid（pgrep 等）。
 is_running() {
-  local home="$1" profile="$2"
+  local home="$1" profile="$2" pid
   for pid in $(pgrep -f 'dsh' 2>/dev/null || true); do
-    local cmd; cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-    # 剥掉 argv[0]（node）与入口脚本，只看头两个参数定形态；入口必须是 dsh 本体
-    #（.bin/dsh 符号链接或 lib/bin.js），借此排除 bash 包装/gateway 子进程等
-    # 同样继承 DSH_HOME、命令行里也含 dsh 的旁支。
-    [[ "$cmd" == node\ * ]] || continue
-    # 逐条 local 赋值（`local a=… b=${a}` 的实参在 local 执行前就展开，set -u 下报 unbound）。
-    local rest="${cmd#node }"
-    local bin="${rest%% *}"
-    rest="${rest#* }"
-    local first="${rest%% *}"
-    local cmd_profile=""
-    case "$bin" in
-      */dsh | */dsh.js | */bin.js) ;;
-      *) continue ;;
-    esac
-    case "$first" in
-      --profile)
-        cmd_profile="${rest#--profile }"; cmd_profile="${cmd_profile%% *}"
-        ;;
-      web) cmd_profile="web" ;;
-      *) continue ;;
-    esac
-    # profile 必须精确同名（`--profile web` 不得命中 `--profile web2`）：一个 home 下
-    # 可有多个 profile（~/.dsh 的 web 与 daemon），只按 home 匹配会把 GUI 与守护混为
-    # 一谈——`stop daemon` 可能命中 3080 GUI。
-    [[ "$cmd_profile" == "$profile" ]] || continue
-    if [[ "$(cat /proc/$pid/environ 2>/dev/null | tr '\0' '\n' | grep '^DSH_HOME=' | cut -d= -f2)" == "$home" ]]; then
-      echo "$pid"
-      return 0
-    fi
+    pid_is_instance "$pid" "$home" "$profile" && { echo "$pid"; return 0; }
   done
+  return 1
+}
+
+# 定位本实例正在运行的 pid：先按 argv 形态扫（pgrep），再用**端口占用者**反查兜底。
+# 端口占用是不可绕过的证据（pgrep 可能漏、argv 形态可能不认，但 3080 在听就一定有人
+# 占着）；占用者仍要过 pid_is_instance（home+profile 双匹配），防止把别人的实例误认成
+# 自己的。start/stop/restart/status 一律用它，不再只靠 pgrep。
+find_instance_pid() {
+  local home="$1" profile="$2" port="${3:-}" pid
+  if pid="$(is_running "$home" "$profile")"; then echo "$pid"; return 0; fi
+  if [[ -n "$port" ]]; then
+    for pid in $(port_owner_pids "$port"); do
+      if pid_is_instance "$pid" "$home" "$profile"; then echo "$pid"; return 0; fi
+    done
+  fi
   return 1
 }
 
@@ -269,7 +344,7 @@ start_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port chanId <<< "$info"
-  local pid; pid="$(is_running "$home" "$profile" || true)"
+  local pid; pid="$(find_instance_pid "$home" "$profile" "$port" || true)"
   if [[ -n "$pid" ]]; then
     echo "[$name] 已在运行 pid=$pid（$home）"
     return 0
@@ -282,15 +357,17 @@ stop_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port chanId <<< "$info"
-  local pid; pid="$(is_running "$home" "$profile" || true)"
+  local pid; pid="$(find_instance_pid "$home" "$profile" "$port" || true)"
   # 先定位 pid 再判自操作（祖先链判据需要 pid；见 guard_no_self_operate）。
   guard_no_self_operate "$name" "$home" "$pid" || return 1
   if [[ -n "$pid" ]]; then
     echo "[$name] 停止 pid=$pid"
     kill "$pid"
-    # 等待优雅退出（gateway/webserver 端口释放），避免紧跟的 start 竞态 bind 失败。
+    # 等待退出（webserver 端口释放）后再返回，避免紧跟的 start 竞态 bind 失败。
+    # 判据用端口占用者反查——只看 pid 存活不够：残余进程可能仍占着端口，而端口
+    # 没释放时新进程必定 EADDRINUSE。
     for _ in $(seq 1 40); do
-      is_running "$home" "$profile" >/dev/null 2>&1 || break
+      find_instance_pid "$home" "$profile" "$port" >/dev/null 2>&1 || break
       sleep 0.5
     done
   else
@@ -305,11 +382,11 @@ restart_one() {
   local name="$1"
   local info; info="$(resolve_instance "$name")" || return 1
   IFS='|' read -r home profile port chanId <<< "$info"
-  local pid; pid="$(is_running "$home" "$profile" || true)"
+  local pid; pid="$(find_instance_pid "$home" "$profile" "$port" || true)"
   local -a inherit=()
   if [[ -n "$pid" ]]; then
     local total kv
-    total="$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' || true)"
+    total="$( { tr '\0' '\n' < "/proc/$pid/environ"; } 2>/dev/null | grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' || true)"
     while IFS= read -r kv; do inherit+=("$kv"); done < <(collect_inherit_env "$pid")
     # 只打印变量名：值可能含 provider 凭证（KILO_API_KEY 等），不进终端回滚缓冲。
     local names=""
@@ -338,7 +415,7 @@ status() {
     fi
     local home profile port chanId
     IFS='|' read -r home profile port chanId <<< "$info"
-    local pid; pid="$(is_running "$home" "$profile" || true)"
+    local pid; pid="$(find_instance_pid "$home" "$profile" "$port" || true)"
     local port_txt="port=headless"
     if [[ -n "$port" ]]; then
       port_txt="port=$port$(ss -tln 2>/dev/null | grep -q ":$port " && echo ' (监听)' || echo ' (未监听)')"
