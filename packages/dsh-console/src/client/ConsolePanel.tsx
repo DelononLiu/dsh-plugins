@@ -43,15 +43,22 @@ function InstanceRow(props: {
   opLabel?: string
   /** 点击启停/重启（ConsolePanel 注入 runControl）。 */
   onControl?: (id: string, op: 'start' | 'stop' | 'restart') => void
-  /** 点击行尾「⋯」菜单项（onMore 存在才显示菜单；本端不显示）。 */
-  onMore?: (action: string, id: string) => void
+  /** 点击行尾「⋯」展开行的操作（onMore 存在才可展开；本端不显示）。 */
+  onMore?: (action: string, id: string, version?: string) => void
+  /** 池内可选 runtime 版本（展开行里的版本下拉框）。 */
+  versions?: readonly string[]
 }): React.JSX.Element {
-  const { item, host, machineName, opLabel, onControl, onMore } = props
+  const { item, host, machineName, opLabel, onControl, onMore, versions = [] } = props
   const online = item.status === 'online'
   const canJump = online && item.addr !== '' && item.id !== 'self'
   // 行尾「⋯」菜单展开状态（单开：记录展开的实例 id 由 ConsolePanel 管理更简——
   // 这里用本地 state，点击其它行自然收起？多行各自独立——用 id 匹配外部更干净，见 onMore 语义）。
   const [menuOpen, setMenuOpen] = useState(false)
+  /** 展开行里选的目标版本（空 = 取池内最新；池空则保持空）。 */
+  const [pickVersion, setPickVersion] = useState('')
+  const effectiveVersion = pickVersion !== ''
+    ? pickVersion
+    : (versions.length > 0 ? versions[versions.length - 1] : '')
   // 版本胶囊显示 runtime 池版本优先（磁盘实际挂载，离线也有）；两者皆缺回退占位符。
   // tooltip 写清两个来源（缺哪个写"未登记/未上报"）。
   const verLabel = item.runtimeVersion ?? item.version ?? '—'
@@ -109,9 +116,23 @@ function InstanceRow(props: {
     {/* 更多功能 = 本行下方展开的一行（不是浮层弹框）：与行同宽、缩进对齐，用完「收起」。 */}
     {canMore && menuOpen && (
       <div className="dsh-console-row-more" role="menu" aria-label={`${item.name} 的更多操作`}>
-        <span className="dsh-console-row-more-lead">更多操作</span>
-        <button type="button" role="menuitem" className="dsh-console-btn dsh-console-act" onClick={() => { setMenuOpen(false); onMore!('upgrade', item.id) }}>
-          升级…（在对话框里选目标版本）
+        <select
+          className="dsh-console-select"
+          aria-label="目标版本"
+          value={effectiveVersion}
+          onChange={(e) => { setPickVersion(e.target.value) }}
+          title="升级的目标 runtime 版本（池内可选）"
+        >
+          {versions.length === 0 && <option value={effectiveVersion}>{effectiveVersion === '' ? '（池内无版本）' : effectiveVersion}</option>}
+          {versions.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <button
+          type="button"
+          role="menuitem"
+          className="dsh-console-btn dsh-console-act"
+          onClick={() => { setMenuOpen(false); onMore!('upgrade', item.id, effectiveVersion) }}
+        >
+          升级
         </button>
         <button
           type="button"
@@ -120,7 +141,7 @@ function InstanceRow(props: {
           onClick={() => { setMenuOpen(false); onMore!('delete', item.id) }}
           title="停止进程并把目录归档（可从命令行恢复）；正式 web 与本机 daemon 会被拒绝"
         >
-          删除实例…
+          删除实例
         </button>
         <div className="grow" />
         <button type="button" className="dsh-console-btn dsh-console-act" onClick={() => setMenuOpen(false)}>收起</button>
@@ -591,12 +612,13 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 machineName={machineNameOf(i.host)}
                 opLabel={opPending?.id === i.id ? (opPending.op === 'start' ? '启动中…' : opPending.op === 'stop' ? '停止中…' : '重启中…') : undefined}
                 onControl={(id, op) => { void runControl(id, op) }}
-                onMore={i.self ? undefined : (action, id) => {
+                versions={pool !== null ? pool.versions.map((v) => v.version) : []}
+                onMore={i.self ? undefined : (action, id, version) => {
                   if (action === 'delete') { void runDelete(id); return }
                   const inst = sortedInstances.find((x) => x.id === id)
                   if (inst) {
-                    // 打开时默认选池内最新（可改）；池空则回落实例已记录版本。
-                    setUpgradePick(pool !== null && pool.versions.length > 0 ? pool.versions[pool.versions.length - 1].version : (inst.version ?? ''))
+                    // 版本由展开行里的下拉框决定；没给就回落到池内最新 / 实例已记录版本。
+                    setUpgradePick(version !== undefined && version !== '' ? version : (pool !== null && pool.versions.length > 0 ? pool.versions[pool.versions.length - 1].version : (inst.version ?? '')))
                     setUpgradeTarget(inst)
                   }
                 }}

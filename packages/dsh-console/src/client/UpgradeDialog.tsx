@@ -107,19 +107,10 @@ export function UpgradeDialog(props: UpgradeDialogProps): React.JSX.Element {
 
           {!startedRef.current && (
             <>
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
-              目标版本
-              <select
-                className="dsh-console-select"
-                value={version}
-                disabled={busy}
-                onChange={(e) => { props.onPickVersion?.(e.target.value) }}
-              >
-                {(props.versions ?? []).length === 0 && <option value={version}>{version === '' ? '（池内无版本）' : version}</option>}
-                {(props.versions ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
-              </select>
-              <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>（当前实例：{item.version ?? '未记录'}）</span>
-            </label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
+              目标版本 <b>{version}</b>
+              <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>（当前实例：{item.version ?? '未记录'}·改版本请在实例行的 ⋯ 展开行里选）</span>
+            </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" className="dsh-console-btn primary" disabled={busy} onClick={() => { void startUpgrade() }}>
                 {busy ? '下发中…' : '开始升级'}
