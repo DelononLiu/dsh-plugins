@@ -100,11 +100,15 @@ export interface ConsoleInstanceViewItem {
   addr: string
   /** 在线状态（含离线覆盖）。 */
   status: 'online' | 'offline'
-  /** 发行包版本（实例自报，仅在线注册后有值；离线为 undefined）。 */
+  /**
+   * 实例**自报的运行内核版本**（管理端探测实例 `/api/channel/identity` 取得；仅在线有值，
+   * 离线为 undefined）。显示顺序：自报优先，缺了才回退 {@link runtimeVersion}。
+   */
   version?: string
   /**
    * 该实例**磁盘上实际挂的 runtime 池版本**（读 profile 目录的池软链；实例自带安装时为
-   * undefined）。与 `version`（实例自报，仅在线有）不同，这个**离线也算得出来**。
+   * undefined）。与 `version`（实例自报，仅在线有）不同，这个**离线也算得出来**——
+   * 只作离线兜底，不是权威来源。
    */
   runtimeVersion?: string
   /** 归属者用户 id（全部实例皆 personal）。 */

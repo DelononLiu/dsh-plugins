@@ -800,6 +800,22 @@ describe('review 修复回归（去 broker 化边界）', () => {
     vi.unstubAllGlobals()
   })
 
+  it('直连探测取实例自报内核版本 → 写入 InstanceIdentity.version（自报是主路径）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ id: 'web3', version: '0.1.7-rc.2' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )))
+    const ctx = new Context()
+    await ctx.plugin(ChannelService, { tokens: {}, heartbeatTimeoutMs: 30000 })
+    await ctx.plugin(ConsoleService, { launch: { web3: { host: 'host1', addr: 'http://127.0.0.1:3083', dshHome: 'x', profile: 'web' } } })
+    const consoleSvc = ctx.console as unknown as { probeLaunch(): Promise<void> }
+    await consoleSvc.probeLaunch()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(ctx.channel.get('web3')?.version).toBe('0.1.7-rc.2')
+    expect(ctx.console.listInstances().instances.find((i) => i.id === 'web3')?.version).toBe('0.1.7-rc.2')
+    vi.unstubAllGlobals()
+  })
+
   it('构造后立即首轮 probe：launch 中不可达实例即刻 offline（重启不假绿）', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }))
     const ctx = new Context()

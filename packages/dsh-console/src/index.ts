@@ -56,6 +56,7 @@ import {
 } from './registry.js'
 import { currentRuntimeVersion, linkRuntimeInto, runtimeReady } from './runtimes.js'
 import { importRuntime, listRuntimes, poolRoot, removeRuntime, runtimeDir, verifyRuntime } from './runtimes.js'
+import { resolveKernelVersion } from './kernel-version.js'
 import { detectKernelUpdate } from './kernel-update.js'
 import { archiveInstance, deleteGuard, restoreInstance } from './lifecycle.js'
 
@@ -407,6 +408,8 @@ export class ConsoleService extends TypertRemoteService {
   private readonly offlineOverride = new Map<string, OfflineOverride>()
   /** 实例进程启动时刻（启动窗口过滤用）。 */
   private readonly startedAt = Date.now()
+  /** 本进程正在跑的内核版本（管理端自己即同进程实例的自报值；拿不到为空）。 */
+  private readonly selfKernelVersion: string | undefined = resolveKernelVersion()
 
   /**
    * 关键事件落盘：terminal console.log + 进程内日志双写。
@@ -636,14 +639,22 @@ export class ConsoleService extends TypertRemoteService {
       const spec = this.config.launch?.[inst.id]
       const host = this.ctx.channel.hostOf(inst.id) ?? spec?.host
       const withHost = host ? { ...inst, host } : inst
-      // runtime 池版本单独解析（不并入 spec）：launch 缺省时 daemon 的部署清单也能算出，
+      // runtime 池版本**离线兜底**（不并入 spec）：launch 缺省时 daemon 的部署清单也能算出，
       // 再缺则查注册表；addr/host 的既有回落语义不变。三者都没有 → 不填。
+      // 注意与 `version`（实例自报，探测 identity 写入；离线为空）是两个来源。
       const registryEntry = registryForRuntime === undefined ? undefined : findRegistryInstance(registryForRuntime, inst.id)
       const runtimeVersion = this.readInstanceRuntimeVersion(
         spec ?? this.instanceSpec(inst.id)
         ?? (registryEntry === undefined ? undefined : { dshHome: registryEntry.home, profile: registryEntry.profileDir }),
       )
-      const withRuntime = runtimeVersion === undefined ? withHost : { ...withHost, runtimeVersion }
+      const withRuntime = {
+        ...withHost,
+        ...(runtimeVersion === undefined ? {} : { runtimeVersion }),
+        // 管理端自己 = 同进程实例：进程内解析的运行版本即自报版本（自己无 addr 可探测）。
+        ...(inst.id === self && withHost.version === undefined && this.selfKernelVersion !== undefined
+          ? { version: this.selfKernelVersion }
+          : {}),
+      }
       const launchAddr = spec?.addr
       const withAddr = launchAddr ? { ...withRuntime, addr: launchAddr } : withRuntime
       // 标记当前实例（管理端自己）：UI 跳转时排除。
@@ -676,6 +687,8 @@ export class ConsoleService extends TypertRemoteService {
   /** 直连状态探测：对管理端 launch / daemon 本机 instances 的 addr 发轻量请求，
    * 可达 → 心跳续期（保持 online）；不可达 → 不续期（sweep 会标离线）。
    * 探测带 5s 超时（目标 hang 时不积累挂起请求）。
+   * 探测目标 = 实例的 `/api/channel/identity`：同一请求既判可达，又取回实例**自报的
+   * 运行内核版本**（老实例无该端点 → 拿到非 JSON/404，仍按可达处理，版本留空）。
    * hub 模式下跳过已注册目标（worker 与其上报实例的存活证据来自注册/长轮询，
    * 探测会与之抢状态）与非回环地址（跨机探测不是本进程的职责）。 */
   private probeLaunch(): void {
@@ -688,9 +701,14 @@ export class ConsoleService extends TypertRemoteService {
         : (typeof spec.port === 'number' ? `http://127.0.0.1:${spec.port}` : undefined)
       if (!addr) continue
       if (hub && (!isLoopbackAddr(addr) || this.ctx.channel.hostOf(id) !== undefined)) continue
-      fetch(addr, { signal: AbortSignal.timeout(ConsoleService.PROBE_TIMEOUT_MS) })
-        .then(() => {
+      fetch(`${addr.replace(/\/+$/, '')}/api/channel/identity`, { signal: AbortSignal.timeout(ConsoleService.PROBE_TIMEOUT_MS) })
+        .then(async (res) => {
           try { this.ctx.channel.heartbeat(id, '') } catch { /* 未注册 */ }
+          // 自报版本：实例进程内解析的运行内核版本（身份端点）。拿不到不改动——
+          // 离线/老实例回退磁盘池软链（runtimeVersion）。
+          if (!res.ok) return
+          const identity = await res.json().catch(() => null) as { version?: unknown } | null
+          if (typeof identity?.version === 'string') this.ctx.channel.setVersion(id, identity.version)
         })
         .catch(() => {
           // 不可达/超时：立即标离线（不续期等 sweep）——探测结果驱动状态，
@@ -814,17 +832,19 @@ export class ConsoleService extends TypertRemoteService {
           signal: AbortSignal.timeout(ConsoleService.PROBE_TIMEOUT_MS),
         })
         const data = await res.json() as {
-          result?: { ok?: boolean; value?: { instances?: Array<{ id: string; addr?: string; status?: string }> } }
+          result?: { ok?: boolean; value?: { instances?: Array<{ id: string; addr?: string; status?: string; version?: string }> } }
         }
         const reported = data.result?.value?.instances
         if (data.result?.ok !== true || reported === undefined) continue
         for (const item of reported) {
           if (item.id === selfId || isHostAgent(item.id)) continue
           const status = item.status === 'online' ? 'online' as const : 'offline' as const
+          const version = typeof item.version === 'string' ? item.version : undefined
           if (this.ctx.channel.get(item.id) === undefined) {
-            this.ctx.channel.declare({ id: item.id, name: item.id, addr: item.addr ?? '', status })
+            this.ctx.channel.declare({ id: item.id, name: item.id, addr: item.addr ?? '', status, ...(version !== undefined ? { version } : {}) })
           } else {
             this.ctx.channel.setStatus(item.id, status)
+            this.ctx.channel.setVersion(item.id, version)
           }
         }
       } catch {

@@ -74,8 +74,9 @@ gateway/browser-skill 后的两项一致）；**不留旧名 alias**，文档与
 
 **13. UI**：创建向导 = 名称 / 模板 / 版本（**必选，默认最新**）/ 端口 / **主机下拉（默认本机，列出已注册主机）**；
 已删除实例**默认隐藏**并另给「已删除」筛选；**列表不展示布局徽标**（并存期靠档案 `layout` 字段判读）。
-实例行的版本胶囊显示**磁盘 runtime 池版本** `runtimeVersion`（读 `<dshHome>/profiles/<profile>` 的池软链，
-**离线也算得出来**；自带安装/无 dshHome 为 undefined，UI 回退实例自报 `version`），tooltip 分别标注两者来源。
+实例行的版本胶囊**自报优先**（实例经通信面自报的运行内核版本 `version`），缺失才回退磁盘
+runtime 池软链 `runtimeVersion`（**离线也算得出来**），tooltip 分别标注两者来源——策略与理由见
+[实例版本 = 运行时自报](2026-10-04-instance-runtime-version-self-report.md)（修正本条早先"池版本优先"的表述）。
 
 ## 批次表（方案 = 这张表，实现只是执行）
 

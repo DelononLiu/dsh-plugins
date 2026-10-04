@@ -60,6 +60,36 @@ describe('实例注册/心跳/发现', () => {
   })
 })
 
+describe('实例自报版本（InstanceIdentity.version 既有字段）', () => {
+  it('setVersion 写入已声明实例的 version；空值/未知实例忽略', () => {
+    const ch = boot()
+    ch.declare({ id: 'web2', name: 'web2', addr: 'http://127.0.0.1:3082', status: 'online' })
+    ch.setVersion('web2', '0.1.7-rc.2')
+    expect(ch.get('web2')?.version).toBe('0.1.7-rc.2')
+    ch.setVersion('web2', undefined)
+    expect(ch.get('web2')?.version).toBe('0.1.7-rc.2') // 未上报不改动既有值
+    ch.setVersion('web2', '')
+    expect(ch.get('web2')?.version).toBe('0.1.7-rc.2')
+    ch.setVersion('nope', '9.9.9')
+    expect(ch.get('nope')).toBeUndefined() // 未知实例不造幽灵条目
+  })
+
+  it('register 携带自报版本原样落表；老实例不带该字段也合法（向后兼容）', () => {
+    const ch = boot()
+    ch.register({ ...IDENTITY, version: '0.1.7-rc.2' }, 'tok-a')
+    expect(ch.get('instA')?.version).toBe('0.1.7-rc.2')
+    ch.register(IDENTITY, 'tok-a')
+    expect(ch.get('instA')?.version).toBeUndefined()
+  })
+
+  it('identity() 自报本进程 id 与内核版本（拿不到为 null）', () => {
+    const ch = boot({ id: 'web2' })
+    const identity = ch.identity()
+    expect(identity.id).toBe('web2')
+    expect(identity.version === null || typeof identity.version === 'string').toBe(true)
+  })
+})
+
 describe('事件总线', () => {
   it('emit 投递到订阅者（进程内）', () => {
     const ch = boot()

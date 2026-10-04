@@ -18,6 +18,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { dirname } from 'node:path'
 
+import { resolveKernelVersion } from '../kernel-version.js'
+
 // Remote 边界类型从 ./types 子路径导出（typert generator 规则：边界类型
 // 必须来自公共非根类型子路径，供跨包消费与类型契约）。
 import type { InstanceIdentity } from './types.ts'
@@ -248,6 +250,8 @@ export class ChannelService extends TypertRemoteService {
   private mode: ChannelMode = 'local'
   /** 本实例 id（构造时解析，见 {@link resolveSelfId}）。 */
   private selfId: string | undefined
+  /** 本进程正在跑的内核版本（构造时进程内解析；拿不到为空——不编造）。 */
+  private readonly selfVersion: string | undefined = resolveKernelVersion()
   /** hub：待派发指令队列（targetId → FIFO）。 */
   private readonly commandQueue = new Map<string, CommandLedgerEntry[]>()
   /** hub：指令台账（commandId → 条目；回执与状态查询）。 */
@@ -282,12 +286,21 @@ export class ChannelService extends TypertRemoteService {
     if (this.mode === 'worker' && (config.console === undefined || this.selfId === undefined)) {
       throw new Error('dsh-console/channel: worker 模式需要 console 地址与实例 id（config.id 或 DSH_CHANNEL_ID）')
     }
-    if (this.mode === 'hub') {
-      this.loadLedger()
-      // 路由挂在官方 webServer 的插件 exact 通道上（先于官方 /api prefix 命中，
-      // 不受 BrowserAuth fence 约束）；headless 角色没有 webServer 即不对外服务。
-      ctx.inject(['webServer'], (injected) => {
-        const disposers = [
+    if (this.mode === 'hub') this.loadLedger()
+    // HTTP 面挂在官方 webServer 的插件 exact 通道上（先于官方 /api prefix 命中，
+    // 不受 BrowserAuth fence 约束）；headless 角色没有 webServer 即不对外服务。
+    ctx.inject(['webServer'], (injected) => {
+      const disposers: Array<() => void> = [
+        // 身份自报（任何角色，含 role: agent）：管理端据此读到**本进程正在跑的内核版本**
+        // ——版本是运行时属性，不靠猜磁盘布局。老实例无此端点 → 探测拿不到版本，不崩。
+        injected.webServer.register({
+          kind: 'exact',
+          path: '/api/channel/identity',
+          handler: (_req, res) => { sendJson(res, 200, this.identity()) },
+        }),
+      ]
+      if (this.mode === 'hub') {
+        disposers.push(
           injected.webServer.register({
             kind: 'exact',
             path: '/api/channel/register',
@@ -303,10 +316,10 @@ export class ChannelService extends TypertRemoteService {
             path: '/api/channel/result',
             handler: (req, res) => { void this.handleHubResult(req, res) },
           }),
-        ]
-        injected.effect(() => () => { for (const dispose of disposers) dispose() })
-      })
-    }
+        )
+      }
+      injected.effect(() => () => { for (const dispose of disposers) dispose() })
+    })
     if (this.mode === 'worker') {
       const stop = this.startWorker()
       ctx.effect(() => stop)
@@ -355,6 +368,30 @@ export class ChannelService extends TypertRemoteService {
     if (expected && expected !== token) throw new Error('token mismatch')
     entry.lastSeen = Date.now()
     entry.status = 'online'
+  }
+
+  /**
+   * 记录实例**自报的运行版本**（管理端探测到 `/api/channel/identity` 时写入，
+   * 落进 {@link InstanceIdentity.version}）。空值/未知实例一律忽略——探测竞态下
+   * 不造幽灵条目，也不把"拿不到"写成版本。
+   * @param instanceId - 实例 id。
+   * @param version - 自报版本（undefined/'' = 未上报，不改动既有值）。
+   */
+  setVersion(instanceId: string, version: string | undefined): void {
+    if (version === undefined || version === '') return
+    const entry = this.instances.get(instanceId)
+    if (entry === undefined) return
+    entry.version = version
+  }
+
+  /** 本进程正在跑的内核版本（自报；拿不到 undefined）。 */
+  get kernelVersion(): string | undefined {
+    return this.selfVersion
+  }
+
+  /** 本实例自报身份（`/api/channel/identity` 回执；拿不到为 null，不编造）。 */
+  identity(): { id: string | null; version: string | null } {
+    return { id: this.selfId ?? null, version: this.selfVersion ?? null }
   }
 
   /**
@@ -925,9 +962,13 @@ export class ChannelService extends TypertRemoteService {
     const hubAddr = this.config.console
     if (id === undefined || hubAddr === undefined) return false
     const provided = this.reportProvider?.()
-    const report: WorkerReport = Array.isArray(provided)
+    const base: WorkerReport = Array.isArray(provided)
       ? { id, instances: provided }
       : provided ?? { id, instances: [] }
+    const report: WorkerReport = { ...base, id }
+    // 自报兜底：worker 进程内解析的**真实运行版本**——上报方未带版本时补上
+    // （守护/实例是同一进程时，这就是该实例正在跑的内核版本）。
+    if (report.version === undefined && this.selfVersion !== undefined) report.version = this.selfVersion
     try {
       const res = await fetch(`${trimSlash(hubAddr)}/api/channel/register`, {
         method: 'POST',

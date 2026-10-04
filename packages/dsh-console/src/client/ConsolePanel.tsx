@@ -11,6 +11,7 @@ import type { ConsoleHost } from './types'
 import type { ConsoleInstanceViewItem, HostRecord, KernelUpdateInfo, LogFileList, LogFileMeta, LogReadOptions, LogReadResult, LogTarget, LogLevel, LogRecord, RuntimePoolView } from 'dsh-console/types'
 import { UpgradeDialog } from './UpgradeDialog'
 import * as logView from './logView'
+import { versionLabel, versionTitle } from './version-label'
 
 // ---- 页签定义 ----
 type TabId = 'overview' | 'instances' | 'hosts' | 'versions' | 'logs'
@@ -59,10 +60,10 @@ function InstanceRow(props: {
   const effectiveVersion = pickVersion !== ''
     ? pickVersion
     : (versions.length > 0 ? versions[versions.length - 1] : '')
-  // 版本胶囊显示 runtime 池版本优先（磁盘实际挂载，离线也有）；两者皆缺回退占位符。
-  // tooltip 写清两个来源（缺哪个写"未登记/未上报"）。
-  const verLabel = item.runtimeVersion ?? item.version ?? '—'
-  const verTitle = `runtime: ${item.runtimeVersion ?? '未登记'} · 实例自报: ${item.version ?? '未上报'}`
+  // 版本胶囊显示：**自报优先**（实例在线时经通信面自报的运行内核版本）；
+  // 自报缺失（离线/老实例）才回退磁盘 runtime 池软链（离线也算得出来）。
+  const verLabel = versionLabel(item)
+  const verTitle = versionTitle(item)
   // 操作列固定宽度、按"列"渲染：版本胶囊 / 跳转 / 启停 / 重启 / ⋯ 五个槽位
   // 在每行里都存在（不可用 disabled 灰显留位占），保证三行同名列横坐标一致。
   const canMore = !!onMore
@@ -533,7 +534,7 @@ export function ConsolePanel(props: ConsolePanelProps): React.JSX.Element {
                 <span className={`dot ${i.status === 'online' ? 'on' : 'off'}`} />
                 <div className="grow">
                   <div className="name">{i.name} <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: 12 }}>· {machineNameOf(i.host) || i.id}{i.self ? ' · 当前实例' : ''}</span></div>
-                  <div className="meta">{i.version ?? '—'}</div>
+                  <div className="meta" title={versionTitle(i)}>{versionLabel(i)}</div>
                 </div>
                 <span style={{ color: i.status === 'online' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)', fontSize: 11 }}>
                   {i.status === 'online' ? '● 在线' : '● 离线'}

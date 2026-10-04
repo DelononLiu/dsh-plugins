@@ -17,7 +17,10 @@ export interface InstanceIdentity {
   status: 'online' | 'offline'
   /** 健康状态（可选）。 */
   health?: string
-  /** 发行包版本。 */
+  /**
+   * 实例**自报的运行内核版本**（实例进程内解析自己正在跑的内核，见
+   * `src/kernel-version.ts`；拿不到留空，不编造）。老实例不带该字段也合法。
+   */
   version?: string
 }
 
